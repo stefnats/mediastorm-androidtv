@@ -109,6 +109,8 @@ object ApiClient {
         .readTimeout(0, TimeUnit.SECONDS)
         .build()
 
+    private val nonReplayingHttp by lazy { http.withoutAutomaticReplay() }
+
     const val UNLOCK_HEADER = "X-Profile-Unlock"
     private val jsonType = "application/json".toMediaType()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -249,11 +251,12 @@ object ApiClient {
         encodedQuery: String? = null,
         headers: Map<String, String> = emptyMap(),
         expectedContext: Long? = null,
+        retryTransport: Boolean = true,
     ): String {
         val context = requestContexts.capture(expectedContext)
         if (method == "GET") SportsFixtures.response(path)?.let { context.check(); return it }
         val prepared = context.use {
-            Prepared(method, url(path, query, encodedQuery), body?.toString(), timeoutMs, context).apply {
+            Prepared(method, url(path, query, encodedQuery), body?.toString(), timeoutMs, context, retryTransport).apply {
                 this.headers.putAll(headers)
                 this.headers["X-Client-ID"] = Config.clientId
                 remoteCredential?.let { this.headers["X-Remote-Access-Credential"] = it }
@@ -277,7 +280,7 @@ object ApiClient {
     }
 
     /** A request retains the identity under which its URL and headers were prepared. */
-    private class Prepared(val method: String, var url: HttpUrl, val body: String?, val timeoutMs: Long, val context: RequestContext.Scope) {
+    private class Prepared(val method: String, var url: HttpUrl, val body: String?, val timeoutMs: Long, val context: RequestContext.Scope, val retryTransport: Boolean = true) {
         val headers = mutableMapOf<String, String>()
     }
 
@@ -327,6 +330,7 @@ object ApiClient {
         }.build()
         val response = ContextBoundTransport(
             req.context,
+            allowReplay = req.retryTransport,
             remote = recoverConnection && req.headers.containsKey("X-Remote-Access-Credential"),
             recover = {
                 val callback = req.context.use { recoverTransport }
@@ -339,7 +343,7 @@ object ApiClient {
             },
             onFailure = { error -> if (recoverConnection) onTransportFailure?.invoke(error) },
         ).execute {
-            http.newCall(request).apply { timeout().timeout(req.timeoutMs, TimeUnit.MILLISECONDS) }.await()
+            (if (req.retryTransport) http else nonReplayingHttp).newCall(request).apply { timeout().timeout(req.timeoutMs, TimeUnit.MILLISECONDS) }.await()
         }
         if (!response.isSuccessful) throw ApiError.Http(HttpFailure(response.code, response.text, response.retryAfter))
         return response.text

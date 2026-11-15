@@ -12,6 +12,7 @@ internal class ContextBoundTransport(
     private val remote: Boolean,
     private val recover: suspend () -> Boolean,
     private val onFailure: (IOException) -> Unit,
+    private val allowReplay: Boolean = true,
 ) {
     suspend fun <T> execute(send: suspend () -> T): T {
         context.check()
@@ -19,7 +20,7 @@ internal class ContextBoundTransport(
             val response=send();context.check();return response
         } catch (error: IOException) {
             context.check()
-            if (!remote || !recoverable(error)) {
+            if (!allowReplay || !remote || !recoverable(error)) {
                 context.use { onFailure(error) }
                 throw error
             }

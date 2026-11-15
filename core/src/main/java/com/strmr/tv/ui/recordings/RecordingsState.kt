@@ -7,6 +7,10 @@ import androidx.compose.runtime.setValue
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.app.AppLog
 import com.strmr.tv.live.Recording
+import com.strmr.tv.live.RecordingPlanItem
+import com.strmr.tv.live.recordingPlan
+import com.strmr.tv.library.ProfileDataContext
+import com.strmr.tv.library.optionalProfileRead
 import com.strmr.tv.live.RecordingFilter
 import com.strmr.tv.live.RecordingRules
 import com.strmr.tv.live.SeriesRule
@@ -31,6 +35,11 @@ class RecordingsState(private val scope: CoroutineScope) {
     /** The profile's recording rules, so a rule's airing offers to cancel the whole series. */
     var rules by mutableStateOf<List<SeriesRule>>(emptyList())
         private set
+    var plans by mutableStateOf<Map<String, RecordingPlanItem>>(emptyMap())
+        private set
+    private var plansContext: Long? = null
+    fun planFor(id: String): RecordingPlanItem? = if (plansContext == ProfileDataContext.current) plans[id] else null
+
     var loading by mutableStateOf(true)
         private set
     var refreshing by mutableStateOf(false)
@@ -52,19 +61,25 @@ class RecordingsState(private val scope: CoroutineScope) {
 
     /** `quiet`: a poll or a reload after an action, without the Refresh button's spinner. */
     suspend fun load(quiet: Boolean = false) {
+        val context = ProfileDataContext.current
+        if (plansContext != context) plans = emptyMap()
         if (!quiet) refreshing = true
         try {
-            recordings = ApiClient.recordings()
-            runCatching { ApiClient.recordingRules() }.getOrNull()?.let { rules = it }
-            error = null
+            val loaded = ApiClient.recordings()
+            ApiClient.inContext(context) { recordings = loaded; plans = emptyMap(); plansContext = context }
+            optionalProfileRead { ApiClient.recordingRules() }?.let { loadedRules -> ApiClient.inContext(context) { rules = loadedRules } }
+            val forecast = optionalProfileRead { ApiClient.recordingPlan(context) }
+            ApiClient.inContext(context) {
+                plans = forecast?.recordings.orEmpty().mapNotNull { item -> item.recordingId?.let { it to item } }.toMap()
+                error = null
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             AppLog.w("Recordings", "load failed: ${e.message}")
-            error = e.message ?: "Failed to load recordings."
+            if (context == ProfileDataContext.current) error = e.message ?: "Failed to load recordings."
         } finally {
-            loading = false
-            refreshing = false
+            if (context == ProfileDataContext.current) { loading = false; refreshing = false }
         }
     }
 

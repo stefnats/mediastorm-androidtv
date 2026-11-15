@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.key
+import androidx.compose.runtime.DisposableEffect
+import com.strmr.tv.ui.recordings.RecordingPlanDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -101,7 +103,9 @@ fun LiveScreen(pick: LivePick? = null, sharedStore: LiveStore? = null) {
     val showsGuide = guideMode && store.epgEnabled == true
 
     // The first run loads favorites and the EPG status; every filter change reloads.
-    LaunchedEffect(store,store.query) { store.start() }
+    LaunchedEffect(store,store.query) { store.recordings.scheduling.dismiss(); store.start() }
+    DisposableEffect(store) { onDispose { store.recordings.scheduling.dismiss() } }
+    RecordingPlanDialog(store.recordings.scheduling)
     // Scheduled / recording marks in the guide; not in the multiscreen picker.
     LaunchedEffect(store,pick == null) { if (pick == null) store.recordings.poll() }
     // Moves progress bars and the guide's now line along.

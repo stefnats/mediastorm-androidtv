@@ -94,7 +94,8 @@ fun RecordingsScreen(asPage: Boolean) {
                             }
                             items(list, key = { it.id }) { r ->
                                 RecordingRow(
-                                    r, busy = state.busyId == r.id,
+                                    plan = state.planFor(r.id),
+                                    r = r, busy = state.busyId == r.id,
                                     onOpen = { navigator.push(Route.RecordingDetail(r.id)) },
                                     onPlay = { PlaybackCoordinator.playRecording(r) },
                                     onMenu = { menuFor = r },

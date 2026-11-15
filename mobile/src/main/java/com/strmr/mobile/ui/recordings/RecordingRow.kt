@@ -42,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.strmr.mobile.ui.live.RecordingRed
 import com.strmr.tv.live.Recording
+import com.strmr.tv.live.RecordingPlanItem
 import com.strmr.tv.live.RecordingRules
 
 private val CompletedGreen = Color(0xFF32D74B)
@@ -71,7 +72,7 @@ fun recordingWhen(r: Recording): String =
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun RecordingRow(r: Recording, busy: Boolean, onOpen: () -> Unit, onPlay: () -> Unit, onMenu: () -> Unit) {
+fun RecordingRow(r: Recording, busy: Boolean, onOpen: () -> Unit, onPlay: () -> Unit, onMenu: () -> Unit, plan: RecordingPlanItem? = null) {
     val haptics = LocalHapticFeedback.current
     val color = statusColor(r.status)
     ListItem(
@@ -81,6 +82,7 @@ fun RecordingRow(r: Recording, busy: Boolean, onOpen: () -> Unit, onPlay: () -> 
             Column {
                 Text(r.channelName, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(recordingWhen(r), style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                if (RecordingRules.canCancel(r)) Text(plan?.summary ?: "Recording capacity forecast unavailable.", style = MaterialTheme.typography.bodySmall, color = if (plan?.state == "conflict") FailedOrange else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3)
                 RecordingRules.visibleError(r.error)?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, maxLines = 2)
                 }

@@ -90,6 +90,7 @@ private fun Detail(r: Recording, state: RecordingsState, confirmations: Recordin
         if (!r.ruleId.isNullOrEmpty()) Fact("Scheduled by", "A recurring rule")
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
         Text(r.description?.ifBlank { null } ?: "No program description available.", style = MaterialTheme.typography.bodyMedium)
+        if (RecordingRules.canCancel(r)) Text(state.planFor(r.id)?.summary ?: "Recording capacity forecast unavailable.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         RecordingRules.visibleError(r.error)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Spacer(Modifier.size(12.dp))
         RecordingActions.of(r, state.ruleFor(r)).forEach { a ->

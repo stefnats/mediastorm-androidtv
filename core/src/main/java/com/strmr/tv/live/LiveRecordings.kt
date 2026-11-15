@@ -3,6 +3,8 @@ package com.strmr.tv.live
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.strmr.tv.library.ProfileDataContext
+import com.strmr.tv.library.optionalProfileRead
 import com.strmr.tv.api.ApiClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -15,12 +17,13 @@ import kotlinx.coroutines.launch
  * what is already set. [active] holds the scheduled / recording ones the guide marks, refreshed
  * every 10 s while Live is on screen ([poll]) and straight after each action. Main thread only.
  */
-class LiveRecordings(private val scope: CoroutineScope, private val notify: (String) -> Unit) {
+class LiveRecordings(private val scope: CoroutineScope, private val dataContext: Long = ProfileDataContext.current, private val notify: (String) -> Unit) {
     var active by mutableStateOf<List<Recording>>(emptyList())
         private set
     /** The profile's series / regex rules, so a programme a rule covers offers to cancel or switch it. */
     var rules by mutableStateOf<List<SeriesRule>>(emptyList())
         private set
+    val scheduling = RecordingScheduling(scope, notify) { refresh() }
     private var job: Job? = null
 
     /** Refreshes [active] until the caller's coroutine is cancelled. */
@@ -33,8 +36,9 @@ class LiveRecordings(private val scope: CoroutineScope, private val notify: (Str
 
     /** Keeps what was last known through a transient failure. */
     suspend fun refresh() {
-        runCatching { ApiClient.activeRecordings() }.getOrNull()?.let { if (it != active) active = it }
-        runCatching { ApiClient.recordingRules() }.getOrNull()?.let { if (it != rules) rules = it }
+        ApiClient.inContext(dataContext) {}
+        optionalProfileRead { ApiClient.activeRecordings() }?.let { loaded -> ApiClient.inContext(dataContext) { if (loaded != active) active = loaded } }
+        optionalProfileRead { ApiClient.recordingRules() }?.let { loaded -> ApiClient.inContext(dataContext) { if (loaded != rules) rules = loaded } }
     }
 
     /** The rule that records [program] on the channel, if any. */
@@ -58,7 +62,7 @@ class LiveRecordings(private val scope: CoroutineScope, private val notify: (Str
         matching(active.filter { it.channelId == channel.id }, program, now)
 
     fun record(program: EpgProgram, channel: LiveChannel) =
-        perform("Recording scheduled for ${program.title}.") { ApiClient.recordProgram(program, channel) }
+        schedule { ApiClient.programRecordingDraft(program, channel, dataContext) }
 
     /** [newOnly] skips airings the guide flags as reruns; re-recording with the other choice switches the rule. */
     fun recordSeries(program: EpgProgram, channel: LiveChannel, newOnly: Boolean = false) =
@@ -68,7 +72,12 @@ class LiveRecordings(private val scope: CoroutineScope, private val notify: (Str
         }
 
     fun recordTwoHours(channel: LiveChannel) =
-        perform("2 hour recording scheduled for ${channel.name}.") { ApiClient.recordTimeBlock(channel, 2 * 3_600_000L) }
+        schedule { ApiClient.blockRecordingDraft(channel, 2 * 3_600_000L, dataContext) }
+
+    private fun schedule(draft: () -> RecordingDraft) {
+        if (dataContext != ProfileDataContext.current) return
+        try { scheduling.schedule(draft()) } catch (_: kotlinx.coroutines.CancellationException) { /* The selection was replaced. */ }
+    }
 
     /** Stops a recording in progress (what was captured is kept) or cancels a scheduled one. */
     fun cancel(recording: Recording) =

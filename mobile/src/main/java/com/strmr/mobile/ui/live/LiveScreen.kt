@@ -28,6 +28,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.key
+import androidx.compose.runtime.DisposableEffect
+import com.strmr.mobile.ui.recordings.RecordingPlanDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -77,7 +79,9 @@ fun LiveScreen(asPage: Boolean) {
     var refreshing by remember(store) { mutableStateOf(false) }
     val showsGuide = guideMode && store.epgEnabled == true
 
-    LaunchedEffect(store,store.query) { store.start() }
+    LaunchedEffect(store,store.query) { store.recordings.scheduling.dismiss(); store.start() }
+    DisposableEffect(store) { onDispose { store.recordings.scheduling.dismiss() } }
+    RecordingPlanDialog(store.recordings.scheduling)
     LaunchedEffect(store) { store.recordings.poll() }
     LaunchedEffect(Unit) {
         while (true) {

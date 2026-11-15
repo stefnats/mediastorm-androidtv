@@ -68,9 +68,10 @@ data class DialogChoice(val label: String, val action: () -> Unit)
  * A centred prompt with stacked choices, the first focused, in a platform dialog so focus and
  * Back stay in it (Back dismisses): the counterpart of a tvOS confirmation dialog or alert.
  * [steady]: the focused choice doesn't grow, so every choice keeps the same width.
+ * [dismissOnChoice]: false when a controller owns the choice and closes the prompt itself.
  */
 @Composable
-fun ChoiceDialog(title: String, message: String? = null, choices: List<DialogChoice>, onDismiss: () -> Unit, steady: Boolean = false) {
+fun ChoiceDialog(title: String, message: String? = null, choices: List<DialogChoice>, onDismiss: () -> Unit, steady: Boolean = false, dismissOnChoice: Boolean = true) {
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -84,7 +85,7 @@ fun ChoiceDialog(title: String, message: String? = null, choices: List<DialogCho
                 message?.let { Text(it, color = Color.White.copy(alpha = 0.7f), textAlign = TextAlign.Center) }
                 choices.forEachIndexed { i, choice ->
                     val modifier = Modifier.fillMaxWidth().then(if (i == 0) Modifier.focusRequester(first) else Modifier)
-                    val onClick = { onDismiss(); choice.action() }
+                    val onClick = { if (dismissOnChoice) onDismiss(); choice.action() }
                     if (i == 0) {
                         Button(onClick = onClick, modifier = modifier,
                                scale = if (steady) ButtonDefaults.scale(focusedScale = 1f) else ButtonDefaults.scale()) { Text(choice.label, Modifier.fillMaxWidth(), textAlign = TextAlign.Center) }

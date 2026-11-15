@@ -30,6 +30,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
 import com.strmr.tv.live.Recording
+import com.strmr.tv.live.RecordingPlanItem
 import com.strmr.tv.live.RecordingRules
 import com.strmr.tv.live.SeriesRule
 import com.strmr.tv.ui.ChoiceDialog
@@ -58,6 +59,7 @@ fun RecordingDetail(
     onCancelSeries: (Recording) -> Unit,
     onDelete: (Recording) -> Unit,
     modifier: Modifier = Modifier,
+    plan: RecordingPlanItem? = null,
 ) {
     Column(
         modifier.background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(16.dp)).padding(24.dp),
@@ -74,6 +76,7 @@ fun RecordingDetail(
         if (facts.isNotEmpty()) Text(facts.joinToString(" · "), color = Muted)
         Text(r.description?.ifBlank { null } ?: "No program description available.", color = Color.White.copy(alpha = 0.8f),
              maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+        if (RecordingRules.canCancel(r)) Text(plan?.summary ?: "Recording capacity forecast unavailable.", color = if (plan?.state == "conflict") Color(0xFFFFD60A) else Muted)
         RecordingRules.visibleError(r.error)?.let { Text(it, color = RecordingRed, maxLines = 3, overflow = TextOverflow.Ellipsis) }
         Spacer(Modifier.height(10.dp))
         // Left from here goes back to the list; entering the row lands on the button last focused.

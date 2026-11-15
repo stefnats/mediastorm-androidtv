@@ -148,7 +148,8 @@ fun RecordingsScreen(asPage: Boolean = false) {
                     }
                 }
                 RecordingDetail(
-                    selected, rule = state.ruleFor(selected), busy = state.busyId == selected.id, actionsFocus = actionsFocus,
+                    plan = state.planFor(selected.id),
+                    r = selected, rule = state.ruleFor(selected), busy = state.busyId == selected.id, actionsFocus = actionsFocus,
                     onPlay = { PlaybackCoordinator.playRecording(it) },
                     onCancel = { confirm = it to false },
                     onCancelSeries = { cancelSeriesFor = it },
