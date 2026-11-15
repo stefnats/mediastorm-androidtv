@@ -11,6 +11,7 @@ import com.strmr.tv.app.AppLog
 import com.strmr.tv.live.LiveChannel
 import com.strmr.tv.live.LiveHlsPreference
 import com.strmr.tv.live.LiveStream
+import com.strmr.tv.live.liveCapacityRejection
 import com.strmr.tv.live.keepLiveSessionAlive
 import com.strmr.tv.live.liveStremioStreams
 import com.strmr.tv.live.stopLiveSession
@@ -82,7 +83,15 @@ class LiveRetune(
     private val keepalive = scope.launch {
         while (isActive) {
             delay(KEEPALIVE_MS)
-            sessionId?.let { ApiClient.keepLiveSessionAlive(it) }
+            sessionId?.let {
+                try {
+                    ApiClient.keepLiveSessionAlive(it, failOnCapacityRejection = true)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    stopForCapacity(error)
+                }
+            }
         }
     }
 
@@ -139,7 +148,7 @@ class LiveRetune(
 
     /** The stream ended, which a live channel doesn't: its source dropped. */
     fun ended() {
-        if (parked) return
+        if (released || parked) return
         if (!fallBackToHls("end of stream") && !sourceLost("end of stream")) failOverOrGiveUp("end of stream", NEVER_PLAYED)
     }
 
@@ -147,8 +156,20 @@ class LiveRetune(
      * A playback error; true when this took it over: any error of a direct stream that never
      * played (retried as HLS), else a source error (retuned).
      */
-    fun failed(e: PlaybackException): Boolean = !parked && (fallBackToHls(e.errorCodeName) || LiveRetunePolicy.isSourceError(e.errorCode) && sourceLost(e.errorCodeName) ||
+    fun failed(e: PlaybackException): Boolean = released || !parked && (stopForCapacity(e) || fallBackToHls(e.errorCodeName) || LiveRetunePolicy.isSourceError(e.errorCode) && sourceLost(e.errorCodeName) ||
             failOver(e.errorCodeName, e.message ?: e.errorCodeName))
+
+    private fun stopForCapacity(error: Throwable): Boolean {
+        val message = liveCapacityRejection(error) ?: return false
+        if (!released) {
+            release()
+            player.stop()
+            reconnecting.value = false
+            note.value = null
+            giveUp(message)
+        }
+        return true
+    }
 
     /** A direct stream that never played: tunes once more as HLS. */
     private fun fallBackToHls(reason: String): Boolean {
@@ -177,6 +198,7 @@ class LiveRetune(
 
     /** Tunes again or gives up; false when the channel never played, so its failure stands. */
     private fun sourceLost(reason: String): Boolean {
+        if (released) return true
         if (retuneJob?.isActive == true) return true
         when (val decision = policy.sourceLost(now())) {
             is LiveRetunePolicy.Decision.Retune -> retune(decision, reason)
@@ -197,6 +219,7 @@ class LiveRetune(
 
     /** Stops the stream and its session, and tunes the channel again after [delayMs]. */
     private fun restart(label: String, delayMs: Long) {
+        if (released || parked) return
         reconnecting.value = true
         hlsProof?.cancel()
         player.stop()
@@ -219,6 +242,7 @@ class LiveRetune(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                if (stopForCapacity(e)) return@launch
                 AppLog.e("Live", "$label failed: ${e.message}")
                 // The server's own reason; a network failure's message is a socket's, not the viewer's.
                 if (!released) failOverOrGiveUp("$label failed", (e as? ApiError)?.message ?: RETUNE_FAILED)

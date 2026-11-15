@@ -10,10 +10,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -84,6 +90,22 @@ fun PlaybackLoading(request: PlaybackRequest) {
 fun PlaybackOverlays() {
     val resolving by PlaybackCoordinator.resolving.collectAsState()
     val error by PlaybackCoordinator.errorMessage.collectAsState()
+    val recordingPrompt by PlaybackCoordinator.recordingInterruption.prompt.collectAsState()
     resolving?.let { PlaybackLoading(it) }
+    recordingPrompt?.let { prompt ->
+        val cancelFocus = remember(prompt) { FocusRequester() }
+        LaunchedEffect(prompt) { cancelFocus.requestFocus() }
+        AlertDialog(
+            onDismissRequest = { PlaybackCoordinator.recordingInterruption.answer(prompt, false) },
+            title = { Text("Stop recording to play?") },
+            text = { Text(prompt.message) },
+            confirmButton = {
+                TextButton(onClick = { PlaybackCoordinator.recordingInterruption.answer(prompt, true) }) { Text("Stop recording and play") }
+            },
+            dismissButton = {
+                TextButton(modifier = Modifier.focusRequester(cancelFocus), onClick = { PlaybackCoordinator.recordingInterruption.answer(prompt, false) }) { Text("Cancel") }
+            },
+        )
+    }
     error?.let { MessageDialog("Playback Error", it) { PlaybackCoordinator.errorMessage.value = null } }
 }

@@ -17,6 +17,8 @@ import com.strmr.tv.live.EpgProgram
 import com.strmr.tv.live.LiveChannel
 import com.strmr.tv.live.LiveHlsPreference
 import com.strmr.tv.live.LiveStream
+import com.strmr.tv.live.LivePlaybackAttempt
+import com.strmr.tv.live.RecordingInterruptionConsent
 import com.strmr.tv.live.Recording
 import com.strmr.tv.live.RecordingRules
 import com.strmr.tv.live.recordingStreamUrl
@@ -45,6 +47,7 @@ object PlaybackCoordinator {
     /** The release being tried, when the server names one. */
     val detail = MutableStateFlow<String?>(null)
     val errorMessage = MutableStateFlow<String?>(null)
+    val recordingInterruption = RecordingInterruptionConsent()
     /** Bumped whenever a playback session ends, so screens can refresh progress. */
     val sessionsEnded = MutableStateFlow(0)
     /** The player is on screen (log uploads hold off). */
@@ -149,11 +152,15 @@ object PlaybackCoordinator {
     fun playLive(channel: LiveChannel, programTitle: String?, expectedContext: Long = ProfileDataContext.current) {
         if (expectedContext != ProfileDataContext.current || _resolving.value != null) return
         val request = PlaybackRequest(DetailsTarget(channel.id, programTitle ?: channel.name, isMovie = true, backdropUrl = null, logoUrl = channel.logoUrl))
+        val attempt = LivePlaybackAttempt(requireCurrent = { ProfileDataContext.requireCurrent(expectedContext) })
         // A source remembered as needing HLS asks for it from the first tune (LiveHlsPreference).
         // Stremio failover tunes another of the channel's streams ([LiveRetune]).
         val live: suspend (Boolean, Int?) -> LiveStream = { force, stremioIndex ->
             val tuned = stremioIndex?.let { channel.copy(stremioStreamIndex = it) } ?: channel
-            ApiClient.startLive(tuned, programTitle, forceHls = force || LiveHlsPreference.prefersHls(channel), timeshift = true, expectedContext = expectedContext)
+            attempt.open(confirm = { recordingInterruption.ask(it, expectedContext) }) { id, confirmation, retry ->
+                ApiClient.startLive(tuned, programTitle, forceHls = force || LiveHlsPreference.prefersHls(channel), timeshift = true,
+                    expectedContext = expectedContext, playAttemptId = id, recordingConfirmation = confirmation, automaticRetry = retry)
+            }
         }
         begin(request, "Tuning…", live = live, liveChannel = channel, expectedContext = expectedContext,
               liveLabel = StreamInfo.live(channel.name))

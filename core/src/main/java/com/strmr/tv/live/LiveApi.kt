@@ -142,11 +142,15 @@ suspend fun ApiClient.clearLiveCache() {
 suspend fun ApiClient.startLive(
     channel: LiveChannel, programTitle: String?, forceHls: Boolean = false, timeshift: Boolean = false,
     target: String = "native", expectedContext: Long = ProfileDataContext.current,
+    playAttemptId: String? = null, recordingConfirmation: String? = null,
+    automaticRetry: Boolean = false,
 ): LiveStream {
     val q = inContext(expectedContext) { buildMap {
         if (forceHls) put("format", "hls")
         if (timeshift) put("timeshift", "1")
         put("url", channel.url)
+        playAttemptId?.let { put("playAttemptId", it) }
+        if (automaticRetry) put("automaticRetry", "true")
         put("target", target)
         put("profileId", profileId)
         put("mediaType", "channel")
@@ -163,7 +167,8 @@ suspend fun ApiClient.startLive(
         channel.stremioStreamIndex?.takeIf { it >= 0 }?.let { put("stremioStreamIndex", it.toString()) }
     }
     }
-    val start = send<LiveStart>("GET", "/api/live/hls/start", q, timeoutMs = 60_000, expectedContext = expectedContext)
+    val headers = recordingConfirmation?.let { mapOf("X-Live-Recording-Confirmation" to it) }.orEmpty()
+    val start = send<LiveStart>("GET", "/api/live/hls/start", q, timeoutMs = 60_000, headers = headers, expectedContext = expectedContext)
     val direct = start.isDirect == true
     val path = (if (direct) start.streamUrl else start.playlistUrl)?.ifEmpty { null }
         ?: throw ApiError.NotReady("The server did not return a stream for this channel")
@@ -180,7 +185,8 @@ private data class KeepAlive(val growing: Boolean = false)
  */
 suspend fun ApiClient.keepLiveSessionAlive(
     sessionId: String, positionSeconds: Double? = null, paused: Boolean? = null, buffering: Boolean? = null,
-): Boolean? = runCatching {
+    failOnCapacityRejection: Boolean = false,
+): Boolean? = try {
     val q = buildMap {
         positionSeconds?.let { put("time", "%.3f".format(java.util.Locale.US, it)) }
         paused?.let { put("paused", it.toString()) }
@@ -188,7 +194,12 @@ suspend fun ApiClient.keepLiveSessionAlive(
     }
     val text = sendRaw("POST", "/api/video/hls/${segment(sessionId)}/keepalive", q, promptOnLock = false, timeoutMs = 10_000)
     runCatching { json.decodeFromString<KeepAlive>(text).growing }.getOrNull()
-}.getOrNull()
+} catch (error: kotlinx.coroutines.CancellationException) {
+    throw error
+} catch (error: Exception) {
+    if (failOnCapacityRejection && liveCapacityRejection(error) != null) throw error
+    null
+}
 
 suspend fun ApiClient.stopLiveSession(sessionId: String) {
     runCatching { stopLiveSessionStrict(sessionId) }

@@ -46,7 +46,17 @@ import com.strmr.tv.player.PlaybackRequest
 fun PlaybackOverlays() {
     val resolving by PlaybackCoordinator.resolving.collectAsState()
     val error by PlaybackCoordinator.errorMessage.collectAsState()
+    val recordingPrompt by PlaybackCoordinator.recordingInterruption.prompt.collectAsState()
     resolving?.let { StreamStartCover(it) }
+    recordingPrompt?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = { PlaybackCoordinator.recordingInterruption.answer(prompt, false) },
+            title = { Text("Stop recording to play?") },
+            text = { Text(prompt.message) },
+            confirmButton = { TextButton(onClick = { PlaybackCoordinator.recordingInterruption.answer(prompt, true) }) { Text("Stop recording and play") } },
+            dismissButton = { TextButton(onClick = { PlaybackCoordinator.recordingInterruption.answer(prompt, false) }) { Text("Cancel") } },
+        )
+    }
     error?.let {
         AlertDialog(
             onDismissRequest = { PlaybackCoordinator.errorMessage.value = null },
