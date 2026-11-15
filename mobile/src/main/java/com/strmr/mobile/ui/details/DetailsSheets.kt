@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import com.strmr.mobile.ui.components.ActionSheet
 import com.strmr.mobile.ui.components.SheetAction
 import com.strmr.mobile.ui.components.SheetHeader
+import com.strmr.tv.ui.details.contentLocalScopes
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.Episode
 import com.strmr.tv.home.continueWatching
@@ -63,6 +64,9 @@ fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: Corout
     }
     val actions = buildList {
         if (!target.fromLibrary) add(SheetAction("Rate for this profile…", Icons.Outlined.Star) { rate() })
+        contentLocalScopes(target, model.currentSeason).takeIf { it.isNotEmpty() }?.let { targets ->
+            add(SheetAction("Automatic source preference…", Icons.Outlined.Storage) { state.localPreferenceScopes = targets })
+        }
         if (state.prequeueTracks.visible(warm)?.tracks != null) add(SheetAction("Audio & Subtitles", AppIcons.Waveform) { state.prequeueTracks.open = true })
         if (target.isMovie || state.activeEpisode != null) add(SheetAction("Choose Source", Icons.Outlined.Search) { state.sourcesFor = EpisodeTarget(state.activeEpisode) })
         if (model.libraryVersions(state.activeEpisode).isNotEmpty()) {
@@ -109,6 +113,9 @@ fun EpisodeMenuSheet(state: DetailsPageState, episode: Episode, scope: Coroutine
         if (resumeAt != null) add(SheetAction("Start Over", Icons.Outlined.Replay) { state.play(episode, null) })
         if (model.libraryVersions(episode).isNotEmpty()) add(SheetAction("Choose Version", Icons.Outlined.Storage) { state.versionsFor = EpisodeTarget(episode) })
         add(SheetAction("Choose Source", Icons.Outlined.Search) { state.sourcesFor = EpisodeTarget(episode) })
+        contentLocalScopes(model.target, episode=episode).takeIf { it.isNotEmpty() }?.let { targets ->
+            add(SheetAction("Automatic source preference…", Icons.Outlined.Storage) { state.localPreferenceScopes = targets })
+        }
         if (sourceHint != null && episode.numbering != null) add(SheetAction("Check sources again", Icons.Outlined.Refresh) { launchSourceRecheck(scope, model.target, episode) })
         DetailsExtras.providers.forEach { addAll(it.episodeActions(extras, episode)) }
         add(SheetAction(if (watched) "Mark as Unwatched" else "Mark as Watched", Icons.Outlined.CheckCircle) {

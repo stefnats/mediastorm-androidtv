@@ -59,9 +59,9 @@ import com.strmr.tv.ui.settings.SpoilerSettings
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DetailsScreen(target: DetailsTarget, autoplay: Boolean) {
-    val model = remember(target) { DetailsModel(target) }
-    val state = remember(model) { DetailsPageState(model) }
     val scope = rememberCoroutineScope()
+    val model = remember(target) { DetailsModel(target, scope) }
+    val state = remember(model) { DetailsPageState(model) }
     val context = LocalContext.current
     val navigator = LocalNavigator.current
     val trailer = remember(model) { TrailerController(context, scope) }

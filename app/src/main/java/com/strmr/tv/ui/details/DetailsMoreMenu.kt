@@ -46,6 +46,7 @@ fun DetailsMoreMenu(
     onCustomize: () -> Unit,
     onHidden: () -> Unit,
     onDismiss: () -> Unit,
+    sourcePreference: DialogChoice? = null,
 ) {
     val rate = com.strmr.tv.ui.rememberRatingAction(target)
     var inContinueWatching by remember { mutableStateOf(false) }
@@ -56,6 +57,7 @@ fun DetailsMoreMenu(
     val choices = buildList {
         if (!target.fromLibrary) add(DialogChoice("Rate for this profile…") { rate() })
         addAll(moved)
+        sourcePreference?.let(::add)
         if (inContinueWatching) {
             add(DialogChoice("Set Aside") { scope.launch { TitleActions.setAside(target) } })
             add(DialogChoice("Remove from Continue Watching") { scope.launch { TitleActions.hideFromContinueWatching(target) } })

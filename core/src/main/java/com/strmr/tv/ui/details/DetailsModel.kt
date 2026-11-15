@@ -25,6 +25,12 @@ import com.strmr.tv.api.setSeriesOrdering
 import com.strmr.tv.api.setWatched
 import com.strmr.tv.home.CardBadge
 import com.strmr.tv.home.ReleaseBadge
+import com.strmr.tv.library.ProfileDataContext
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import com.strmr.tv.ui.AppToast
 import com.strmr.tv.library.LibraryVersion
 import com.strmr.tv.library.LibraryVersions
 import com.strmr.tv.player.ManualSourceTracks
@@ -43,7 +49,18 @@ import kotlinx.coroutines.withTimeoutOrNull
  * with per-episode watched / resume, the up-next episode and the server's resume decision
  * (no client thresholds). Reloaded after playback to refresh progress.
  */
-class DetailsModel(val target: DetailsTarget) {
+class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope = MainScope()) {
+    val dataContext = ProfileDataContext.current
+    private var playJob: Job? = null
+
+    fun sourcePreferenceChanged() {
+        ApiClient.inContext(dataContext) {
+            playJob?.cancel()
+            PlaybackCoordinator.invalidateWarmSources()
+            playChoice = null
+            AppToast.show("Source preference saved for this profile.")
+        }
+    }
     var title by mutableStateOf<Title?>(null)
         private set
     var seasons by mutableStateOf<List<Season>>(emptyList())
@@ -265,8 +282,22 @@ class DetailsModel(val target: DetailsTarget) {
      * title never starts a search by mistake.
      */
     fun play(episode: Episode?, start: StartPoint?, picks: PrequeuePick? = null) {
-        if (libraryLookup.isCompleted) return playOrAsk(episode, start, picks, library)
-        MainScope().launch { playOrAsk(episode, start, picks, withTimeoutOrNull(8_000) { libraryLookup.await() }) }
+        if (playJob?.isActive == true || dataContext != ProfileDataContext.current) return
+        playJob = scope.launch {
+            try {
+                ApiClient.inContext(dataContext) {}
+                val versions = if (libraryLookup.isCompleted) library else withTimeoutOrNull(8_000) { libraryLookup.await() }
+                val selectedLibrary = catalogPlayLibrary(target, episode, versions, dataContext)
+                ApiClient.inContext(dataContext) {
+                    playOrAsk(episode, start, picks, selectedLibrary)
+                }
+            } catch (_: TimeoutCancellationException) {
+                if (dataContext == ProfileDataContext.current) AppToast.show("Source preferences did not respond. Try again.")
+            } catch (e: CancellationException) { throw e
+            } catch (_: Exception) {
+                if (dataContext == ProfileDataContext.current) AppToast.show("Source preferences could not be checked. Try again.")
+            }
+        }
     }
 
     private fun playOrAsk(episode: Episode?, start: StartPoint?, picks: PrequeuePick?, versions: LibraryVersions?) {

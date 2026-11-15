@@ -339,6 +339,9 @@ object PlaybackCoordinator {
     /** Starts resolving what `target`'s details page would play as it opens ([PrequeueResolver.prewarm]). */
     fun prewarm(target: DetailsTarget) = prequeue.prewarm(target)
 
+    /** Discard old source/track previews after a content source preference changes. */
+    fun invalidateWarmSources() = prequeue.invalidateWarm()
+
     /** Starts resolving the next episode near the end of this one ([PrequeueResolver.prefetch]); [play] adopts it. */
     fun prefetch(request: PlaybackRequest) = prequeue.prefetch(request)
 }

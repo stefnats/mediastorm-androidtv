@@ -42,6 +42,14 @@ internal class PrequeueResolver(
      * time stay behind so re-opening the page doesn't search again.
      */
     private var warmed: Warmed? = null
+    private var warmGeneration = 0L
+
+    fun invalidateWarm() {
+        warmGeneration++
+        warmed?.prequeue?.cancel()
+        warmed = null
+        _warm.value = null
+    }
 
     private class Warmed(val titleId: String, val profile: String, val started: Long, var prequeue: Deferred<String?>?)
 
@@ -54,6 +62,7 @@ internal class PrequeueResolver(
         if (target.fromLibrary) return // Play uses the library's copy
         val profile = ApiClient.profileId
         warmed?.let { if (it.titleId == target.titleId && it.profile == profile && System.currentTimeMillis() - it.started < 600_000) return }
+        val generation = ++warmGeneration
         // No episode or start point: the server targets the series' next-up episode.
         val body = body(PlaybackRequest(target))
         _warm.value = WarmPrequeue(target.titleId, profile, WarmPrequeue.Phase.RESOLVING)
@@ -61,8 +70,8 @@ internal class PrequeueResolver(
             val id = if (runCatching { ApiClient.playbackSettings().prequeueOnOpen }.getOrDefault(false)) {
                 runCatching { ApiClient.startPrequeue(body).prequeueId }.getOrNull()
             } else null
-            if (id == null) settleWarm(target.titleId, profile, WarmPrequeue.Phase.UNAVAILABLE, null)
-            else scope.launch { watchWarm(id, body, target.titleId, profile) }
+            if (id == null) settleWarm(target.titleId, profile, WarmPrequeue.Phase.UNAVAILABLE, null, generation)
+            else if (generation == warmGeneration) scope.launch { watchWarm(id, body, target.titleId, profile, generation) }
             id
         }
         warmed = Warmed(target.titleId, profile, System.currentTimeMillis(), task)
@@ -74,16 +83,16 @@ internal class PrequeueResolver(
      * restarted), asks once more, since the server hands back whatever entry now holds that
      * title, then gives up rather than polling a dead id until the deadline.
      */
-    private suspend fun watchWarm(firstId: String, body: JsonObject, titleId: String, profile: String) {
+    private suspend fun watchWarm(firstId: String, body: JsonObject, titleId: String, profile: String, generation: Long) {
         var id = firstId
         var restarted = false
         val deadline = System.currentTimeMillis() + 180_000
-        while (System.currentTimeMillis() < deadline && _warm.value?.let { it.titleId == titleId && it.profile == profile } == true) {
+        while (generation == warmGeneration && System.currentTimeMillis() < deadline && _warm.value?.let { it.titleId == titleId && it.profile == profile } == true) {
             try {
                 val status = ApiClient.prequeueStatus(id)
                 if (status.status == "ready") {
                     AppLog.i("Prequeue", "details prequeue $id ready: ${status.audioTracks?.size ?: 0} audio, ${status.subtitleTracks?.size ?: 0} subtitles")
-                    return settleWarm(titleId, profile, WarmPrequeue.Phase.READY, status)
+                    return settleWarm(titleId, profile, WarmPrequeue.Phase.READY, status, generation)
                 }
                 if (status.status == "failed" || status.status == "expired") break
             } catch (e: CancellationException) {
@@ -95,11 +104,13 @@ internal class PrequeueResolver(
                     AppLog.w("Prequeue", "details prequeue $id gone again after restart")
                     break
                 } else {
+                    if (generation != warmGeneration) return
                     restarted = true
                     val next = runCatching { ApiClient.startPrequeue(body).prequeueId }.getOrNull() ?: break
                     AppLog.w("Prequeue", "details prequeue $id gone on the server; following $next")
                     id = next
                     // Play adopts the live prequeue, not the dropped one.
+                    if (generation != warmGeneration) return
                     warmed?.takeIf { it.titleId == titleId && it.profile == profile && it.prequeue != null }
                         ?.prequeue = CompletableDeferred(next)
                     continue
@@ -108,13 +119,14 @@ internal class PrequeueResolver(
             delay(1500)
         }
         AppLog.i("Prequeue", "details prequeue $id unavailable")
-        settleWarm(titleId, profile, WarmPrequeue.Phase.UNAVAILABLE, null)
+        settleWarm(titleId, profile, WarmPrequeue.Phase.UNAVAILABLE, null, generation)
     }
 
     /** The server no longer has the prequeue (404 "not found or expired"). */
     private fun isGone(e: Exception): Boolean = e is ApiError && e.statusCode == 404
 
-    private fun settleWarm(titleId: String, profile: String, phase: WarmPrequeue.Phase, status: PrequeueStatus?) {
+    private fun settleWarm(titleId: String, profile: String, phase: WarmPrequeue.Phase, status: PrequeueStatus?, generation: Long) {
+        if (generation != warmGeneration) return
         val w = _warm.value ?: return
         if (w.titleId == titleId && w.profile == profile && w.phase == WarmPrequeue.Phase.RESOLVING) {
             _warm.value = w.copy(phase = phase, status = status)

@@ -81,8 +81,8 @@ private data class PendingVersion(val version: LibraryVersion, val episode: Epis
  */
 @Composable
 fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autoplay: Boolean = false) {
-    val model = remember(target) { DetailsModel(target) }
     val scope = rememberCoroutineScope()
+    val model = remember(target) { DetailsModel(target, scope) }
     val context = LocalContext.current
     val trailer = remember { TrailerController(context, scope) }
     val sessionsEnded by PlaybackCoordinator.sessionsEnded.collectAsState()
@@ -99,6 +99,7 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
     var more by remember { mutableStateOf(false) }
     var customizingButtons by remember { mutableStateOf(false) }
     var episodeOrder by remember { mutableStateOf(false) }
+    var localPreferenceScopes by remember { mutableStateOf<List<ContentLocalScope>?>(null) }
     val navigator = com.strmr.tv.ui.LocalNavigator.current
     val actions = com.strmr.tv.library.TitleActions.changes
     // A long-press menu's bulk watch-state action opens the sheet once the seasons are in.
@@ -218,6 +219,7 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
                         onChooseSource = { ep -> picker = PickerTarget(ep) },
                         onChooseVersion = { ep -> versionsFor = PickerTarget(ep) },
                         onToggleWatched = { ep -> scope.launch { model.toggleWatched(ep) } },
+                        onSourcePreference = { ep -> localPreferenceScopes = contentLocalScopes(target, episode = ep).takeIf { it.isNotEmpty() } },
                         modifier = Modifier.padding(top = 24.dp),
                     )
                 }
@@ -239,7 +241,13 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
         val order = if (model.offersOrderings) {
             DialogChoice("Episode Order: ${model.currentOrdering?.name ?: "Default"}…") { episodeOrder = true }
         } else null
-        DetailsMoreMenu(target, scope, moved, order, onCustomize = { customizingButtons = true }, onHidden = { navigator.close() }, onDismiss = { more = false })
+        DetailsMoreMenu(target, scope, moved, order, onCustomize = { customizingButtons = true }, onHidden = { navigator.close() }, onDismiss = { more = false },
+            sourcePreference = contentLocalScopes(target, model.currentSeason).takeIf { it.isNotEmpty() }?.let { targets ->
+                DialogChoice("Automatic source preference…") { localPreferenceScopes = targets }
+            })
+    }
+    localPreferenceScopes?.let { targets ->
+        ContentLocalPreferenceDialog(targets, expectedContext = model.dataContext, onSaved = { model.sourcePreferenceChanged(); prequeueTracks.clear() }, onDismiss = { localPreferenceScopes = null })
     }
     if (episodeOrder) EpisodeOrderDialog(model, scope, onDismiss = { episodeOrder = false })
     if (customizingButtons) DetailsButtonsDialog(onDismiss = { customizingButtons = false })

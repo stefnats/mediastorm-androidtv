@@ -9,6 +9,7 @@ import com.strmr.tv.api.StartPoint
 import com.strmr.tv.library.LibraryVersion
 import com.strmr.tv.player.ManualSourceTracks
 import com.strmr.tv.player.PlaybackCoordinator
+import com.strmr.tv.ui.details.ContentLocalScope
 import com.strmr.tv.ui.details.DetailsModel
 import com.strmr.tv.ui.details.PrequeueTracks
 
@@ -35,6 +36,7 @@ class DetailsPageState(val model: DetailsModel) {
     var pendingVersion by mutableStateOf<PendingVersion?>(null)
     var episodeSourceHint by mutableStateOf<com.strmr.tv.api.SourceAvailability?>(null)
     var episodeMenu by mutableStateOf<Episode?>(null)
+    var localPreferenceScopes by mutableStateOf<List<ContentLocalScope>?>(null)
     var more by mutableStateOf(false)
     var watchState by mutableStateOf(false)
     var episodeOrder by mutableStateOf(false)

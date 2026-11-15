@@ -90,6 +90,7 @@ fun EpisodesSection(
     onChooseVersion: (Episode) -> Unit,
     onToggleWatched: (Episode) -> Unit,
     modifier: Modifier = Modifier,
+    onSourcePreference: (Episode) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var menuSource by remember { mutableStateOf<SourceAvailability?>(null) }
@@ -102,6 +103,7 @@ fun EpisodesSection(
                 DialogChoice("Check sources again") { launchSourceRecheck(scope, model.target, ep) }.takeIf { menuSource != null && ep.numbering != null },
                 DialogChoice("Choose Version") { onChooseVersion(ep) }.takeIf { model.libraryVersions(ep).isNotEmpty() },
                 DialogChoice("Choose Source") { onChooseSource(ep) },
+                DialogChoice("Automatic source preference…") { onSourcePreference(ep) }.takeIf { contentLocalScopes(model.target, episode=ep).isNotEmpty() },
                 DialogChoice(if (model.isWatched(ep)) "Mark as Unwatched" else "Mark as Watched") { onToggleWatched(ep) },
                 DialogChoice("Cancel") {},
             ),

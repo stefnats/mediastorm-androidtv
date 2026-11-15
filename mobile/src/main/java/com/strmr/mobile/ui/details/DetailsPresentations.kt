@@ -18,6 +18,9 @@ import kotlinx.coroutines.CoroutineScope
 @Composable
 fun DetailsPresentations(state: DetailsPageState, warm: WarmPrequeue?, scope: CoroutineScope, extras: DetailsActionContext, onHidden: () -> Unit) {
     val model = state.model
+    state.localPreferenceScopes?.let { targets ->
+        ContentLocalPreferenceDialog(targets, expectedContext = model.dataContext, onSaved = { model.sourcePreferenceChanged(); state.prequeueTracks.clear() }, onDismiss = { state.localPreferenceScopes = null })
+    }
     if (state.more) DetailsMoreSheet(state, warm, scope, extras, onHidden)
     state.episodeMenu?.let { EpisodeMenuSheet(state, it, scope, extras) }
     if (state.episodeOrder) EpisodeOrderSheet(state, scope)
