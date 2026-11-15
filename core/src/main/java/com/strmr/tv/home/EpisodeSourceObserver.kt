@@ -10,12 +10,14 @@ import com.strmr.tv.api.EpisodeSourceResponse
 import com.strmr.tv.api.toEpisodeSourceBody
 import com.strmr.tv.api.SourceAvailability
 import java.util.UUID
+import java.time.Instant
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -61,37 +63,42 @@ class EpisodeSourceObserver(
             withTimeoutOrNull(2_000) { runCatching { gateway.update(viewId, EpisodeSourceDemand(clearVersion)) } }
         }
     }
-    fun states(visible: List<Episode>): Flow<Map<String, SourceAvailability>> = flow {
+    fun states(visible: List<Episode>): Flow<Map<String, SourceAvailability>> = snapshots(visible).map { it.hints }
+    fun snapshots(visible: List<Episode>): Flow<EpisodeSourceEvidence> = flow {
         val batch = claim()
-        emit(emptyMap())
+        emit(EpisodeSourceEvidence())
         val episodes = visible.filter { it.id.isNotBlank() && it.seasonNumber >= 0 && it.episodeNumber > 0 && it.numbering?.seriesId?.isNotBlank() == true }
             .distinctBy(::episodeSourceKey).take(12)
         val numbering = episodes.firstOrNull()?.numbering
         if (target.isMovie || episodes.isEmpty() || episodes.any { it.numbering != numbering } || !gateway.isCurrent()) { clear(batch); return@flow }
         var pendingPolls = 0
+        var published = false
         try {
             while (currentCoroutineContext().isActive && gateway.isCurrent() && owns(batch)) {
                 val requestVersion = next(batch) ?: return@flow
                 val body = EpisodeSourceDemand(requestVersion, target.titleId, numbering, episodes.map { EpisodeSourceCoordinate(it.id, it.seasonNumber, it.episodeNumber) })
                 val reply = gateway.update(viewId, body)
-                if (!gateway.isCurrent() || !owns(batch)) return@flow
-                if (!reply.enabled) { synchronized(lock) { if (owner == batch) dirty = false }; return@flow }
-                if (reply.version != requestVersion) return@flow
+                if (!owns(batch)) return@flow
+                if (!gateway.isCurrent()) { if (published) emit(EpisodeSourceEvidence()); return@flow }
+                if (!reply.enabled) { synchronized(lock) { if (owner == batch) dirty = false }; if (published) emit(EpisodeSourceEvidence()); return@flow }
+                if (reply.version != requestVersion) { if (published) emit(EpisodeSourceEvidence()); return@flow }
                 val values = buildMap {
                     for (ep in episodes) {
                         val matches = reply.items.filter { it.episodeId == ep.id && it.seasonNumber == ep.seasonNumber && it.episodeNumber == ep.episodeNumber }
                         if (matches.size == 1) matches.single().sourceAvailability?.let { put(episodeSourceKey(ep), it) }
                     }
                 }
-                emit(values)
+                emit(EpisodeSourceEvidence(values, reply.episodeCoverage?.takeIf { it.valid }, Instant.now()))
+                published = true
                 val pending = values.size < episodes.size || values.values.any { it.reason in setOf("recheck_queued", "not_checked", "expired", "evidence_not_recorded", "prepared_source_requires_recheck") }
                 delay(if (pending && pendingPolls++ < 15) 1_000 else 15_000)
             }
+            if (owns(batch) && published) emit(EpisodeSourceEvidence())
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (error: Exception) {
             if (error is ApiError && error.statusCode in setOf(404, 405, 501)) synchronized(lock) { if (owner == batch) dirty = false }
-            emit(emptyMap())
+            emit(EpisodeSourceEvidence())
         } finally {
             clear(batch)
         }

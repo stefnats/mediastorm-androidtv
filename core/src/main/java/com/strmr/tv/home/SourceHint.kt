@@ -14,15 +14,17 @@ data class SourceHint(
     val label: String,
     val checkedAt: Instant?,
     val expiresAt: Instant?,
+    val episodeCoverageDescription: String? = null,
 ) {
-    enum class Kind { CANDIDATE, LOCAL, MISSING, UNKNOWN }
+    enum class Kind { CANDIDATE, LOCAL, PARTIAL, MISSING, UNKNOWN }
     val dimArtwork: Boolean get() = kind == Kind.MISSING
 
     fun checkedLabel(locale: Locale = Locale.getDefault(), zone: ZoneId = ZoneId.systemDefault()): String? =
         checkedAt?.let { runCatching { "Checked " + DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT).withLocale(locale).withZone(zone).format(it) }.getOrNull() }
 
     fun description(locale: Locale = Locale.getDefault(), zone: ZoneId = ZoneId.systemDefault()): String =
-        listOfNotNull(label, checkedLabel(locale, zone), when (kind) {
+        listOfNotNull(label, checkedLabel(locale, zone), episodeCoverageDescription, when (kind) {
+            Kind.PARTIAL -> "Only observed episode checks are represented. A candidate is not proof of playback."
             Kind.CANDIDATE -> "A search candidate is not proof of playback."
             Kind.LOCAL -> "The local file and requested audio were checked. Playback can still fail."
             Kind.MISSING -> "No matching source was found in the completed check. Open details for other options."
@@ -35,9 +37,16 @@ data class SourceHint(
             val checked = parse(value.checkedAt)
             val expiry = parse(value.expiresAt)
             val valid = checked != null && expiry != null && !checked.isAfter(now) && expiry.isAfter(checked) && expiry.isAfter(now) && Duration.between(checked, expiry) <= Duration.ofHours(24)
+            val coverage = value.episodeCoverage?.takeIf { it.valid }
+            val aggregateLocal = value.sourceType == "local" && value.providers.isEmpty() &&
+                value.reason in setOf("episode_candidates", "partial_episode_candidates") &&
+                coverage != null && coverage.foundEpisodes > 0 && Duration.between(checked ?: now, expiry ?: now) <= Duration.ofMinutes(2)
             val kind = when {
                 value.reason?.startsWith("recheck_") == true -> Kind.UNKNOWN
                 !valid -> Kind.UNKNOWN
+                coverage?.partial == true && value.state == "found" && (value.sourceType == null || aggregateLocal) -> Kind.PARTIAL
+                aggregateLocal && value.state == "found" -> Kind.CANDIDATE
+                value.episodeCoverage != null && value.state == "not_found" -> Kind.UNKNOWN
                 value.sourceType != null || value.reason == "local_file_checked" ->
                     if (value.state == "found" && value.sourceType == "local" && value.reason == "local_file_checked" && value.providers.isEmpty() && Duration.between(checked, expiry) <= Duration.ofMinutes(2)) Kind.LOCAL else Kind.UNKNOWN
                 value.state == "not_found" && value.complete && value.reason in setOf("no_matching_candidates", "reported_candidates") -> Kind.MISSING
@@ -45,6 +54,7 @@ data class SourceHint(
                 else -> Kind.UNKNOWN
             }
             val label = when (kind) {
+                Kind.PARTIAL -> "Partial episode coverage"
                 Kind.MISSING -> "No matching source"
                 Kind.CANDIDATE -> "Source candidate found"
                 Kind.LOCAL -> "Local file checked"
@@ -63,7 +73,7 @@ data class SourceHint(
                     else -> "Source status unknown"
                 }
             }
-            return SourceHint(kind, label, checked?.takeUnless { it.isAfter(now) }, expiry)
+            return SourceHint(kind, label, checked?.takeUnless { it.isAfter(now) }, expiry, coverage?.takeIf { valid && value.reason?.startsWith("recheck_") != true }?.let { episodeCoverageText(it) })
         }
 
         private fun parse(value: String?): Instant? = value?.let { runCatching { Instant.parse(it) }.getOrNull() }

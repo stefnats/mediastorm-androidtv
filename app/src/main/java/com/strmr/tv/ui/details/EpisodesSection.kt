@@ -56,7 +56,8 @@ import com.strmr.tv.api.Artwork
 import com.strmr.tv.api.Episode
 import com.strmr.tv.api.SourceAvailability
 import com.strmr.tv.home.episodeSourceKey
-import com.strmr.tv.ui.rememberEpisodeSourceHints
+import com.strmr.tv.ui.rememberEpisodeSourceEvidence
+import com.strmr.tv.ui.rememberEpisodeCoverageText
 import com.strmr.tv.ui.rememberSourceHint
 import com.strmr.tv.ui.SourceHintBadge
 import com.strmr.tv.ui.sourceHintArtwork
@@ -145,7 +146,11 @@ fun EpisodesSection(
             val entryIndex = current.episodes.indexOfFirst { it.id == model.primaryEpisode?.id }.coerceAtLeast(0)
             val listState = rememberLazyListState(initialFirstVisibleItemIndex = entryIndex)
             var rowInWindow by remember { mutableStateOf(false) }
-            val sourceHints = rememberEpisodeSourceHints(model.target, current.episodes, listState, rowInWindow)
+            val sourceEvidence = rememberEpisodeSourceEvidence(model.target, current.episodes, listState, rowInWindow)
+            val sourceHints = sourceEvidence.hints
+            rememberEpisodeCoverageText(sourceEvidence, current.number)?.let { coverage ->
+                Text(coverage, fontSize = 13.sp, modifier = Modifier.padding(horizontal = ContentMargin))
+            }
             val entry = remember { FocusRequester() }
             LaunchedEffect(Unit) { listState.scrollToItem(entryIndex) }
             LazyRow(

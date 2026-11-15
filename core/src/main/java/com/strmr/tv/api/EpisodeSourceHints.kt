@@ -23,7 +23,7 @@ data class EpisodeSourceItem(
     val sourceAvailability: SourceAvailability? = null,
 )
 @Serializable
-data class EpisodeSourceResponse(val enabled: Boolean = false, val version: Long = 0, val items: List<EpisodeSourceItem> = emptyList())
+data class EpisodeSourceResponse(val enabled: Boolean = false, val version: Long = 0, val items: List<EpisodeSourceItem> = emptyList(), val episodeCoverage: EpisodeSourceCoverage? = null)
 
 /** Keep the empty episode array explicit: it is the protocol's release operation. */
 fun EpisodeSourceDemand.toEpisodeSourceBody(): JsonObject = buildJsonObject {

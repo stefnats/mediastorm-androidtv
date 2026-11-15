@@ -8,6 +8,7 @@ import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonEncoder
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -25,6 +26,7 @@ data class SourceAvailability(
     val complete: Boolean = false,
     val reason: String? = null,
     val sourceType: String? = null,
+    val episodeCoverage: EpisodeSourceCoverage? = null,
 )
 
 /** A malformed optional hint must not discard its otherwise usable catalogue title. */
@@ -35,10 +37,14 @@ object SourceAvailabilitySerializer : KSerializer<SourceAvailability> {
             ?: return SourceAvailability(reason = "invalid_source_hint")
         fun text(key: String): String? = (obj[key] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
         val complete = (obj["complete"] as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull == true
+        val coverage = EpisodeSourceCoverageSerializer.parse(obj["episodeCoverage"])
+        val invalidCoverageNegative = text("state") == "not_found" && obj["episodeCoverage"] != null && obj["episodeCoverage"] != JsonNull && coverage == null
         return SourceAvailability(
-            state = text("state") ?: "unknown", checkedAt = text("checkedAt"), expiresAt = text("expiresAt"),
+            state = if (invalidCoverageNegative) "unknown" else text("state") ?: "unknown", checkedAt = text("checkedAt"), expiresAt = text("expiresAt"),
             providers = (obj["providers"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull } ?: emptyList(),
-            complete = complete, reason = text("reason"), sourceType = text("sourceType"),
+            complete = complete && !invalidCoverageNegative,
+            reason = if (invalidCoverageNegative) "episode_coverage_unverified" else text("reason"), sourceType = text("sourceType"),
+            episodeCoverage = coverage,
         )
     }
     override fun serialize(encoder: Encoder, value: SourceAvailability) {
@@ -50,6 +56,7 @@ object SourceAvailabilitySerializer : KSerializer<SourceAvailability> {
             put("complete", value.complete)
             value.reason?.let { put("reason", it) }
             value.sourceType?.let { put("sourceType", it) }
+            value.episodeCoverage?.takeIf { it.valid }?.let { put("episodeCoverage", EpisodeSourceCoverageSerializer.toJson(it)) }
         })
     }
 }

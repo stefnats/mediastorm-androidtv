@@ -21,9 +21,12 @@ import com.strmr.tv.app.AppSession
 import com.strmr.tv.api.DetailsTarget
 import com.strmr.tv.api.Episode
 import com.strmr.tv.api.SourceAvailability
+import com.strmr.tv.home.EpisodeSourceEvidence
+import com.strmr.tv.home.episodeCoverageText
 import com.strmr.tv.home.EpisodeSourceObserver
 import com.strmr.tv.home.ServerEpisodeSourceGateway
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -31,7 +34,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 /** Only clipped-in-window, resumed rows advertise the items actually intersecting their viewport. */
 @OptIn(FlowPreview::class)
 @Composable
-fun rememberEpisodeSourceHints(target: DetailsTarget, episodes: List<Episode>, list: LazyListState, inWindow: Boolean): Map<String, SourceAvailability> {
+fun rememberEpisodeSourceEvidence(target: DetailsTarget, episodes: List<Episode>, list: LazyListState, inWindow: Boolean): EpisodeSourceEvidence {
     val profile by AppSession.profile.collectAsState()
     val server by AppSession.serverUrl.collectAsState()
     val phase by AppSession.phase.collectAsState()
@@ -54,16 +57,29 @@ fun rememberEpisodeSourceHints(target: DetailsTarget, episodes: List<Episode>, l
         onDispose { lifecycle?.removeObserver(observer); if (tree.isAlive) tree.removeOnWindowFocusChangeListener(focus) }
     }
     val observer = remember(target, list, profile?.id, server, phase) { EpisodeSourceObserver(ServerEpisodeSourceGateway(), target) }
-    val results = remember(observer) { mutableStateOf<Map<String, SourceAvailability>>(emptyMap()) }
+    val results = remember(observer) { mutableStateOf(EpisodeSourceEvidence()) }
     LaunchedEffect(observer, episodes, inWindow, resumed, wakes, phase, uncovered, focused, rechecks) {
-        if (!inWindow || !resumed || !focused || !uncovered || phase != AppSession.Phase.Ready) { results.value = emptyMap(); return@LaunchedEffect }
+        if (!inWindow || !resumed || !focused || !uncovered || phase != AppSession.Phase.Ready) { results.value = EpisodeSourceEvidence(); return@LaunchedEffect }
         snapshotFlow {
             val info = list.layoutInfo
             info.visibleItemsInfo.filter { it.offset < info.viewportEndOffset && it.offset + it.size > info.viewportStartOffset }
                 .mapNotNull { episodes.getOrNull(it.index) }.take(12)
         }.distinctUntilChanged().debounce(150).collectLatest { visible ->
-            observer.states(visible).collect { results.value = it }
+            observer.snapshots(visible).collect { results.value = it }
         }
     }
-    return if (inWindow && resumed && focused && uncovered && phase == AppSession.Phase.Ready) results.value else emptyMap()
+    return if (inWindow && resumed && focused && uncovered && phase == AppSession.Phase.Ready) results.value else EpisodeSourceEvidence()
+}
+
+/** The existing observer supplies this summary; its timer performs no source requests. */
+@Composable
+fun rememberEpisodeCoverageText(evidence: EpisodeSourceEvidence, seasonNumber: Int): String? {
+    var text by remember(evidence, seasonNumber) { mutableStateOf(episodeCoverageText(evidence, seasonNumber)) }
+    LaunchedEffect(evidence, seasonNumber) {
+        while (text != null) {
+            delay(1_000)
+            text = episodeCoverageText(evidence, seasonNumber)
+        }
+    }
+    return text
 }

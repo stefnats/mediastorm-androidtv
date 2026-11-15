@@ -52,7 +52,8 @@ import com.strmr.tv.api.Artwork
 import com.strmr.tv.api.Episode
 import com.strmr.tv.api.SourceAvailability
 import com.strmr.tv.home.episodeSourceKey
-import com.strmr.tv.ui.rememberEpisodeSourceHints
+import com.strmr.tv.ui.rememberEpisodeSourceEvidence
+import com.strmr.tv.ui.rememberEpisodeCoverageText
 import com.strmr.tv.ui.rememberSourceHint
 import com.strmr.tv.ui.SourceHintBadge
 import com.strmr.tv.ui.sourceHintArtwork
@@ -103,7 +104,11 @@ fun EpisodesSection(state: DetailsPageState) {
             val list = rememberLazyListState(initialFirstVisibleItemIndex = start)
             LaunchedEffect(Unit) { list.scrollToItem(start) }
             var rowInWindow by remember { mutableStateOf(false) }
-            val sourceHints = rememberEpisodeSourceHints(model.target, current.episodes, list, rowInWindow)
+            val sourceEvidence = rememberEpisodeSourceEvidence(model.target, current.episodes, list, rowInWindow)
+            val sourceHints = sourceEvidence.hints
+            rememberEpisodeCoverageText(sourceEvidence, current.number)?.let { coverage ->
+                Text(coverage, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp))
+            }
             val privacy = SpoilerSettings.effective
             LazyRow(state = list, modifier = Modifier.onGloballyPositioned { val bounds = it.boundsInWindow(); rowInWindow = bounds.width > 0 && bounds.height > 0 }, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(current.episodes, key = { "${it.seasonNumber}x${it.episodeNumber}:${it.id}" }) { ep ->
