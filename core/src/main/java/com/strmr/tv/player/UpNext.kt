@@ -2,6 +2,7 @@ package com.strmr.tv.player
 
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.SkipSegment
+import com.strmr.tv.api.PlaybackSettings
 import com.strmr.tv.api.playbackSettings
 import com.strmr.tv.library.ProfileDataContext
 import com.strmr.tv.ui.settings.EpisodeAutoplayChanges
@@ -27,6 +28,10 @@ class UpNext(
     private val scope: CoroutineScope,
     private val surface: () -> android.view.SurfaceView?,
     private val onSkip: (Long) -> Unit = {},
+    private val readSettings: suspend () -> PlaybackSettings = { ApiClient.playbackSettings() },
+    private val creditsEnabled: (Boolean) -> Boolean = CreditsDetectionSettings::enabled,
+    private val prepareNext: (PlaybackRequest) -> Unit = PlaybackCoordinator::prefetch,
+    private val log: (String) -> Unit = { AppLog.i(TAG, it) },
     private val onAdvance: (PlaybackRequest) -> Unit,
 ) {
     val nextEpisode: PlaybackRequest? = request.nextEpisode
@@ -51,7 +56,7 @@ class UpNext(
     init {
         scope.launch {
             val before = EpisodeAutoplayChanges.changes.value
-            val settings = ApiClient.playbackSettings()
+            val settings = readSettings()
             if (cancelled || context != ProfileDataContext.current) return@launch
             val latest = EpisodeAutoplayChanges.changes.value
             policy.autoplay = if (latest?.context == context && latest != before) latest.enabled else settings.nextEpisodeAutoPlay
@@ -59,7 +64,7 @@ class UpNext(
             introAutoSkip = settings.introAutoSkip
             recapAutoSkip = settings.recapAutoSkip
             // Reading credits on screen only feeds the next-episode countdown.
-            if (nextEpisode != null && request.isEpisode && CreditsDetectionSettings.enabled(settings.creditsDetection) && !advanced && !cancelled) {
+            if (nextEpisode != null && request.isEpisode && creditsEnabled(settings.creditsDetection) && !advanced && !cancelled) {
                 detector = CreditsDetector { start -> segments.detectedCredits(start, durationSec) }
             }
         }
@@ -131,7 +136,7 @@ class UpNext(
         if (advanced || cancelled || context != ProfileDataContext.current) return
         advanced = true
         _action.value = null
-        AppLog.i(TAG, "playing next: ${next.episode?.code}")
+        log("playing next: ${next.episode?.code}")
         onAdvance(next)
     }
 
@@ -143,13 +148,13 @@ class UpNext(
         detector?.close()
     }
 
-    private fun prefetchIfNear(positionMs: Long, durationMs: Long) {
+    internal fun prefetchIfNear(positionMs: Long, durationMs: Long) {
         val next = nextEpisode ?: return
-        if (prefetched || durationMs <= 0) return
+        if (prefetched || durationMs <= 0 || cancelled || context != ProfileDataContext.current) return
         if (positionMs < durationMs * PREFETCH_FRACTION && active?.type != "outro") return
         prefetched = true
-        AppLog.i(TAG, "prefetching ${next.episode?.code} at ${positionMs / 1000}s of ${durationMs / 1000}s")
-        PlaybackCoordinator.prefetch(next)
+        log("prefetching ${next.episode?.code} at ${positionMs / 1000}s of ${durationMs / 1000}s")
+        prepareNext(next)
     }
 
     private companion object {

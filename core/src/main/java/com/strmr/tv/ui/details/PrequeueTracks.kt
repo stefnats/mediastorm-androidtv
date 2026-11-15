@@ -47,8 +47,9 @@ class PrequeueTracks(
 
     /** The page's prequeue while it resolves, or once it lists tracks for the episode Play targets; null hides the button. */
     fun visible(warm: WarmPrequeue?): WarmPrequeue? {
-        if (model.primaryVersions.isNotEmpty()) return null // Play uses a library copy
-        if (warm == null || warm.titleId != model.target.titleId || warm.profile != ApiClient.profileId) return null
+        if (model.primaryVersions.isNotEmpty() && warm?.automaticLibrarySelection != true) return null // Legacy Play uses a library copy
+        if (warm == null || warm.titleId != model.target.titleId || warm.profile != ApiClient.profileId ||
+            warm.context != model.dataContext || model.dataContext != com.strmr.tv.library.ProfileDataContext.current) return null
         return when (warm.phase) {
             WarmPrequeue.Phase.RESOLVING -> warm
             WarmPrequeue.Phase.UNAVAILABLE -> null
@@ -58,6 +59,9 @@ class PrequeueTracks(
                     val ep = episode() ?: return null
                     val target = status.targetEpisode
                     if (target?.seasonNumber != ep.seasonNumber || target.episodeNumber != ep.episodeNumber) return null
+                    if (warm.automaticLibrarySelection && !com.strmr.tv.player.prequeueMatchesEpisode(status,
+                        com.strmr.tv.player.PlaybackRequest.EpisodeInfo(ep.seasonNumber, ep.episodeNumber,
+                            numbering = ep.numbering, metadataEpisodeId = ep.id), true)) return null
                 }
                 warm
             }

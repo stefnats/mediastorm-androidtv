@@ -14,11 +14,11 @@ import kotlinx.serialization.json.JsonObject
 // Prequeue, streams, progress and the profile's playback settings.
 
 /** Carries this route's throughput estimate, as Expo's `prequeuePlayback` does, for adaptive caps. */
-suspend fun ApiClient.startPrequeue(body: JsonObject): PrequeueStartResponse =
-    send("POST", "/api/playback/prequeue", body = body, headers = ThroughputStore.headers())
+suspend fun ApiClient.startPrequeue(body: JsonObject, expectedContext: Long? = null): PrequeueStartResponse =
+    send("POST", "/api/playback/prequeue", body = body, headers = ThroughputStore.headers(), expectedContext = expectedContext)
 
-suspend fun ApiClient.prequeueStatus(id: String): PrequeueStatus =
-    send("GET", "/api/playback/prequeue/${segment(id)}")
+suspend fun ApiClient.prequeueStatus(id: String, expectedContext: Long? = null): PrequeueStatus =
+    send("GET", "/api/playback/prequeue/${segment(id)}", expectedContext = expectedContext)
 
 /** What the server stored for a progress report, its resume decision, and whether it wants the player off this source. */
 @Serializable
@@ -87,6 +87,12 @@ data class PlaybackSettings(
     val preferredAudioLanguage: String? = null,
     /** The languages the player's menus offer (`playback.allowedTrackLanguages`); empty allows all. */
     val allowedTrackLanguages: List<String> = emptyList(),
+    /** Effective profile/server preference; null when the server did not provide it. */
+    val preferLocalFiles: Boolean? = null,
+    /** Response-only capability; automatic catalog playback can include all library sources. */
+    val automaticLibrarySelectionSupported: Boolean = false,
+    /** Internal read result: an unavailable policy must not masquerade as an old server. */
+    val sourcePolicyAvailable: Boolean = true,
 )
 
 @Serializable
@@ -114,6 +120,7 @@ internal data class PlaybackFields(
     val preferredSubtitleMode: String? = null,
     val preferredAudioLanguage: String? = null,
     val allowedTrackLanguages: List<String>? = null,
+    val preferLocalFiles: Boolean? = null,
 ) {
     /** The `subtitle*` fields of the same object. */
     val style: SubtitleStyle.Server
@@ -126,7 +133,10 @@ internal data class PlaybackFields(
 }
 
 @Serializable
-internal data class UserPlayback(val playback: PlaybackFields? = null)
+internal data class UserPlayback(
+    val playback: PlaybackFields? = null,
+    val automaticLibrarySelectionSupported: Boolean = false,
+)
 
 suspend fun ApiClient.playbackSettings(): PlaybackSettings = coroutineScope {
     val captured = ProfileDataContext.current
@@ -134,7 +144,7 @@ suspend fun ApiClient.playbackSettings(): PlaybackSettings = coroutineScope {
     val profile = profileId
     val user = async {
         ProfileDataContext.requireCurrent(captured)
-        optionalProfileRead { send<UserPlayback>("GET", "$path/settings", promptOnLock = false, timeoutMs = 10_000) }?.playback
+        optionalProfileRead { send<UserPlayback>("GET", "$path/settings", promptOnLock = false, timeoutMs = 10_000) }
     }
     val device = async {
         ProfileDataContext.requireCurrent(captured)
@@ -145,10 +155,13 @@ suspend fun ApiClient.playbackSettings(): PlaybackSettings = coroutineScope {
     }
     val (u, d) = user.await() to device.await()
     ProfileDataContext.requireCurrent(captured)
-    mergePlaybackSettings(u, d)
+    mergePlaybackSettings(u?.playback, d, u?.automaticLibrarySelectionSupported == true, u != null)
 }
 
-internal fun mergePlaybackSettings(u: PlaybackFields?, d: PlaybackFields?): PlaybackSettings =
+internal fun mergePlaybackSettings(
+    u: PlaybackFields?, d: PlaybackFields?, automaticLibrarySelectionSupported: Boolean = false,
+    sourcePolicyAvailable: Boolean = u != null,
+): PlaybackSettings =
     PlaybackSettings(
         prequeueOnOpen = !(d?.disablePrequeue ?: u?.disablePrequeue ?: false),
         autoPlayTrailers = d?.autoPlayTrailersTV ?: u?.autoPlayTrailersTV ?: false,
@@ -171,4 +184,8 @@ internal fun mergePlaybackSettings(u: PlaybackFields?, d: PlaybackFields?): Play
         },
         preferredAudioLanguage = (d?.preferredAudioLanguage?.ifEmpty { null } ?: u?.preferredAudioLanguage)?.ifEmpty { null },
         allowedTrackLanguages = d?.allowedTrackLanguages?.ifEmpty { null } ?: u?.allowedTrackLanguages ?: emptyList(),
+        // Source ordering has no device override. The server also applies content scopes.
+        preferLocalFiles = u?.preferLocalFiles,
+        automaticLibrarySelectionSupported = automaticLibrarySelectionSupported,
+        sourcePolicyAvailable = sourcePolicyAvailable,
     )

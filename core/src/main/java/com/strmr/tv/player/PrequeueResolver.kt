@@ -3,12 +3,13 @@ package com.strmr.tv.player
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.ApiError
 import com.strmr.tv.api.DetailsTarget
+import com.strmr.tv.api.PlaybackSettings
 import com.strmr.tv.api.PrequeueStatus
 import com.strmr.tv.api.playbackSettings
 import com.strmr.tv.api.prequeueStatus
 import com.strmr.tv.api.startPrequeue
-import com.strmr.tv.app.AppLog
 import com.strmr.tv.app.Config
+import com.strmr.tv.library.ProfileDataContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -22,224 +23,228 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/**
- * [PlaybackCoordinator]'s backend prequeue: the warm-ups started as a details page opens or
- * near the end of an episode, and resolving a request through one (adopting a warm-up for the
- * same title and profile) until its stream is ready. [progress] gets the stream-start
- * screen's stage line and the release being tried. Main thread only.
- */
+/** Shared automatic preparation for details warm-up, Up Next prefetch and Play. Main thread only. */
 internal class PrequeueResolver(
     private val scope: CoroutineScope,
     private val progress: (stage: String, detail: String?) -> Unit,
+    private val settings: suspend () -> PlaybackSettings = { ApiClient.playbackSettings() },
+    private val start: suspend (JsonObject, Long) -> String = { body, expected -> ApiClient.startPrequeue(body, expected).prequeueId },
+    private val status: suspend (String, Long) -> PrequeueStatus = { id, expected -> ApiClient.prequeueStatus(id, expected) },
+    private val profile: () -> String = { ApiClient.profileId },
+    private val client: () -> String = { Config.clientId },
+    private val sourcePlan: suspend (PlaybackRequest, PlaybackSettings, Long) -> PlaybackSourcePlan = { request, playback, expected ->
+        selectPlaybackSource(request, playback, expected)
+    },
+    private val now: () -> Long = System::currentTimeMillis,
 ) {
-    private val _warm = MutableStateFlow<WarmPrequeue?>(null)
-    /** The details page's prequeue as it resolves, for its Audio & Subtitles button. */
-    val warm: StateFlow<WarmPrequeue?> = _warm
-
-    /**
-     * A prequeue started as a details page opened, for whatever the server would play there
-     * (the movie, or the series' next-up episode). Adopted once; the title, profile and start
-     * time stay behind so re-opening the page doesn't search again.
-     */
+    private val warmValue = MutableStateFlow<WarmPrequeue?>(null)
+    val warm: StateFlow<WarmPrequeue?> = warmValue
     private var warmed: Warmed? = null
     private var warmGeneration = 0L
+
+    private class Warmed(
+        val request: PlaybackRequest, val profile: String, val context: Long, val started: Long,
+        var prequeue: Deferred<String?>?,
+    )
 
     fun invalidateWarm() {
         warmGeneration++
         warmed?.prequeue?.cancel()
         warmed = null
-        _warm.value = null
+        warmValue.value = null
     }
 
-    private class Warmed(val titleId: String, val profile: String, val started: Long, var prequeue: Deferred<String?>?)
-
-    /**
-     * Starts resolving what `target`'s details page would play as soon as it opens, so Play
-     * starts quickly, unless the profile turned prequeue off. At most once per title and
-     * profile every ten minutes.
-     */
     fun prewarm(target: DetailsTarget) {
-        if (target.fromLibrary) return // Play uses the library's copy
-        val profile = ApiClient.profileId
-        warmed?.let { if (it.titleId == target.titleId && it.profile == profile && System.currentTimeMillis() - it.started < 600_000) return }
-        val generation = ++warmGeneration
-        // No episode or start point: the server targets the series' next-up episode.
-        val body = body(PlaybackRequest(target))
-        _warm.value = WarmPrequeue(target.titleId, profile, WarmPrequeue.Phase.RESOLVING)
-        val task = scope.async {
-            val id = if (runCatching { ApiClient.playbackSettings().prequeueOnOpen }.getOrDefault(false)) {
-                runCatching { ApiClient.startPrequeue(body).prequeueId }.getOrNull()
-            } else null
-            if (id == null) settleWarm(target.titleId, profile, WarmPrequeue.Phase.UNAVAILABLE, null, generation)
-            else if (generation == warmGeneration) scope.launch { watchWarm(id, body, target.titleId, profile, generation) }
-            id
+        if (target.fromLibrary) return
+        val expected = ProfileDataContext.current
+        val currentProfile = profile()
+        warmed?.let {
+            if (it.request.title.titleId == target.titleId && it.profile == currentProfile &&
+                it.context == expected && now() - it.started < 600_000) return
         }
-        warmed = Warmed(target.titleId, profile, System.currentTimeMillis(), task)
+        warmRequest(PlaybackRequest(target), expected, currentProfile, display = true)
     }
 
-    /**
-     * Follows the details prequeue until it settles, for the page's Audio & Subtitles button.
-     * If the server drops it (404: replaced by another prequeue for the same title, or
-     * restarted), asks once more, since the server hands back whatever entry now holds that
-     * title, then gives up rather than polling a dead id until the deadline.
-     */
-    private suspend fun watchWarm(firstId: String, body: JsonObject, titleId: String, profile: String, generation: Long) {
+    fun prefetch(request: PlaybackRequest) {
+        if (request.libraryVersion != null) return
+        warmRequest(request, ProfileDataContext.current, profile(), display = false)
+    }
+
+    private fun warmRequest(request: PlaybackRequest, expected: Long, currentProfile: String, display: Boolean) {
+        val generation = ++warmGeneration
+        // A replacement detaches background work; an adopted active preparation is never cancelled.
+        warmed?.prequeue?.cancel()
+        if (display) warmValue.value = WarmPrequeue(request.title.titleId, currentProfile, WarmPrequeue.Phase.RESOLVING, context = expected)
+        else warmValue.value = null
+        val task = scope.async {
+            val preparation = try {
+                requirePlaybackContext(expected)
+                val playback = settings()
+                requirePlaybackContext(expected)
+                if (!playback.prequeueOnOpen) null else {
+                    when (val plan = sourcePlan(request, playback, expected)) {
+                        is PlaybackSourcePlan.Library -> null
+                        is PlaybackSourcePlan.Prequeue -> {
+                            requirePlaybackContext(expected)
+                            if (display && generation == warmGeneration) warmValue.value = warmValue.value?.copy(automaticLibrarySelection = plan.automaticLibrarySelection)
+                            val body = prequeueRequestBody(request, plan.automaticLibrarySelection, currentProfile, client())
+                            val id = start(body, expected)
+                            requirePlaybackContext(expected)
+                            if (generation != warmGeneration) return@async null
+                            if (display) scope.launch { watchWarm(id, body, request, currentProfile, expected, generation, plan.automaticLibrarySelection) }
+                            id
+                        }
+                    }
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) { null }
+            if (preparation == null && display) settleWarm(request.title.titleId, currentProfile, WarmPrequeue.Phase.UNAVAILABLE, null, generation)
+            preparation
+        }
+        warmed = Warmed(request, currentProfile, expected, now(), task)
+    }
+
+    private suspend fun watchWarm(
+        firstId: String, body: JsonObject, request: PlaybackRequest, currentProfile: String,
+        expected: Long, generation: Long, automatic: Boolean,
+    ) {
         var id = firstId
         var restarted = false
-        val deadline = System.currentTimeMillis() + 180_000
-        while (generation == warmGeneration && System.currentTimeMillis() < deadline && _warm.value?.let { it.titleId == titleId && it.profile == profile } == true) {
+        val deadline = now() + 180_000
+        while (generation == warmGeneration && now() < deadline) {
             try {
-                val status = ApiClient.prequeueStatus(id)
-                if (status.status == "ready") {
-                    AppLog.i("Prequeue", "details prequeue $id ready: ${status.audioTracks?.size ?: 0} audio, ${status.subtitleTracks?.size ?: 0} subtitles")
-                    return settleWarm(titleId, profile, WarmPrequeue.Phase.READY, status, generation)
+                requirePlaybackContext(expected)
+                val reply = status(id, expected)
+                requirePlaybackContext(expected)
+                if (reply.automaticLibrarySelection != automatic) break
+                if (reply.status == "ready") {
+                    if (!prequeueMatchesEpisode(reply, request.episode, automatic)) break
+                    return settleWarm(request.title.titleId, currentProfile, WarmPrequeue.Phase.READY, reply, generation)
                 }
-                if (status.status == "failed" || status.status == "expired") break
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                if (!isGone(e)) {
-                    AppLog.w("Prequeue", "details prequeue $id status failed: ${e.message}")
-                } else if (restarted) {
-                    AppLog.w("Prequeue", "details prequeue $id gone again after restart")
-                    break
-                } else {
-                    if (generation != warmGeneration) return
-                    restarted = true
-                    val next = runCatching { ApiClient.startPrequeue(body).prequeueId }.getOrNull() ?: break
-                    AppLog.w("Prequeue", "details prequeue $id gone on the server; following $next")
-                    id = next
-                    // Play adopts the live prequeue, not the dropped one.
-                    if (generation != warmGeneration) return
-                    warmed?.takeIf { it.titleId == titleId && it.profile == profile && it.prequeue != null }
-                        ?.prequeue = CompletableDeferred(next)
-                    continue
-                }
+                if (reply.status == "failed" || reply.status == "expired") break
+            } catch (error: CancellationException) { throw error
+            } catch (error: Exception) {
+                if (!isGone(error) || restarted || generation != warmGeneration) break
+                restarted = true
+                requirePlaybackContext(expected)
+                id = try { start(body, expected)
+                } catch (cancelled: CancellationException) { throw cancelled
+                } catch (_: Exception) { break }
+                requirePlaybackContext(expected)
+                if (generation != warmGeneration) return
+                warmed?.takeIf { it.context == expected && it.request.title.titleId == request.title.titleId && it.prequeue != null }
+                    ?.prequeue = CompletableDeferred(id)
             }
             delay(1500)
         }
-        AppLog.i("Prequeue", "details prequeue $id unavailable")
-        settleWarm(titleId, profile, WarmPrequeue.Phase.UNAVAILABLE, null, generation)
+        settleWarm(request.title.titleId, currentProfile, WarmPrequeue.Phase.UNAVAILABLE, null, generation)
     }
 
-    /** The server no longer has the prequeue (404 "not found or expired"). */
-    private fun isGone(e: Exception): Boolean = e is ApiError && e.statusCode == 404
+    private fun isGone(error: Exception): Boolean = error is ApiError && error.statusCode == 404
 
-    private fun settleWarm(titleId: String, profile: String, phase: WarmPrequeue.Phase, status: PrequeueStatus?, generation: Long) {
+    private fun settleWarm(titleId: String, currentProfile: String, phase: WarmPrequeue.Phase, reply: PrequeueStatus?, generation: Long) {
         if (generation != warmGeneration) return
-        val w = _warm.value ?: return
-        if (w.titleId == titleId && w.profile == profile && w.phase == WarmPrequeue.Phase.RESOLVING) {
-            _warm.value = w.copy(phase = phase, status = status)
-        }
+        val before = warmValue.value ?: return
+        if (before.titleId == titleId && before.profile == currentProfile && before.phase == WarmPrequeue.Phase.RESOLVING)
+            warmValue.value = before.copy(phase = phase, status = reply)
     }
 
-    /**
-     * Starts resolving the next episode near the end of this one, so Up Next starts quickly;
-     * [resolve] adopts it like a details-page prewarm.
-     */
-    fun prefetch(request: PlaybackRequest) {
-        if (request.preferredLibraryVersion != null) return // plays its library copy
-        val profile = ApiClient.profileId
-        val body = body(request)
-        val task = scope.async {
-            if (!ApiClient.playbackSettings().prequeueOnOpen) return@async null
-            runCatching { ApiClient.startPrequeue(body).prequeueId }.getOrNull()
-        }
-        warmed = Warmed(request.title.titleId, profile, System.currentTimeMillis(), task)
-    }
-
-    /** The ready prequeue for `request`: a warm-up for it when one is usable, else a fresh one. */
-    suspend fun resolve(request: PlaybackRequest): PrequeueStatus {
-        val w = warmed
-        val pendingPrequeue = w?.prequeue
-        if (w != null && w.titleId == request.title.titleId && w.profile == ApiClient.profileId && pendingPrequeue != null) {
-            w.prequeue = null
-            pendingPrequeue.await()?.let { id ->
-                try {
-                    return await(id, request.episode)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Exception) {
-                    // A different episode than the one asked for, or expired / failed: start fresh.
-                }
-            }
-        }
-        val body = body(request)
+    suspend fun resolve(request: PlaybackRequest, automaticLibrarySelection: Boolean, expected: Long): PrequeueStatus {
+        requirePlaybackContext(expected)
+        val currentProfile = profile()
+        // Warm IDs remain reachable for reports even after their policy fingerprint was
+        // retired. Re-POST the current request so the server, not a by-ID GET, decides reuse.
+        warmed?.takeIf { it.context == expected && it.profile == currentProfile && it.request.title.titleId == request.title.titleId }
+            ?.prequeue = null
+        val body = prequeueRequestBody(request, automaticLibrarySelection, currentProfile, client())
         return try {
-            await(ApiClient.startPrequeue(body).prequeueId)
-        } catch (e: ApiError) {
-            // Dropped on the server mid-resolve: ask once more; the server returns whichever
-            // entry now holds this title (an in-flight one is reused, not restarted).
-            if (!isGone(e)) throw e
-            AppLog.w("Prequeue", "prequeue gone on the server; restarting once")
-            await(ApiClient.startPrequeue(body).prequeueId)
+            await(start(body, expected), request.episode, automaticLibrarySelection, expected)
+        } catch (error: ApiError) {
+            if (!isGone(error)) throw error
+            requirePlaybackContext(expected)
+            await(start(body, expected), request.episode, automaticLibrarySelection, expected)
         }
     }
 
-    private fun body(request: PlaybackRequest): JsonObject = buildJsonObject {
-        val t = request.title
-        put("titleId", t.titleId)
-        put("titleName", t.name)
-        put("mediaType", if (t.isMovie) "movie" else "series")
-        put("userId", ApiClient.profileId)
-        put("clientId", Config.clientId)
-        put("reason", "details")
-        put("skipHLS", true)
-        t.imdbId?.let { put("imdbId", it) }
-        t.tmdbId?.let { put("tmdbId", it) }
-        t.tvdbId?.let { put("tvdbId", it) }
-        t.year?.let { put("year", it) }
-        request.episode?.let { ep ->
-            put("seasonNumber", ep.season)
-            put("episodeNumber", ep.episode)
-            ep.absolute?.takeIf { it > 0 }?.let { put("absoluteEpisodeNumber", it) }
-            ep.numbering?.let { n ->
-                put("numbering", buildJsonObject {
-                    put("seriesId", n.seriesId)
-                    n.ordering?.takeIf { it.isNotEmpty() }?.let { put("ordering", it) }
-                })
-            }
-        }
-        request.startPosition?.let { put("startOffset", it) }
-    }
-
-    /**
-     * Polls a prequeue until its stream is ready. With `episode`, gives up straight away if
-     * the prequeue is resolving a different one.
-     */
-    private suspend fun await(id: String, episode: PlaybackRequest.EpisodeInfo? = null): PrequeueStatus {
-        val deadline = System.currentTimeMillis() + 180_000
-        while (System.currentTimeMillis() < deadline) {
-            val status = ApiClient.prequeueStatus(id)
-            if (episode != null && (status.targetEpisode?.seasonNumber != episode.season ||
-                    status.targetEpisode.episodeNumber != episode.episode)) {
-                throw ApiError.NotReady("Prequeue is for a different episode")
-            }
-            when (status.status) {
+    private suspend fun await(id: String, episode: PlaybackRequest.EpisodeInfo?, automatic: Boolean, expected: Long): PrequeueStatus {
+        val deadline = now() + 180_000
+        while (now() < deadline) {
+            requirePlaybackContext(expected)
+            val reply = status(id, expected)
+            requirePlaybackContext(expected)
+            if (reply.automaticLibrarySelection != automatic) throw ApiError.NotReady("Prequeue uses a different source policy")
+            when (reply.status) {
                 "ready" -> {
-                    if (status.streamPath.isNullOrEmpty()) throw ApiError.NotReady("Stream resolved without a path")
-                    return status
+                    if (!prequeueMatchesEpisode(reply, episode, automatic)) throw ApiError.NotReady("Prequeue is for a different episode")
+                    if (reply.streamPath.isNullOrEmpty()) throw ApiError.NotReady("Stream resolved without a path")
+                    return reply
                 }
-                "failed", "expired" -> throw ApiError.NotReady(status.error ?: "No playable stream found")
-                else -> describe(status).let { (s, d) -> progress(s, d) }
+                "failed", "expired" -> throw ApiError.NotReady(reply.error ?: "No playable stream found")
+                else -> describe(reply).let { (stage, detail) -> progress(stage, detail) }
             }
             delay(750)
         }
         throw ApiError.NotReady("Timed out waiting for a stream")
     }
 
-    /** A friendly line for the prequeue's stage, plus the release being tried when there is one. */
-    private fun describe(s: PrequeueStatus): Pair<String, String?> {
-        val d = s.progressDetail?.ifEmpty { null }
-        return when (s.progressStage ?: s.status) {
+    private fun describe(reply: PrequeueStatus): Pair<String, String?> {
+        val detail = reply.progressDetail?.ifEmpty { null }
+        return when (reply.progressStage ?: reply.status) {
             "queued", "metadata" -> "Starting…" to null
+            "local_fallback" -> "Checking library…" to null
             "searching" -> "Searching…" to null
             "ranking", "preparing_candidates" -> "Ranking…" to null
-            "resolving_candidate", "waiting_provider" -> "Fetching…" to d
-            "validating_candidate" -> "Checking…" to d
+            "resolving_candidate", "waiting_provider" -> "Fetching…" to detail
+            "validating_candidate" -> "Checking…" to detail
             "analyzing_media", "probing", "selecting_tracks" -> "Inspecting…" to null
             "preparing_playback" -> "Preparing…" to null
             else -> "Searching…" to null
         }
     }
+}
+
+internal fun prequeueMatchesEpisode(reply: PrequeueStatus, episode: PlaybackRequest.EpisodeInfo?, automatic: Boolean): Boolean {
+    if (episode == null) return true
+    val actual = reply.targetEpisode ?: return false
+    if (actual.seasonNumber != episode.season || actual.episodeNumber != episode.episode) return false
+    if (!automatic) return true
+    if (!episode.metadataEpisodeId.isNullOrEmpty() && actual.episodeId != episode.metadataEpisodeId) return false
+    episode.numbering?.let { expected ->
+        val owner = actual.numbering ?: return false
+        if (owner.seriesId != expected.seriesId) return false
+        fun ordering(value: String?) = value?.trim()?.lowercase().orEmpty().let { if (it in setOf("", "aired", "default")) "official" else it }
+        if (ordering(owner.ordering) != ordering(expected.ordering)) return false
+    }
+    return true
+}
+
+/** The metadata leaf is distinct from progress identity; false leaves the legacy body unchanged. */
+internal fun prequeueRequestBody(request: PlaybackRequest, automatic: Boolean, profile: String, client: String): JsonObject = buildJsonObject {
+    val title = request.title
+    put("titleId", title.titleId)
+    put("titleName", title.name)
+    put("mediaType", if (title.isMovie) "movie" else "series")
+    put("userId", profile)
+    put("clientId", client)
+    put("reason", "details")
+    put("skipHLS", true)
+    if (automatic) put("automaticLibrarySelection", true)
+    title.imdbId?.let { put("imdbId", it) }
+    title.tmdbId?.let { put("tmdbId", it) }
+    title.tvdbId?.let { put("tvdbId", it) }
+    title.year?.let { put("year", it) }
+    request.episode?.let { episode ->
+        put("seasonNumber", episode.season)
+        put("episodeNumber", episode.episode)
+        episode.absolute?.takeIf { it > 0 }?.let { put("absoluteEpisodeNumber", it) }
+        if (automatic) episode.metadataEpisodeId?.takeIf { it.isNotEmpty() }?.let { put("episodeId", it) }
+        episode.numbering?.let { numbering ->
+            put("numbering", buildJsonObject {
+                put("seriesId", numbering.seriesId)
+                numbering.ordering?.takeIf { it.isNotEmpty() }?.let { put("ordering", it) }
+            })
+        }
+    }
+    request.startPosition?.let { put("startOffset", it) }
 }

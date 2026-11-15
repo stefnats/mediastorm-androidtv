@@ -3,13 +3,18 @@ package com.strmr.tv.player
 import com.strmr.tv.api.PrequeueStatus
 import com.strmr.tv.api.ProbedSubtitleTrack
 import com.strmr.tv.api.TrackProbe
+import com.strmr.tv.library.ProfileDataContext
 
 // The details page's Audio & Subtitles button: track picks for the stream the page's prequeue
 // resolved (the Expo details page's prequeue track pills, `usePlayback` `trackOverrideAudio` /
 // `trackOverrideSubtitle`), shown in manual selection's track panel.
 
 /** The prequeue started as a details page opened ([PlaybackCoordinator.prewarm]), as its button shows it. */
-data class WarmPrequeue(val titleId: String, val profile: String, val phase: Phase, val status: PrequeueStatus? = null) {
+data class WarmPrequeue(
+    val titleId: String, val profile: String, val phase: Phase, val status: PrequeueStatus? = null,
+    val context: Long = ProfileDataContext.current,
+    val automaticLibrarySelection: Boolean = false,
+) {
     /** Unavailable: failed, expired, timed out, or prequeue is off for the profile. */
     enum class Phase { RESOLVING, READY, UNAVAILABLE }
 

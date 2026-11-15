@@ -70,7 +70,7 @@ internal suspend fun resolveContentLocalPreference(target: DetailsTarget, episod
     null
 }
 
-/** The catalog Play path shares this decision with both native applications. */
+/** Legacy selection helper; capable servers own automatic ordering and eligibility. */
 internal suspend fun catalogPlayLibrary(
     target: DetailsTarget,
     episode: Episode?,

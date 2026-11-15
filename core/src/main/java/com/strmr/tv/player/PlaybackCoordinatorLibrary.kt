@@ -4,6 +4,7 @@ import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.LibraryPlaybackInfo
 import com.strmr.tv.api.libraryPlayback
 import com.strmr.tv.library.LibraryVersion
+import com.strmr.tv.library.ProfileDataContext
 
 /**
  * Plays a library copy (local, Plex or Jellyfin) instead of searching: the server names the file's
@@ -11,8 +12,10 @@ import com.strmr.tv.library.LibraryVersion
  * profile's languages choose the audio and subtitles once the player has read them. `known` is
  * the file's playback info when the caller already fetched it.
  */
-fun PlaybackCoordinator.playLibrary(request: PlaybackRequest, version: LibraryVersion, known: LibraryPlaybackInfo? = null) =
-    begin(request.copy(libraryVersion = version), "Preparing…", resolve = {
-        val playback = known ?: ApiClient.libraryPlayback(version.id)
+fun PlaybackCoordinator.playLibrary(request: PlaybackRequest, version: LibraryVersion, known: LibraryPlaybackInfo? = null) {
+    val expected = ProfileDataContext.current
+    begin(request.copy(libraryVersion = version), "Preparing…", expectedContext = expected, resolve = {
+        val playback = known ?: ApiClient.libraryPlayback(version.id, expected)
         ResolvedStream(playback.streamPath, null, version.releaseName, pickTracksOnDevice = true)
     })
+}

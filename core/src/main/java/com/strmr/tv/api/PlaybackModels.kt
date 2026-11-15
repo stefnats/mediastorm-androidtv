@@ -146,9 +146,18 @@ data class PrequeueStatus(
     val dolbyVisionProfile: String? = null,
     /** The server's probe saw an HDR10 (PQ) video stream. */
     val hasHdr10: Boolean = false,
+    /** Echoed only for the opt-in automatic library preparation mode. */
+    val automaticLibrarySelection: Boolean = false,
+    val libraryItemId: String? = null,
+    val librarySourceType: String? = null,
 ) {
     @Serializable
-    data class TargetEpisode(val seasonNumber: Int, val episodeNumber: Int)
+    data class TargetEpisode(
+        val seasonNumber: Int,
+        val episodeNumber: Int,
+        val episodeId: String? = null,
+        val numbering: EpisodeNumbering? = null,
+    )
 
     @Serializable
     data class SelectedResult(

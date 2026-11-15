@@ -23,8 +23,8 @@ data class PlaybackRequest(
     /** The aired episodes after [episode], in order; the player offers the first as Up Next. */
     val following: List<EpisodeInfo> = emptyList(),
     /**
-     * The title's copies in the profile's libraries: Play and Up Next play a movie's or an
-     * episode's copy when it has one, without the prequeue.
+     * The title's copies in the profile's libraries, retained for deliberate selection and
+     * the legacy server path. Capable servers validate automatic candidates themselves.
      */
     val library: LibraryVersions? = null,
     /** The copy this playback uses (picked in the Versions list, or set as it starts). */
@@ -41,7 +41,11 @@ data class PlaybackRequest(
     val speed: Float = 1f,
     /** Catalogue ordering contains this episode; an empty local folder is not evidence of a series ending. */
     val episodeOrderKnown: Boolean = false,
+    /** Intent survives Up Next; a resolved preference or server capability never does. */
+    val sourceSelection: SourceSelection = SourceSelection.AUTOMATIC,
 ) {
+    enum class SourceSelection { AUTOMATIC, SEARCH_ONLY }
+
     data class EpisodeInfo(
         val season: Int,
         val episode: Int,
@@ -53,6 +57,8 @@ data class PlaybackRequest(
         val overview: String? = null,
         /** The ordering [season] / [episode] are in (the details page's episode order). */
         val numbering: EpisodeNumbering? = null,
+        /** Actual metadata leaf ID, distinct from [itemId] used for watch progress. */
+        val metadataEpisodeId: String? = null,
     ) {
         val code: String get() = episodeCode(season, episode)
     }
@@ -81,15 +87,19 @@ data class PlaybackRequest(
 
     /** Identifies what a prequeue resolves: the title, the episode (in its ordering) and the start point. */
     val prequeueKey: String
-        get() = listOf(title.titleId, episode?.code ?: "", episode?.numbering?.ordering ?: "",
-                       startPosition?.toLong()?.toString() ?: "").joinToString("|")
+        get() = listOf(title.titleId, episode?.code.orEmpty(), episode?.numbering?.seriesId.orEmpty(),
+                       episode?.numbering?.ordering.orEmpty(), episode?.metadataEpisodeId.orEmpty(),
+                       startPosition?.toString().orEmpty(), sourceSelection.name).joinToString("|")
+
+    internal fun preparationKey(automaticLibrarySelection: Boolean): String =
+        "$prequeueKey|automaticLibrarySelection=$automaticLibrarySelection"
 
     /** The next episode from the start, its still leading the loading art; null when there is none. */
     val nextEpisode: PlaybackRequest?
         get() {
             val next = following.firstOrNull() ?: return null
             val art = listOfNotNull(next.imageUrl) + backdrops.filter { it != episode?.imageUrl && it != next.imageUrl }
-            // It plays its own library copy, if it has one.
+            // Re-resolve source policy for this episode; retain only the deliberate intent.
             return copy(episode = next, start = null, following = following.drop(1), backdrops = art, libraryVersion = null,
                         audioRecoveryCount = 0)
         }

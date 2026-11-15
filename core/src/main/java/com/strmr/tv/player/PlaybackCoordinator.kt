@@ -4,6 +4,7 @@ import android.content.Intent
 import com.strmr.tv.adaptive.AdaptiveThroughput
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.DetailsTarget
+import com.strmr.tv.api.PlaybackSettings
 import com.strmr.tv.api.PrequeueStatus
 import com.strmr.tv.api.SourceResult
 import com.strmr.tv.api.TrackSelection
@@ -69,42 +70,17 @@ object PlaybackCoordinator {
 
     private val scope = MainScope()
     private var resolveJob: Job? = null
-    private val prequeue = PrequeueResolver(scope) { s, d -> stage.value = s; detail.value = d }
+    private val prequeue = PrequeueResolver(scope, progress = { s, d -> stage.value = s; detail.value = d })
+    private val catalog = CatalogPlaybackResolver(prequeue::resolve)
     /** The details page's prequeue as it resolves, for its Audio & Subtitles button. */
     val warm: StateFlow<WarmPrequeue?> get() = prequeue.warm
 
-    /**
-     * Plays through the prequeue. [picks], made on details for the stream its prequeue resolved,
-     * replace the server's choice when Play resolves that same stream. A movie or episode with a
-     * library copy plays that instead ([playLibrary]).
-     */
-    fun play(request: PlaybackRequest, picks: PrequeuePick? = null) {
-        request.preferredLibraryVersion?.let { return playLibrary(request, it) }
-        playThroughPrequeue(request, picks)
+    /** Automatic catalog playback shares its selection with Up Next and prefetch. */
+    fun play(request: PlaybackRequest, picks: PrequeuePick? = null, chooseLegacyLibrary: (() -> Unit)? = null) {
+        val expected = ProfileDataContext.current
+        begin(request, "Searching…", expectedContext = expected,
+            resolveWithSettings = { settings -> catalog.resolve(request, settings, picks, expected, chooseLegacyLibrary) })
     }
-
-    private fun playThroughPrequeue(request: PlaybackRequest, picks: PrequeuePick?) = begin(request, "Searching…", resolve = {
-        val status = prequeue.resolve(request)
-        val subtitles = status.subtitleTracks.orEmpty()
-        val source = sourceHints(status)
-        // Another stream (another episode, or a re-resolve) takes the picks by intent.
-        val m = picks?.tracksFor(status)
-        if (picks != null && !picks.appliesTo(status)) {
-            AppLog.i("ManualTracks", "details picks carried to a different stream: ${picks.tracks.choice} -> ${m?.choice}")
-        }
-        when {
-            m == null || m.choice.isEmpty ->
-                ResolvedStream(status.streamPath!!, status.trackSelection, status.displayName, subtitles, source = source, prequeueId = status.prequeueId)
-            else -> {
-                val applied = ManualTracks.applied(status.trackSelection, m.choice, m.audio, m.subtitles)
-                AppLog.i("ManualTracks", "play prequeue with ${m.choice}: audio=${applied.audio?.streamIndex} " +
-                    "subtitle=${applied.subtitle?.streamIndex} mode=${applied.subtitleMode} (server audio=" +
-                    "${status.trackSelection?.audio?.streamIndex} subtitle=${status.trackSelection?.subtitle?.streamIndex})")
-                ResolvedStream(status.streamPath!!, applied, status.displayName, subtitles, manualTracks = true, source = source,
-                    prequeueId = status.prequeueId, explicitAudioLanguage = m.explicitAudioLanguage)
-            }
-        }
-    })
 
     /**
      * Plays a source picked by hand, bypassing the automatic prequeue. [manual] carries the
@@ -121,7 +97,7 @@ object PlaybackCoordinator {
         begin(request.copy(libraryVersion = null), "Preparing…", carried = carried, resolve = {
             if (prepared != null) {
                 return@begin ResolvedStream(requireNotNull(prepared.streamPath), prepared.trackSelection, prepared.displayName,
-                    prepared.subtitleTracks.orEmpty(), manualTracks = true, source = sourceHints(prepared), prequeueId = prepared.prequeueId)
+                    prepared.subtitleTracks.orEmpty(), manualTracks = true, source = prequeueSourceHints(prepared), prequeueId = prepared.prequeueId)
             }
             val (path, tracks) = resolved ?: ApiClient.resolveSource(source, request.title.titleId, request.startPosition)
             val hints = SourceHints(source.serviceType.ifEmpty { null }, indexer = source.indexer.ifEmpty { null },
@@ -246,6 +222,7 @@ object PlaybackCoordinator {
         liveChannel: LiveChannel? = null,
         liveLabel: String? = null,
         expectedContext: Long? = null,
+        resolveWithSettings: (suspend (PlaybackSettings?) -> ResolvedStream?)? = null,
         resolve: suspend () -> ResolvedStream = { error("no resolver") },
     ) {
         if (_resolving.value != null) return
@@ -264,18 +241,27 @@ object PlaybackCoordinator {
                                   retuneLive = live.takeIf { !growing }, liveChannel = liveChannel, sourceLabel = liveLabel)
                 } else {
                     val settings = async { runCatching { ApiClient.playbackSettings() }.getOrNull() }
-                    val r = resolve()
-                    if (streamClaim?.invoke(request, r) == true) {
+                    val r = if (resolveWithSettings != null) resolveWithSettings(settings.await()) else resolve()
+                    if (r == null) {
+                        settings.cancel()
+                        if (_resolving.value === request) _resolving.value = null
+                        return@launch
+                    }
+                    expectedContext?.let(ProfileDataContext::requireCurrent)
+                    val selectedRequest = r.libraryVersion?.let { request.copy(libraryVersion = it) } ?: request
+                    val claimed = if (expectedContext == null) streamClaim?.invoke(selectedRequest, r)
+                        else ApiClient.inContext(expectedContext) { streamClaim?.invoke(selectedRequest, r) }
+                    if (claimed == true) {
                         settings.cancel()
                         AppLog.i("Playback", "resolved stream claimed (cast)")
                         playerStarted()
                         return@launch
                     }
-                    PlayerSession(request, ApiClient.streamUrl(r.path, request.streamMetadata(r.path) + StreamInfo.trackerQuery(r.path, r.source)), r.tracks, streamPath = r.path,
+                    PlayerSession(selectedRequest, ApiClient.streamUrl(r.path, selectedRequest.streamMetadata(r.path) + StreamInfo.trackerQuery(r.path, r.source)), r.tracks, streamPath = r.path,
                                   releaseName = r.releaseName?.ifEmpty { null } ?: releaseFileName(r.path), subtitleStreams = r.subtitleStreams,
                                   playback = settings.await(), manualTracks = r.manualTracks, carried = carried, prequeueId = r.prequeueId, explicitAudioLanguage = r.explicitAudioLanguage,
                                   pickTracksOnDevice = r.pickTracksOnDevice,
-                                  sourceLabel = StreamInfo.source(r.path, r.source, request.libraryVersion?.origin),
+                                  sourceLabel = StreamInfo.source(r.path, r.source, selectedRequest.libraryVersion?.origin),
                                   sourceDolbyVision = r.source?.dolbyVisionProfile, sourceHdr10 = r.source?.hdr10 == true)
                 }
                 fun publish() {
@@ -306,16 +292,6 @@ object PlaybackCoordinator {
         val name = runCatching { java.net.URLDecoder.decode(path.substringBefore('?').substringAfterLast('/'), "UTF-8") }.getOrNull()
         return name?.takeIf { Regex("\\.(mkv|mp4|m4v|avi|ts|mov|webm)$", RegexOption.IGNORE_CASE).containsMatchIn(it) }
     }
-
-    /** What the prequeue says about the source it resolved: service type, provider, indexer. */
-    private fun sourceHints(s: PrequeueStatus) = SourceHints(
-        serviceType = s.serviceType?.ifEmpty { null } ?: s.selectedResult?.serviceType?.ifEmpty { null },
-        debridProvider = s.debridProvider?.ifEmpty { null },
-        indexer = s.selectedResult?.indexer?.ifEmpty { null },
-        attributes = s.selectedResult?.attributes.orEmpty() + s.resultAttributes.orEmpty(),
-        dolbyVisionProfile = s.dolbyVisionProfile?.ifEmpty { null },
-        hdr10 = s.hasHdr10,
-    )
 
     /** The player is on screen: the stream-start screen hands over to it. */
     fun playerStarted() {

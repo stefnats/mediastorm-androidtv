@@ -297,9 +297,8 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
         }
 
     /**
-     * Play, through the library when it has the movie or episode: one copy plays, several are
-     * listed to pick from. A press while the lookup is still running waits for it, so a library
-     * title never starts a search by mistake.
+     * Normal Play uses the coordinator's source policy. The legacy server path can still
+     * offer a library picker; explicit Versions and library pages remain deliberate choices.
      */
     fun play(episode: Episode?, start: StartPoint?, picks: PrequeuePick? = null) {
         if (playJob?.isActive == true || dataContext != ProfileDataContext.current) return
@@ -307,9 +306,10 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
             try {
                 ApiClient.inContext(dataContext) {}
                 val versions = if (libraryLookup.isCompleted) library else withTimeoutOrNull(8_000) { libraryLookup.await() }
-                val selectedLibrary = catalogPlayLibrary(target, episode, versions, dataContext)
                 ApiClient.inContext(dataContext) {
-                    playOrAsk(episode, start, picks, selectedLibrary)
+                    PlaybackCoordinator.play(request(episode, start).copy(library = versions), picks) {
+                        ApiClient.inContext(dataContext) { playChoice = PlayChoice(episode, start, picks) }
+                    }
                 }
             } catch (_: TimeoutCancellationException) {
                 if (dataContext == ProfileDataContext.current) AppToast.show("Source preferences did not respond. Try again.")
@@ -320,19 +320,9 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
         }
     }
 
-    private fun playOrAsk(episode: Episode?, start: StartPoint?, picks: PrequeuePick?, versions: LibraryVersions?) {
-        val copies = if (episode == null && !target.isMovie) emptyList()
-                     else versions?.versions(episode?.seasonNumber, episode?.episodeNumber).orEmpty()
-        if (copies.size > 1) {
-            playChoice = PlayChoice(episode, start, picks)
-            return
-        }
-        PlaybackCoordinator.play(request(episode, start).copy(library = versions), picks)
-    }
-
-    /** Stream Instead, from the list Play opened: the prequeue, with no library copy for this title or the episodes after it. */
+    /** Stream Instead keeps search intent for this title and the episodes after it. */
     fun streamInstead(choice: PlayChoice) =
-        PlaybackCoordinator.play(request(choice.episode, choice.start).copy(library = null), choice.picks)
+        PlaybackCoordinator.play(request(choice.episode, choice.start).copy(sourceSelection = PlaybackRequest.SourceSelection.SEARCH_ONLY), choice.picks)
 
     /** A copy picked in Versions. */
     fun playVersion(version: LibraryVersion, episode: Episode?, start: StartPoint?) =
@@ -358,7 +348,7 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
     }
 
     private fun episodeInfo(e: Episode) = PlaybackRequest.EpisodeInfo(
-        e.seasonNumber, e.episodeNumber, e.absoluteEpisodeNumber, e.name, e.itemId, e.image?.url, e.overview, e.numbering,
+        e.seasonNumber, e.episodeNumber, e.absoluteEpisodeNumber, e.name, e.itemId, e.image?.url, e.overview, e.numbering, e.id,
     )
 
     /** The aired regular-season episodes after `after`, for Up Next. */

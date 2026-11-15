@@ -88,4 +88,6 @@ data class ResolvedStream(
     val prequeueId: String? = null,
     /** Audio explicitly chosen on details/manual selection, saved before any recovery request. */
     val explicitAudioLanguage: String? = null,
+    /** A legacy or deliberate library copy chosen while resolving this request. */
+    val libraryVersion: com.strmr.tv.library.LibraryVersion? = null,
 )

@@ -54,16 +54,31 @@ internal fun PlayerController.rememberAudioLanguage(raw: String?) {
     if (session.isLive || !session.reportsProgress || session.localFile) return
     val previous = audioPreferenceSave
     val context = ServerReleaseReportGateway()
+    val expected = com.strmr.tv.library.ProfileDataContext.current
     audioPreferenceSave = scope.launch {
         previous?.join()
         if (!context.isCurrent()) return@launch
         try {
-            com.strmr.tv.api.ApiClient.saveContentAudioLanguage(request.title.titleId, if (request.isEpisode) "series" else "movie", language)
-            audioPreferenceFailed = false
+            savePlaybackAudioLanguage(request.title.titleId, if (request.isEpisode) "series" else "movie", language, expected)
+            com.strmr.tv.api.ApiClient.inContext(expected) { audioPreferenceFailed = false }
         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (e: Exception) {
             audioPreferenceFailed = true
             notice.value = "Audio changed, but its language could not be saved. Select it again before reporting."
         }
     }
+}
+
+/** Only a confirmed same-context save retires previews, never the active playback envelope. */
+internal suspend fun savePlaybackAudioLanguage(
+    titleId: String, contentType: String, language: String, expected: Long,
+    save: suspend (String, String, String, Long) -> Unit = { title, type, value, context ->
+        com.strmr.tv.api.ApiClient.saveContentAudioLanguage(title, type, value, context)
+    },
+    invalidate: () -> Unit = PlaybackCoordinator::invalidateWarmSources,
+) {
+    requirePlaybackContext(expected)
+    save(titleId, contentType, language, expected)
+    requirePlaybackContext(expected)
+    com.strmr.tv.api.ApiClient.inContext(expected) { invalidate() }
 }

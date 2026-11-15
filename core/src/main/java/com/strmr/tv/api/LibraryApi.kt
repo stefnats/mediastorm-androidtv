@@ -1,5 +1,6 @@
 package com.strmr.tv.api
 
+import com.strmr.tv.library.ProfileDataContext
 import com.strmr.tv.home.BrowseEntry
 import com.strmr.tv.home.BrowseOptions
 import com.strmr.tv.home.BrowsePage
@@ -64,10 +65,13 @@ suspend fun ApiClient.libraryMatches(target: DetailsTarget): List<LibraryMatch> 
  * One library file's stream path. The server first checks a local file can be played (422 when
  * it can't). `profileName` attributes the stream on the admin dashboard.
  */
-suspend fun ApiClient.libraryPlayback(itemId: String): LibraryPlaybackInfo {
-    val q = mutableMapOf("profileId" to profileId)
-    profileName?.takeIf { it.isNotEmpty() }?.let { q["profileName"] = it }
-    return send("GET", "/api/library/items/${segment(itemId)}/playback", q, timeoutMs = 60_000)
+suspend fun ApiClient.libraryPlayback(itemId: String, expectedContext: Long = ProfileDataContext.current): LibraryPlaybackInfo {
+    val query = inContext(expectedContext) {
+        mutableMapOf("profileId" to profileId).apply {
+            profileName?.takeIf { it.isNotEmpty() }?.let { put("profileName", it) }
+        }
+    }
+    return send("GET", "/api/library/items/${segment(itemId)}/playback", query, timeoutMs = 60_000, expectedContext = expectedContext)
 }
 
 /**
