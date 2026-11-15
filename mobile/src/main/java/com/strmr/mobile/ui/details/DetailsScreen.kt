@@ -58,7 +58,7 @@ import com.strmr.tv.ui.settings.SpoilerSettings
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DetailsScreen(target: DetailsTarget, autoplay: Boolean) {
+fun DetailsScreen(target: DetailsTarget, autoplay: Boolean, prewarmOnOpen: Boolean = true) {
     val scope = rememberCoroutineScope()
     val model = remember(target) { DetailsModel(target, scope) }
     val state = remember(model) { DetailsPageState(model) }
@@ -70,7 +70,7 @@ fun DetailsScreen(target: DetailsTarget, autoplay: Boolean) {
     val list = rememberLazyListState()
     val extras = DetailsActionContext(model, state.activeEpisode, state::playPrimary)
 
-    LaunchedEffect(model) { PlaybackCoordinator.prewarm(target) }
+    LaunchedEffect(model,prewarmOnOpen) { if(prewarmOnOpen) PlaybackCoordinator.prewarm(target) }
     LaunchedEffect(model) { model.loadLibrary() }
     LaunchedEffect(model) { if (!target.isMovie) SpoilerSettings.refresh() }
     DisposableEffect(trailer) { onDispose { trailer.release() } }

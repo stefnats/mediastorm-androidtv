@@ -1,5 +1,11 @@
 package com.strmr.tv.ui.details
 
+import com.strmr.tv.app.AppSession
+import com.strmr.tv.ui.reminders.ReminderTarget
+import com.strmr.tv.ui.reminders.ReminderDialog
+import com.strmr.tv.ui.reminders.reminderChoices
+import com.strmr.tv.ui.reminders.remindersAllowed
+
 import android.os.Build
 import androidx.annotation.OptIn
 import androidx.compose.animation.core.animateFloatAsState
@@ -81,6 +87,7 @@ private data class PendingVersion(val version: LibraryVersion, val episode: Epis
  */
 @Composable
 fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autoplay: Boolean = false) {
+    val reminderProfile by AppSession.profile.collectAsState()
     val scope = rememberCoroutineScope()
     val model = remember(target) { DetailsModel(target, scope) }
     val context = LocalContext.current
@@ -100,6 +107,7 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
     var customizingButtons by remember { mutableStateOf(false) }
     var episodeOrder by remember { mutableStateOf(false) }
     var localPreferenceScopes by remember { mutableStateOf<List<ContentLocalScope>?>(null) }
+    var reminderTarget by remember { mutableStateOf<ReminderTarget?>(null) }
     val navigator = com.strmr.tv.ui.LocalNavigator.current
     val actions = com.strmr.tv.library.TitleActions.changes
     // A long-press menu's bulk watch-state action opens the sheet once the seasons are in.
@@ -220,6 +228,7 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
                         onChooseVersion = { ep -> versionsFor = PickerTarget(ep) },
                         onToggleWatched = { ep -> scope.launch { model.toggleWatched(ep) } },
                         onSourcePreference = { ep -> localPreferenceScopes = contentLocalScopes(target, episode = ep).takeIf { it.isNotEmpty() } },
+                        onReminder = { ep -> reminderTarget = ReminderTarget(target,ep) },
                         modifier = Modifier.padding(top = 24.dp),
                     )
                 }
@@ -244,11 +253,14 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
         DetailsMoreMenu(target, scope, moved, order, onCustomize = { customizingButtons = true }, onHidden = { navigator.close() }, onDismiss = { more = false },
             sourcePreference = contentLocalScopes(target, model.currentSeason).takeIf { it.isNotEmpty() }?.let { targets ->
                 DialogChoice("Automatic source preference…") { localPreferenceScopes = targets }
+            }, reminder = ReminderTarget(target).takeIf { remindersAllowed(reminderProfile) && reminderChoices(it).isNotEmpty() }?.let { value ->
+                DialogChoice("Remind me…") { reminderTarget = value }
             })
     }
     localPreferenceScopes?.let { targets ->
         ContentLocalPreferenceDialog(targets, expectedContext = model.dataContext, onSaved = { model.sourcePreferenceChanged(); prequeueTracks.clear() }, onDismiss = { localPreferenceScopes = null })
     }
+    reminderTarget?.let { value -> ReminderDialog(value,model.dataContext,reloadTitle={model.reloadForReminder()},onDismiss={reminderTarget=null}) }
     if (episodeOrder) EpisodeOrderDialog(model, scope, onDismiss = { episodeOrder = false })
     if (customizingButtons) DetailsButtonsDialog(onDismiss = { customizingButtons = false })
     picker?.let { p ->

@@ -15,7 +15,7 @@ import kotlinx.serialization.json.put
  * call. [seasonType] asks for an episode ordering (the one just picked); without it the server
  * applies the profile's saved one.
  */
-suspend fun ApiClient.detailsBundle(t: DetailsTarget, seasonType: String? = null): DetailsBundle {
+suspend fun ApiClient.detailsBundle(t: DetailsTarget, seasonType: String? = null, expectedContext: Long? = null): DetailsBundle {
     val q = buildMap {
         put("type", if (t.isMovie) "movie" else "series")
         seasonType?.takeIf { it.isNotEmpty() }?.let { put("seasonType", it) }
@@ -26,7 +26,8 @@ suspend fun ApiClient.detailsBundle(t: DetailsTarget, seasonType: String? = null
         t.tvdbId?.let { put("tvdbId", it) }
         t.year?.let { put("year", it.toString()) }
     }
-    return send("GET", "$profilePath/details-bundle", q)
+    val path = if(expectedContext==null) "$profilePath/details-bundle" else inContext(expectedContext) {"$profilePath/details-bundle"}
+    return send("GET", path, q, expectedContext=expectedContext)
 }
 
 /**

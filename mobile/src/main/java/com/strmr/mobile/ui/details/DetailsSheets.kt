@@ -1,5 +1,11 @@
 package com.strmr.mobile.ui.details
 
+import com.strmr.tv.app.AppSession
+import com.strmr.tv.ui.reminders.ReminderTarget
+import com.strmr.tv.ui.reminders.reminderChoices
+import com.strmr.tv.ui.reminders.remindersAllowed
+import androidx.compose.runtime.collectAsState
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
@@ -54,6 +60,7 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: CoroutineScope, extras: DetailsActionContext, onHidden: () -> Unit) {
+    val reminderProfile by AppSession.profile.collectAsState()
     val model = state.model
     val target = model.target
     val rate = com.strmr.tv.ui.rememberRatingAction(target)
@@ -63,6 +70,7 @@ fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: Corout
         inContinueWatching = runCatching { ApiClient.continueWatching() }.getOrNull().orEmpty().any { it.isTitle(target) }
     }
     val actions = buildList {
+        if(remindersAllowed(reminderProfile) && reminderChoices(ReminderTarget(target)).isNotEmpty()) add(SheetAction("Remind me…", Icons.Outlined.Star) {state.reminderTarget=ReminderTarget(target)})
         if (!target.fromLibrary) add(SheetAction("Rate for this profile…", Icons.Outlined.Star) { rate() })
         contentLocalScopes(target, model.currentSeason).takeIf { it.isNotEmpty() }?.let { targets ->
             add(SheetAction("Automatic source preference…", Icons.Outlined.Storage) { state.localPreferenceScopes = targets })
@@ -104,6 +112,7 @@ fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: Corout
  */
 @Composable
 fun EpisodeMenuSheet(state: DetailsPageState, episode: Episode, scope: CoroutineScope, extras: DetailsActionContext) {
+    val reminderProfile by AppSession.profile.collectAsState()
     val model = state.model
     val sourceHint = rememberSourceHint(state.episodeSourceHint)
     val resumeAt = model.resumePoint(episode)
@@ -113,6 +122,7 @@ fun EpisodeMenuSheet(state: DetailsPageState, episode: Episode, scope: Coroutine
         if (resumeAt != null) add(SheetAction("Start Over", Icons.Outlined.Replay) { state.play(episode, null) })
         if (model.libraryVersions(episode).isNotEmpty()) add(SheetAction("Choose Version", Icons.Outlined.Storage) { state.versionsFor = EpisodeTarget(episode) })
         add(SheetAction("Choose Source", Icons.Outlined.Search) { state.sourcesFor = EpisodeTarget(episode) })
+        if(remindersAllowed(reminderProfile) && reminderChoices(ReminderTarget(model.target,episode)).isNotEmpty()) add(SheetAction("Remind me…", Icons.Outlined.Star) {state.reminderTarget=ReminderTarget(model.target,episode)})
         contentLocalScopes(model.target, episode=episode).takeIf { it.isNotEmpty() }?.let { targets ->
             add(SheetAction("Automatic source preference…", Icons.Outlined.Storage) { state.localPreferenceScopes = targets })
         }

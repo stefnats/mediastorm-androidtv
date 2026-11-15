@@ -52,7 +52,7 @@ fun SectionRoot(section: Section, more: List<Section>, asPage: Boolean = false) 
 @Composable
 fun RouteScreen(route: Route) {
     when (route) {
-        is Route.Details -> DetailsScreen(route.target, route.autoplay)
+        is Route.Details -> DetailsScreen(route.target, route.autoplay, route.prewarmOnOpen)
         is Route.Grid -> ListGridScreen(route.list, route.query)
         is Route.Person -> PersonScreen(route.person)
         is Route.LibraryShow -> LibraryShowScreen(route.entry)
@@ -65,5 +65,6 @@ fun RouteScreen(route: Route) {
         is Route.SettingsPage -> SettingsPageScreen(route.key, route.title)
         is Route.RecordingDetail -> RecordingDetailScreen(route.id)
         Route.RecordingRules -> RecordingRulesScreen()
+        Route.Reminders -> com.strmr.mobile.ui.reminders.RemindersScreen()
     }
 }

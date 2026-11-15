@@ -8,6 +8,7 @@ import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.ApiError
 import com.strmr.tv.api.CastMember
 import com.strmr.tv.api.DetailsTarget
+import com.strmr.tv.api.DetailsBundle
 import com.strmr.tv.api.Episode
 import com.strmr.tv.api.EpisodeRef
 import com.strmr.tv.api.ResumeState
@@ -30,6 +31,8 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import com.strmr.tv.ui.AppToast
 import com.strmr.tv.library.LibraryVersion
 import com.strmr.tv.library.LibraryVersions
@@ -147,32 +150,49 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
     suspend fun load() {
         try {
             val bundle = ApiClient.detailsBundle(target, pickedOrdering)
-            if (target.isMovie) {
-                title = bundle.movieDetails ?: throw ApiError.NotReady("Details unavailable")
-            } else {
-                val details = bundle.seriesDetails ?: throw ApiError.NotReady("Details unavailable")
-                title = details.title
-                seasons = details.seasons
-                orderings = details.availableOrderings
-                activeOrdering = details.activeOrdering
-                upNext = bundle.upNextEpisode
-                primaryEpisode = findPrimaryEpisode(details.seasons, bundle.upNextEpisode)
-                privacyEpisode = EpisodePrivacy.currentEpisode(details.seasons, bundle.upNextEpisode)
-                if (selectedSeason == null) selectedSeason = primaryEpisode?.seasonNumber
-            }
-            resume = bundle.resume
-            trailers = bundle.trailers
-            serverInWatchlist = bundle.inWatchlist
-            movieWatched = bundle.watched
-            similar = bundle.similar.orEmpty().distinctBy { it.id }
-            watchedOverrides.clear()
-            loadError = null
+            applyBundle(bundle)
         } catch (e: Exception) {
             if (title == null) loadError = e.message
         }
         title?.collection?.let { c ->
             if (collectionMovies.isEmpty()) collectionMovies = runCatching { ApiClient.collectionMovies(c.id) }.getOrDefault(emptyList()).distinctBy { it.id }
         }
+    }
+
+    /** A reminder recovery must prove that fresh page metadata was read successfully. */
+    suspend fun reloadForReminder() = reloadForReminder { expected ->
+        ApiClient.detailsBundle(target,pickedOrdering,expectedContext=expected)
+    }
+
+    internal suspend fun reloadForReminder(fetch: suspend (Long) -> DetailsBundle) {
+        val callerContext=currentCoroutineContext()
+        callerContext.ensureActive()
+        ApiClient.inContext(dataContext) {}
+        val bundle=fetch(dataContext)
+        ApiClient.inContext(dataContext) {callerContext.ensureActive();applyBundle(bundle)}
+    }
+
+    private fun applyBundle(bundle: DetailsBundle) {
+        if (target.isMovie) {
+            title = bundle.movieDetails ?: throw ApiError.NotReady("Details unavailable")
+        } else {
+            val details = bundle.seriesDetails ?: throw ApiError.NotReady("Details unavailable")
+            title = details.title
+            seasons = details.seasons
+            orderings = details.availableOrderings
+            activeOrdering = details.activeOrdering
+            upNext = bundle.upNextEpisode
+            primaryEpisode = findPrimaryEpisode(details.seasons, bundle.upNextEpisode)
+            privacyEpisode = EpisodePrivacy.currentEpisode(details.seasons, bundle.upNextEpisode)
+            if (selectedSeason == null) selectedSeason = primaryEpisode?.seasonNumber
+        }
+        resume = bundle.resume
+        trailers = bundle.trailers
+        serverInWatchlist = bundle.inWatchlist
+        movieWatched = bundle.watched
+        similar = bundle.similar.orEmpty().distinctBy { it.id }
+        watchedOverrides.clear()
+        loadError = null
     }
 
     /** Only series with more than one ordering offer the choice. */

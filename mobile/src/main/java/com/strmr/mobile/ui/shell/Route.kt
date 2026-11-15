@@ -7,7 +7,7 @@ import com.strmr.tv.home.BrowseList
 
 /** A page pushed over a section's root, in that section's own back stack. */
 sealed interface Route {
-    data class Details(val target: DetailsTarget, val autoplay: Boolean = false) : Route
+    data class Details(val target: DetailsTarget, val autoplay: Boolean = false, val prewarmOnOpen: Boolean = true) : Route
     data class Grid(val list: BrowseList, val query: Map<String, String> = emptyMap()) : Route
     data class Person(val person: PersonRef) : Route
     data class LibraryShow(val entry: LibraryEntry) : Route
@@ -22,4 +22,5 @@ sealed interface Route {
     data class SettingsPage(val key: String, val title: String) : Route
     data class RecordingDetail(val id: String) : Route
     data object RecordingRules : Route
+    data object Reminders : Route
 }

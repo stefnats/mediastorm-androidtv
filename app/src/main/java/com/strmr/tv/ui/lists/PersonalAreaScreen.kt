@@ -69,6 +69,9 @@ fun PersonalAreaScreen() {
             }
         }
         item("personal") { TileRow("Continue and Saved", PersonalArea.tiles(watching, count, preferenceRevision)) }
+        item("reminders") {
+            OutlinedButton(onClick = { navigator.open(com.strmr.tv.ui.Page.Reminders) }, modifier = Modifier.padding(horizontal = ContentMargin)) { Text("Reminders & Inbox") }
+        }
         item("your-lists") {
             TileRow("Your Lists", PersonalArea.ownLists(lists)) { naming = true }
         }

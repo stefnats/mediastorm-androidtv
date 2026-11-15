@@ -50,6 +50,7 @@ sealed interface Page {
     data object SubtitleStyle : Page
     /** Live › More › Recordings (Expo's Live drawer entry); also a menu entry when Settings › Menu shows it. */
     data object Recordings : Page
+    data object Reminders : Page
     /** A Sports hub game's page. */
     data class SportsGame(val id: String) : Page
     /** A race weekend's page, open on [sessionId] (null: the weekend's default session). */
@@ -133,6 +134,7 @@ fun PageStack(content: @Composable () -> Unit) {
                     Page.TabOrder -> TabOrderSettings()
                     Page.SubtitleStyle -> SubtitleSettings()
                     Page.Recordings -> RecordingsScreen(asPage = true)
+                    Page.Reminders -> com.strmr.tv.ui.reminders.RemindersScreen()
                     is Page.SportsGame -> SportsGameScreen(page.id)
                     is Page.SportsRace -> SportsRaceScreen(page.weekendId, page.sessionId)
                     is Page.SportsCycling -> SportsCyclingScreen(page.raceId, page.stageId)

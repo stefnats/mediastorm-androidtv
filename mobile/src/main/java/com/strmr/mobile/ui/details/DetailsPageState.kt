@@ -1,5 +1,7 @@
 package com.strmr.mobile.ui.details
 
+import com.strmr.tv.ui.reminders.ReminderTarget
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -37,6 +39,7 @@ class DetailsPageState(val model: DetailsModel) {
     var episodeSourceHint by mutableStateOf<com.strmr.tv.api.SourceAvailability?>(null)
     var episodeMenu by mutableStateOf<Episode?>(null)
     var localPreferenceScopes by mutableStateOf<List<ContentLocalScope>?>(null)
+    var reminderTarget by mutableStateOf<ReminderTarget?>(null)
     var more by mutableStateOf(false)
     var watchState by mutableStateOf(false)
     var episodeOrder by mutableStateOf(false)

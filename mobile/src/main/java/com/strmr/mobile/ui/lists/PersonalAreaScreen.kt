@@ -66,6 +66,9 @@ fun PersonalAreaScreen(asPage: Boolean) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
             }
             item("personal") { TileRow("Continue and Saved", PersonalArea.tiles(watching, count, preferenceRevision)) }
+            item("reminders") {
+                TextButton(onClick = { navigator.push(com.strmr.mobile.ui.shell.Route.Reminders) }, modifier = Modifier.padding(horizontal = 16.dp)) { Text("Reminders & Inbox") }
+            }
             item("your-lists") { TileRow("Your Lists", PersonalArea.ownLists(lists)) { naming = true } }
             if (!refreshing && (failed || lists == null || watching == null || WatchlistStore.loadError != null)) item("retry") {
                 Text("Some saved items could not be loaded. Select Refresh to try again.", modifier = Modifier.padding(horizontal = 16.dp))

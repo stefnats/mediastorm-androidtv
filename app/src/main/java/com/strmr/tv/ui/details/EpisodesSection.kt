@@ -1,5 +1,11 @@
 package com.strmr.tv.ui.details
 
+import com.strmr.tv.app.AppSession
+import com.strmr.tv.ui.reminders.ReminderTarget
+import com.strmr.tv.ui.reminders.reminderChoices
+import com.strmr.tv.ui.reminders.remindersAllowed
+import androidx.compose.runtime.collectAsState
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -92,7 +98,9 @@ fun EpisodesSection(
     onToggleWatched: (Episode) -> Unit,
     modifier: Modifier = Modifier,
     onSourcePreference: (Episode) -> Unit = {},
+    onReminder: (Episode) -> Unit = {},
 ) {
+    val reminderProfile by AppSession.profile.collectAsState()
     val scope = rememberCoroutineScope()
     var menuSource by remember { mutableStateOf<SourceAvailability?>(null) }
     var menuFor by remember { mutableStateOf<Episode?>(null) }
@@ -105,6 +113,7 @@ fun EpisodesSection(
                 DialogChoice("Choose Version") { onChooseVersion(ep) }.takeIf { model.libraryVersions(ep).isNotEmpty() },
                 DialogChoice("Choose Source") { onChooseSource(ep) },
                 DialogChoice("Automatic source preference…") { onSourcePreference(ep) }.takeIf { contentLocalScopes(model.target, episode=ep).isNotEmpty() },
+                DialogChoice("Remind me…") { onReminder(ep) }.takeIf { remindersAllowed(reminderProfile) && reminderChoices(ReminderTarget(model.target,ep)).isNotEmpty() },
                 DialogChoice(if (model.isWatched(ep)) "Mark as Unwatched" else "Mark as Watched") { onToggleWatched(ep) },
                 DialogChoice("Cancel") {},
             ),
