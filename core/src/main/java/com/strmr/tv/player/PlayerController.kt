@@ -169,7 +169,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     private val postPlayOffer = PostPlayOffer(dataContext)
 
     val upNext: UpNext? = if (session.reportsProgress && !session.isLive) {
-        UpNext(request, session.streamPath?.takeIf { !session.localFile }, scope, { videoSurface }, onSkip = { seekTo(it) },onDenied={denyVod(it)}) { next ->
+        UpNext(request, session.streamPath?.takeIf { !session.localFile }, scope, { videoSurface }, onSkip = { seekTo(it) },onDenied={denyVod(it)},expectedContext=dataContext) { next ->
             report(ended = true)
             advanceTo.value = next.copy(speed = speed.value)
         }

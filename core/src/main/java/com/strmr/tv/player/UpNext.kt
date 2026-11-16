@@ -36,10 +36,12 @@ class UpNext(
     private val prepareNext: (PlaybackRequest) -> Unit = PlaybackCoordinator::prefetch,
     private val log: (String) -> Unit = { AppLog.i(TAG, it) },
     private val onDenied:(VodAccessDenial)->Unit={},
+    private val expectedContext: Long = ProfileDataContext.current,
     private val onAdvance: (PlaybackRequest) -> Unit,
 ) {
+    private val context = expectedContext
     val nextEpisode: PlaybackRequest? = request.nextEpisode
-    private val segments = SkipSegments(request, streamPath)
+    private val segments = SkipSegments(request, streamPath, context, onDenied = { denial -> cancel(); onDenied(denial) })
     private var detector: CreditsDetector? = null
     private var durationSec = 0.0
     private var cancelled = false
@@ -48,7 +50,6 @@ class UpNext(
 
     private var active: SkipSegment? = null
     private var dismissed: SkipSegment? = null
-    private val context = ProfileDataContext.current
     private val policy = EpisodeAdvancePolicy()
     private val initialSettingsRevision = EpisodeAutoplayChanges.changes.value?.revision ?: 0L
     private var introAutoSkip = false

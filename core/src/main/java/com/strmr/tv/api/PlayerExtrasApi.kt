@@ -1,5 +1,6 @@
 package com.strmr.tv.api
 
+import com.strmr.tv.library.ProfileDataContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 
@@ -86,8 +87,8 @@ data class SkipSegment(
 @Serializable
 private data class SkipSegmentsResponse(val segments: List<SkipSegment>? = null)
 
-suspend fun ApiClient.skipSegments(body: JsonObject): List<SkipSegment> =
-    send<SkipSegmentsResponse>("POST", "/api/video/segments", body = body, promptOnLock = false).segments.orEmpty()
+suspend fun ApiClient.skipSegments(body: JsonObject, expected: Long = ProfileDataContext.current): List<SkipSegment> =
+    send<SkipSegmentsResponse>("POST", "/api/video/segments", preparationQuery(expected), body = body, promptOnLock = false, expectedContext = expected).segments.orEmpty()
 
 /** A container chapter of the playing file, as the server's ffprobe read it (`/api/video/metadata`). */
 @Serializable
@@ -100,6 +101,6 @@ private data class VideoChaptersResponse(val chapters: List<VideoChapter>? = nul
  * The file's chapters (ExoPlayer surfaces none), for `/api/video/segments` to read credits
  * from chapter names as the Expo player's do. The server caches the probe per path.
  */
-suspend fun ApiClient.videoChapters(path: String): List<VideoChapter> =
-    send<VideoChaptersResponse>("GET", "/api/video/metadata", mapOf("path" to path),
-                                promptOnLock = false, timeoutMs = 20_000).chapters.orEmpty()
+suspend fun ApiClient.videoChapters(path: String, expected: Long = ProfileDataContext.current): List<VideoChapter> =
+    send<VideoChaptersResponse>("GET", "/api/video/metadata", preparationQuery(expected, mapOf("path" to path)),
+                                promptOnLock = false, timeoutMs = 20_000, expectedContext = expected).chapters.orEmpty()

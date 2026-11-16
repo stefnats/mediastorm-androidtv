@@ -1,6 +1,13 @@
 package com.strmr.tv.player
 
 import com.strmr.tv.api.ApiClient
+import com.strmr.tv.api.VodAccessDenial
+import com.strmr.tv.api.VodDenialEvents
+import com.strmr.tv.api.vodDenial
+import com.strmr.tv.library.ProfileDataContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import com.strmr.tv.api.SkipSegment
 import com.strmr.tv.api.VideoChapter
 import com.strmr.tv.api.skipSegments
@@ -21,40 +28,82 @@ import kotlinx.serialization.json.putJsonArray
  * the Expo player posts the chapters mpv reports. On-device credits detection adds an outro
  * through [detectedCredits] when neither source has one.
  */
-class SkipSegments(private val request: PlaybackRequest, private val streamPath: String?) {
+class SkipSegments(
+    private val request: PlaybackRequest,
+    private val streamPath: String?,
+    private val expected: Long = ProfileDataContext.current,
+    private val onDenied: (VodAccessDenial) -> Unit = {},
+    private val readSegments: suspend (kotlinx.serialization.json.JsonObject, Long) -> List<SkipSegment> = { body, context -> ApiClient.skipSegments(body, context) },
+    private val readChapters: suspend (String, Long) -> List<VideoChapter> = { path, context -> ApiClient.videoChapters(path, context) },
+    private val log: (String) -> Unit = { AppLog.i(TAG, it) },
+) {
     private var segments: List<SkipSegment> = emptyList()
     private var detected: SkipSegment? = null
     private var postedDuration = 0L
     private var job: Job? = null
 
+    private var generation = 0L
+    private var retired = false
+    private fun current(ticket: Long = generation) = !retired && ticket == generation && expected == ProfileDataContext.current
+    private suspend fun stageCurrent(ticket: Long): Boolean { currentCoroutineContext().ensureActive(); return current(ticket) }
+
     /** Whether the server's segments include credits (on-device detection then stays off). */
-    val hasOutro: Boolean get() = segments.any { it.type == "outro" }
+    val hasOutro: Boolean get() = current() && segments.any { it.type == "outro" }
+
+    /** One request stage; denial is terminal, while ordinary unavailable metadata can fall back. */
+    private suspend fun <T> read(ticket: Long, fetch: suspend () -> T): T? {
+        if (!stageCurrent(ticket)) return null
+        val attempt = VodDenialEvents.begin(request.title.titleId, expected)
+        return try {
+            val result = fetch()
+            if (stageCurrent(ticket)) result else null
+        } catch (error: CancellationException) { throw error
+        } catch (error: Exception) {
+            if (!stageCurrent(ticket)) return null
+            error.vodDenial?.let { denial ->
+                retired = true
+                generation++
+                segments = emptyList()
+                detected = null
+                VodDenialEvents.reject(attempt, denial)
+                onDenied(denial)
+            }
+            null
+        }
+    }
 
     fun refresh(scope: CoroutineScope, durationMs: Long) {
-        if (durationMs <= 0 || durationMs / 1000 == postedDuration) return
+        if (!current() || durationMs <= 0 || durationMs / 1000 == postedDuration) return
         postedDuration = durationMs / 1000
         val duration = durationMs / 1000.0
+        val ticket = ++generation
         job?.cancel()
         job = scope.launch {
-            runCatching { ApiClient.skipSegments(body(duration, emptyList())) }.onSuccess { segments = it }
+            val initial = read(ticket) { readSegments(body(duration, emptyList()), expected) }
+            if (!stageCurrent(ticket)) return@launch
+            if (initial != null) segments = initial
             val path = streamPath?.takeIf { request.isEpisode && !hasOutro } ?: return@launch
-            val chapters = runCatching { ApiClient.videoChapters(path) }.getOrNull().orEmpty()
-            if (chapters.isEmpty()) return@launch
-            runCatching { ApiClient.skipSegments(body(duration, chapters)) }.onSuccess {
-                AppLog.i(TAG, "segments with ${chapters.size} chapters: ${it.joinToString { s -> s.type }}")
-                segments = it
-            }
+            val chapters = read(ticket) { readChapters(path, expected) }.orEmpty()
+            if (!stageCurrent(ticket) || chapters.isEmpty()) return@launch
+            val updated = read(ticket) { readSegments(body(duration, chapters), expected) }
+            if (!stageCurrent(ticket) || updated == null) return@launch
+            log("segments with ${chapters.size} chapters: ${updated.joinToString { it.type }}")
+            segments = updated
         }
     }
 
     /** Credits found on screen at [startSec]: an outro to the end, unless the server has one. */
     fun detectedCredits(startSec: Double, durationSec: Double) {
-        if (hasOutro || durationSec <= startSec) return
+        if (!current() || hasOutro || durationSec <= startSec) return
         detected = SkipSegment("outro", startSec, durationSec)
     }
 
     fun cancel() {
+        retired = true
+        generation++
         job?.cancel()
+        segments = emptyList()
+        detected = null
     }
 
     /**
@@ -62,6 +111,7 @@ class SkipSegments(private val request: PlaybackRequest, private val streamPath:
      * alone (skipping them only ends the film, and may skip a post-credits scene).
      */
     fun active(positionMs: Long): SkipSegment? {
+        if (!current()) return null
         val t = positionMs / 1000.0
         val all = if (hasOutro) segments else segments + listOfNotNull(detected)
         return all.firstOrNull { t >= it.start && t < it.end - 1 && (it.type != "outro" || request.isEpisode) }
