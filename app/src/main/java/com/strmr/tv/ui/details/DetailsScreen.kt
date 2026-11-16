@@ -90,26 +90,28 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
     val reminderProfile by AppSession.profile.collectAsState()
     val scope = rememberCoroutineScope()
     val model = remember(target) { DetailsModel(target, scope) }
+    val actionGeneration=model.accessGeneration
     val context = LocalContext.current
     val trailer = remember { TrailerController(context, scope) }
     val sessionsEnded by PlaybackCoordinator.sessionsEnded.collectAsState()
     val resolving by PlaybackCoordinator.resolving.collectAsState()
     val warm by PlaybackCoordinator.warm.collectAsState()
-    val prequeueTracks = remember(model) { PrequeueTracks(model) }
-    var picker by remember { mutableStateOf<PickerTarget?>(null) }
-    var pendingSource by remember { mutableStateOf<PendingSource?>(null) }
+    val prequeueTracks = remember(model,actionGeneration) { PrequeueTracks(model) }
+    var picker by remember(model,actionGeneration) { mutableStateOf<PickerTarget?>(null) }
+    var pendingSource by remember(model,actionGeneration) { mutableStateOf<PendingSource?>(null) }
     /** The Versions list (movie, or a specific episode) and a copy picked there. */
-    var versionsFor by remember { mutableStateOf<PickerTarget?>(null) }
-    var pendingVersion by remember { mutableStateOf<PendingVersion?>(null) }
+    var versionsFor by remember(model,actionGeneration) { mutableStateOf<PickerTarget?>(null) }
+    var pendingVersion by remember(model,actionGeneration) { mutableStateOf<PendingVersion?>(null) }
     var headerFocused by remember { mutableStateOf(true) }
     var watchState by remember { mutableStateOf(false) }
-    var more by remember { mutableStateOf(false) }
+    var more by remember(model,actionGeneration) { mutableStateOf(false) }
     var customizingButtons by remember { mutableStateOf(false) }
     var episodeOrder by remember { mutableStateOf(false) }
     var localPreferenceScopes by remember { mutableStateOf<List<ContentLocalScope>?>(null) }
     var reminderTarget by remember { mutableStateOf<ReminderTarget?>(null) }
     val navigator = com.strmr.tv.ui.LocalNavigator.current
     val actions = com.strmr.tv.library.TitleActions.changes
+    LaunchedEffect(model.vodDenial) {if(model.vodDenial!=null)trailer.dismiss("title access denied")}
     // A long-press menu's bulk watch-state action opens the sheet once the seasons are in.
     var watchStateOpened by remember { mutableStateOf(false) }
     LaunchedEffect(model.seasons.isNotEmpty()) {
@@ -152,19 +154,21 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
     LaunchedEffect(menuOpen) { if (menuOpen) trailer.dismiss("menu open") }
 
     fun chooseVersion(version: LibraryVersion, episode: Episode?) {
+        if(!model.acceptsPlaybackAction(actionGeneration))return
         val resumeAt = model.resumePoint(episode)
         if (resumeAt != null) pendingVersion = PendingVersion(version, episode, resumeAt) else model.playVersion(version, episode, null)
     }
 
     fun choose(source: SourceResult, episode: Episode?, manual: ManualSourceTracks?) {
+        if(!model.acceptsPlaybackAction(actionGeneration))return
         val resumeAt = model.resumePoint(episode)
         if (resumeAt != null) pendingSource = PendingSource(source, episode, resumeAt, manual) else model.play(source, episode, null, manual)
     }
 
     // Shared by the row's buttons and, for those moved there, More.
     val startOver = { p: DetailsModel.Primary -> model.play(p.episode, null, prequeueTracks.pick(warm)) }
-    val openVersions = { versionsFor = PickerTarget(if (target.isMovie) null else model.primaryEpisode) }
-    val chooseSource = { picker = PickerTarget(if (target.isMovie) null else model.primaryEpisode) }
+    val openVersions = { if(model.acceptsPlaybackAction(actionGeneration))versionsFor = PickerTarget(if (target.isMovie) null else model.primaryEpisode) }
+    val chooseSource = { if(model.acceptsPlaybackAction(actionGeneration))picker = PickerTarget(if (target.isMovie) null else model.primaryEpisode) }
 
     BoxWithConstraints(
         Modifier.fillMaxSize().background(Color.Black).onPreviewKeyEvent { e ->
@@ -224,8 +228,8 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
                     EpisodesSection(
                         model,
                         onPlay = { ep -> model.play(ep, model.resumePoint(ep), prequeueTracks.pick(warm)) },
-                        onChooseSource = { ep -> picker = PickerTarget(ep) },
-                        onChooseVersion = { ep -> versionsFor = PickerTarget(ep) },
+                        onChooseSource = { ep -> if(model.acceptsPlaybackAction(actionGeneration))picker = PickerTarget(ep) },
+                        onChooseVersion = { ep -> if(model.acceptsPlaybackAction(actionGeneration))versionsFor = PickerTarget(ep) },
                         onToggleWatched = { ep -> scope.launch { model.toggleWatched(ep) } },
                         onSourcePreference = { ep -> localPreferenceScopes = contentLocalScopes(target, episode = ep).takeIf { it.isNotEmpty() } },
                         onReminder = { ep -> reminderTarget = ReminderTarget(target,ep) },
@@ -263,13 +267,13 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
     reminderTarget?.let { value -> ReminderDialog(value,model.dataContext,reloadTitle={model.reloadForReminder()},onDismiss={reminderTarget=null}) }
     if (episodeOrder) EpisodeOrderDialog(model, scope, onDismiss = { episodeOrder = false })
     if (customizingButtons) DetailsButtonsDialog(onDismiss = { customizingButtons = false })
-    picker?.let { p ->
+    picker?.takeIf {model.acceptsPlaybackAction(actionGeneration)}?.let { p ->
         SourcePicker(
             target, p.episode, onPick = { source, manual -> choose(source, p.episode, manual) }, onDismiss = { picker = null },
             libraryVersions = model.libraryVersions(p.episode), onPickLibrary = { chooseVersion(it, p.episode) },
         )
     }
-    versionsFor?.let { v ->
+    versionsFor?.takeIf {model.acceptsPlaybackAction(actionGeneration)}?.let { v ->
         LibraryVersionsDialog(
             v.episode?.let { "${target.name} · ${it.code}" } ?: target.name, model.libraryVersions(v.episode),
             onPick = { chooseVersion(it, v.episode) }, onDismiss = { versionsFor = null },

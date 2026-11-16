@@ -32,6 +32,7 @@ class SourceSearchState(
     private var page by mutableStateOf<SourceSearchPage?>(null)
     var rows by mutableStateOf<List<SourceSearchRow>>(emptyList());private set
     var supported by mutableStateOf(false);private set
+    var vodDenied by mutableStateOf<VodAccessDenial?>(null);private set
     var loading by mutableStateOf(false);private set
     var loadingMore by mutableStateOf(false);private set
     var error by mutableStateOf<String?>(null);private set
@@ -51,7 +52,7 @@ class SourceSearchState(
     val filterPending get()=supported && draft!=applied
     init {observer=scope.launch {ProfileDataContext.changes.first {it!=context};dispose()}}
     private suspend fun check() {currentCoroutineContext().ensureActive();ProfileDataContext.requireCurrent(context);if(!isCurrent)throw CancellationException("Sources page closed")}
-    private fun liveView()=isCurrent && !expired && page?.let {now().isBefore(it.expiresAt)}!=false
+    private fun liveView()=isCurrent && vodDenied==null && !expired && page?.let {now().isBefore(it.expiresAt)}!=false
 
     class Selection internal constructor(val row:SourceSearchRow,internal val source:Long,internal val view:Long)
     fun selection(row:SourceSearchRow):Selection? = if(liveView() && !metadataChanged && !loading && rows.any {it===row})Selection(row,sourceGeneration,viewGeneration)else null
@@ -72,7 +73,7 @@ class SourceSearchState(
     }
     fun endManual() {manualGeneration++}
     val viewId get()=page?.viewId ?: "legacy"
-    fun manualLibrary(action:()->Unit) {if(isCurrent)action()}
+    fun manualLibrary(action:()->Unit) {if(isCurrent && vodDenied==null)action()}
     fun healthFor(row:SourceSearchRow)=if(isCurrent)health[row.sourceIndex] ?: row.result.health else null
     fun edit(filters:SourceFilters) {if(isCurrent && supported && filters.valid())draft=filters}
     fun clearDraft() {if(isCurrent && supported)draft=SourceFilters()}
@@ -82,19 +83,26 @@ class SourceSearchState(
         }
     }
     fun probeFailed(result:SourceResult,error:Exception) {
-        if(!isCurrent || !supported || result.responseScope!=page?.snapshotId)return
-        if(unavailable(error)){requiresReload=true;expired=true;metadataChanged=true;viewGeneration++;manualGeneration++;this.error=message(error)}
+        if(!isCurrent || result.responseScope!=page?.snapshotId || !supported && error.vodDenial==null)return
+        if(error.vodDenial!=null || unavailable(error)) {
+            vodDenied=error.vodDenial
+            if(vodDenied!=null)rows=emptyList()
+            requiresReload=true;expired=true;metadataChanged=true;viewGeneration++;manualGeneration++
+            this.error=error.vodDenial?.message ?: message(error)
+            if(vodDenied!=null) {healthJobs.forEach {it.cancel()};paging?.cancel();health.clear()}
+        }
     }
 
     /** Explicit initial open / Reload only. An expired view never calls this by itself. */
     fun reload() {
-        if(!isCurrent || loading)return
+        if(!isCurrent || loading || vodDenied!=null)return
         val wanted=if(supported)draft else SourceFilters()
         request?.cancel();paging?.cancel();expiry?.cancel();healthJobs.forEach {it.cancel()};healthJobs.clear();health.clear()
         sourceGeneration++;viewGeneration++;manualGeneration++;val source=sourceGeneration
         page=null;rows=emptyList();supported=false;expired=false;requiresReload=false;metadataChanged=false
         loading=true;loadingMore=false;error=null;pageError=null;consumedCursors.clear()
         request=scope.launch {
+            val attempt=VodDenialEvents.begin(target.titleId,context)
             try {
                 check();require(target.valid())
                 val reply=transport.search(title,episode,context)
@@ -113,7 +121,7 @@ class SourceSearchState(
                     }
                 }
             } catch(e:CancellationException){throw e}
-            catch(e:Exception){if(isCurrent && source==sourceGeneration){error=message(e);requiresReload=true;rows=emptyList()}}
+            catch(e:Exception){if(isCurrent && source==sourceGeneration){vodDenied=e.vodDenial;e.vodDenial?.let {VodDenialEvents.reject(attempt,it)};error=e.vodDenial?.message ?: message(e);requiresReload=true;rows=emptyList()}}
             finally {if(isCurrent && source==sourceGeneration)loading=false}
         }
     }
@@ -124,13 +132,14 @@ class SourceSearchState(
         request?.cancel();paging?.cancel();viewGeneration++;val view=viewGeneration;val source=sourceGeneration;val filters=draft
         rows=emptyList();loading=true;loadingMore=false;error=null;pageError=null;metadataChanged=false;consumedCursors.clear()
         request=scope.launch {
+            val attempt=VodDenialEvents.begin(target.titleId,context)
             try {
                 check()
                 val loaded=transport.page(current.snapshotId,filters,null,context)
                 check();if(source!=sourceGeneration || view!=viewGeneration)return@launch
                 validate(loaded,filters,current.snapshotId);accept(loaded)
             } catch(e:CancellationException){throw e}
-            catch(e:Exception){if(isCurrent && source==sourceGeneration && view==viewGeneration){error=message(e);requiresReload=unavailable(e);expired=viewChanged(e);if(!requiresReload && !expired)scheduleExpiry(current)}}
+            catch(e:Exception){if(isCurrent && source==sourceGeneration && view==viewGeneration){vodDenied=e.vodDenial;e.vodDenial?.let {VodDenialEvents.reject(attempt,it)};error=e.vodDenial?.message ?: message(e);requiresReload=vodDenied!=null || unavailable(e);expired=viewChanged(e);if(!requiresReload && !expired)scheduleExpiry(current)}}
             finally {if(isCurrent && source==sourceGeneration && view==viewGeneration)loading=false}
         }
     }
@@ -139,6 +148,7 @@ class SourceSearchState(
         if(!liveView() || metadataChanged || loading || loadingMore || !supported || cursor in consumedCursors)return
         val source=sourceGeneration;val view=viewGeneration;loadingMore=true;pageError=null
         paging=scope.launch {
+            val attempt=VodDenialEvents.begin(target.titleId,context)
             try {
                 check();val loaded=transport.page(current.snapshotId,current.filters,cursor,context)
                 check();if(source!=sourceGeneration || view!=viewGeneration)return@launch
@@ -150,7 +160,7 @@ class SourceSearchState(
                 require(count<=loaded.total && if(loaded.nextCursor==null)count==loaded.total else count<loaded.total)
                 consumedCursors+=cursor;rows=rows+loaded.rows;page=loaded;scheduleExpiry(loaded)
             } catch(e:CancellationException){throw e}
-            catch(e:Exception){if(isCurrent && source==sourceGeneration && view==viewGeneration){pageError=if(e is IllegalArgumentException)"Filter data changed. Apply filters again." else message(e);if(unavailable(e)){requiresReload=true;expired=true}else if(viewChanged(e) || e is IllegalArgumentException){expired=true}}}
+            catch(e:Exception){if(isCurrent && source==sourceGeneration && view==viewGeneration){vodDenied=e.vodDenial;e.vodDenial?.let {VodDenialEvents.reject(attempt,it)};pageError=if(vodDenied!=null)vodDenied!!.message else if(e is IllegalArgumentException)"Filter data changed. Apply filters again." else message(e);if(vodDenied!=null || unavailable(e)){requiresReload=true;expired=true}else if(viewChanged(e) || e is IllegalArgumentException){expired=true}}}
             finally {if(isCurrent && source==sourceGeneration && view==viewGeneration)loadingMore=false}
         }
     }
@@ -174,14 +184,15 @@ class SourceSearchState(
         for(row in initial)row.result.health?.let {health[row.sourceIndex]=it}
         val tokens=(initial.mapNotNull {it.result.health?.takeIf {h->h.state=="pending"}?.token}+listOfNotNull(token)).toSet()
         for(t in tokens)healthJobs+=scope.launch {
+            var attempt=VodDenialEvents.begin(target.titleId,context)
             try {
-                while(isCurrent && source==sourceGeneration) {
-                    check();val update=transport.health(t,context);check();if(source!=sourceGeneration)return@launch
+                while(isCurrent && vodDenied==null && source==sourceGeneration) {
+                    check();attempt=VodDenialEvents.begin(target.titleId,context);val update=transport.health(t,context);check();if(source!=sourceGeneration)return@launch
                     for(entry in update.results)if(initial.any {it.sourceIndex==entry.index})health[entry.index]=entry.health
                     if(update.complete)break
                 }
             } catch(e:CancellationException){throw e}
-            catch(_:Exception){}
+            catch(error:Exception){if(isCurrent && source==sourceGeneration && error.vodDenial!=null) {VodDenialEvents.reject(attempt,error.vodDenial!!);initial.firstOrNull()?.let {probeFailed(it.result,error)}}}
             finally {if(isCurrent && source==sourceGeneration)health.filterValues {it.state=="pending" && it.token==t}.keys.toList().forEach {health[it]=SourceHealth("unknown")}}
         }
     }

@@ -60,14 +60,14 @@ fun DownloadButton(target: DetailsTarget, episode: Episode?, modifier: Modifier 
 
 /** The details page's round Download action (beside Watchlist and Trailer), with the same states. */
 @Composable
-fun RowScope.DownloadActionItem(target: DetailsTarget, episode: Episode?) {
+fun RowScope.DownloadActionItem(target: DetailsTarget, episode: Episode?,allowed:()->Boolean={true}) {
     val item by remember(target.titleId, episode?.id) { Downloads.state(target, episode) }.collectAsState(Downloads.find(target, episode))
     val prompts = rememberDownloadPrompts()
     var menu by remember { mutableStateOf(false) }
     Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Box {
-            FilledTonalIconButton(onClick = { if (item == null) pick(target, episode) else menu = true },
-                                  enabled = target.isMovie || episode != null, modifier = Modifier.size(52.dp)) {
+            FilledTonalIconButton(onClick = { if(allowed()) {if (item == null) pick(target, episode) else menu = true} },
+                                  enabled = allowed() && (target.isMovie || episode != null), modifier = Modifier.size(52.dp)) {
                 DownloadGlyph(item)
             }
             item?.let { DropdownMenu(menu, onDismissRequest = { menu = false }) { DownloadMenuItems(it, prompts) { menu = false } } }

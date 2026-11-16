@@ -7,6 +7,7 @@ import com.strmr.tv.api.LibraryPlaybackInfo
 import com.strmr.tv.api.StartPoint
 import com.strmr.tv.api.libraryPlayback
 import com.strmr.tv.api.resumeState
+import com.strmr.tv.library.ProfileDataContext
 import com.strmr.tv.library.LibraryVersion
 import com.strmr.tv.library.LibraryVersions
 import com.strmr.tv.player.PlaybackCoordinator
@@ -25,13 +26,15 @@ data class LibraryFileStart(
     val following: List<PlaybackRequest.EpisodeInfo>,
     val playback: LibraryPlaybackInfo,
     val resumeAt: StartPoint?,
+    val context:Long=ProfileDataContext.current,
 ) {
     fun play(from: StartPoint?) {
+        if(context!=ProfileDataContext.current)return
         val request = PlaybackRequest(
             DetailsTarget.unmatched(group), episode, from, backdrops = listOfNotNull(episode?.imageUrl, group.backdropUrl),
             following = following, library = versions,
         )
-        PlaybackCoordinator.playLibrary(request, version, playback)
+        PlaybackCoordinator.playLibrary(request, version, playback,context)
     }
 
     companion object {
@@ -39,9 +42,11 @@ data class LibraryFileStart(
             version: LibraryVersion, versions: LibraryVersions, group: LibraryGroup,
             episode: PlaybackRequest.EpisodeInfo? = null, following: List<PlaybackRequest.EpisodeInfo> = emptyList(),
         ): LibraryFileStart {
-            val playback = ApiClient.libraryPlayback(version.id)
-            val resume = ApiClient.resumeState(if (episode == null) "movie" else "episode", playback.streamPath)
-            return LibraryFileStart(group, versions, version, episode, following, playback, resume?.startPoint)
+            val expected=ProfileDataContext.current
+            val playback = ApiClient.libraryPlayback(version.id,expected)
+            val resume = ApiClient.resumeState(if (episode == null) "movie" else "episode", playback.streamPath,expected)
+            ProfileDataContext.requireCurrent(expected)
+            return LibraryFileStart(group, versions, version, episode, following, playback, resume?.startPoint,expected)
         }
     }
 }

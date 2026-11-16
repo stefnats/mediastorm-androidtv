@@ -51,14 +51,15 @@ suspend fun ApiClient.libraryPage(library: LibraryRef, options: BrowseOptions?, 
 }
 
 /** A title's copies in the profile's libraries: by its catalog ids, else its title and year. */
-suspend fun ApiClient.libraryMatches(target: DetailsTarget): List<LibraryMatch> {
-    val q = mutableMapOf("mediaType" to if (target.isMovie) "movie" else "series", "title" to target.name, "profileId" to profileId)
+suspend fun ApiClient.libraryMatches(target: DetailsTarget,expectedContext:Long=ProfileDataContext.current): List<LibraryMatch> {
+    val profile=inContext(expectedContext) {profileId}
+    val q = mutableMapOf("mediaType" to if (target.isMovie) "movie" else "series", "title" to target.name, "profileId" to profile)
     if (target.hasCatalogIds) q["titleId"] = target.titleId
     target.tmdbId?.let { q["tmdbId"] = it }
     target.imdbId?.let { q["imdbId"] = it }
     target.tvdbId?.let { q["tvdbId"] = it }
     target.year?.let { q["year"] = it.toString() }
-    return sendList("GET", "/api/library/matches", q, timeoutMs = 8_000)
+    return sendList("GET", "/api/library/matches", q, timeoutMs = 8_000,expectedContext=expectedContext)
 }
 
 /**
@@ -85,9 +86,10 @@ suspend fun ApiClient.libraryGroup(entry: LibraryEntry): LibraryGroup {
 }
 
 /** The server's resume decision for one progress record; null when there is none. */
-suspend fun ApiClient.resumeState(mediaType: String, itemId: String): ResumeState? = runCatching {
-    send<ProgressResume>("GET", "$profilePath/history/progress/${segment(mediaType)}/${segment(itemId)}", promptOnLock = false).resume
-}.getOrNull()
+suspend fun ApiClient.resumeState(mediaType: String, itemId: String, expectedContext:Long=ProfileDataContext.current): ResumeState? {
+    val path=inContext(expectedContext) {"$profilePath/history/progress/${segment(mediaType)}/${segment(itemId)}"}
+    return vodOptionalRead {send<ProgressResume>("GET",path,promptOnLock=false,expectedContext=expectedContext).resume}
+}
 
 @kotlinx.serialization.Serializable
 data class ProgressResume(val resume: ResumeState? = null)

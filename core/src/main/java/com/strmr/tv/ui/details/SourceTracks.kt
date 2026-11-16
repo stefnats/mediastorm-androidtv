@@ -28,6 +28,7 @@ class SourceTracks(
     private val log: (String) -> Unit = { AppLog.i("ManualTracks",it) },
     private val onProbeChanged:(SourceResult)->Unit={},
     private val onProbeError:(SourceResult,Exception)->Unit={_,_->},
+    private val denialTitleId:String?=null,
 ) {
     private data class Key(val index: Int, val response: String,val scope:String?)
     private fun key(result: SourceResult) = Key(result.index,result.raw.toString(),result.responseScope)
@@ -39,10 +40,15 @@ class SourceTracks(
     private var opened by mutableStateOf<SourceResult?>(null)
     private var defaults by mutableStateOf<TrackDefaults?>(null)
     private var disposed = false
+    private var denied:VodAccessDenial?=null
     private var defaultsTask: Job? = null
     private var contextTask: Job? = null
     init { contextTask = scope.launch { ProfileDataContext.changes.first { it != expected }; dispose() } }
-    private fun current() = !disposed && ProfileDataContext.current == expected
+    private fun current() = !disposed && denied==null && ProfileDataContext.current == expected
+
+    private fun deny(reason:VodAccessDenial) {
+        denied=reason;opened=null;defaultsTask?.cancel();tasks.values.forEach {it.cancel()};tasks.clear();probes.clear();choices.clear()
+    }
 
     fun hasChoice(result: SourceResult) = current() && choices[key(result)]?.isEmpty == false
 
@@ -52,7 +58,11 @@ class SourceTracks(
         opened = result
         if (defaults == null && defaultsTask?.isActive != true) defaultsTask = scope.launch {
             if (!current()) return@launch
-            val loaded = try { readDefaults(expected) } catch (error: CancellationException) { throw error } catch (_: Exception) { null }
+            val attempt=denialTitleId?.let {VodDenialEvents.begin(it,expected)}
+            val loaded = try { readDefaults(expected) } catch (error: CancellationException) { throw error } catch (error: Exception) {
+                if(current() && error.vodDenial!=null) {attempt?.let {VodDenialEvents.reject(it,error.vodDenial!!)};onProbeError(result,error);deny(error.vodDenial!!);return@launch}
+                null
+            }
             ensureActive()
             if (current()) defaults = loaded
         }
@@ -70,10 +80,15 @@ class SourceTracks(
         probes[key] = ProbeState(null)
         tasks[key] = scope.launch {
             if (!current()) return@launch
+            val attempt=denialTitleId?.let {VodDenialEvents.begin(it,expected)}
             val loaded = try { readProbe(result,expected)
             } catch (error: CancellationException) { throw error
             } catch (error: Exception) {
-                if(current() && generations[key]==generation)onProbeError(result,error)
+                if(current() && generations[key]==generation) {
+                    if(attempt!=null)error.vodDenial?.let {VodDenialEvents.reject(attempt,it)}
+                    onProbeError(result,error)
+                    error.vodDenial?.let(::deny)
+                }
                 TrackProbe.Failed("Track metadata could not be loaded. Try again.")
             }
             ensureActive()

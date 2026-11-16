@@ -143,11 +143,11 @@ suspend fun ApiClient.playbackSettings(expectedContext: Long = ProfileDataContex
     val (path, profile) = inContext(captured) { profilePath to profileId }
     val user = async {
         ProfileDataContext.requireCurrent(captured)
-        optionalProfileRead { send<UserPlayback>("GET", "$path/settings", promptOnLock = false, timeoutMs = 10_000, expectedContext = captured) }
+        vodOptionalRead { send<UserPlayback>("GET", "$path/settings", promptOnLock = false, timeoutMs = 10_000, expectedContext = captured) }
     }
     val device = async {
         ProfileDataContext.requireCurrent(captured)
-        optionalProfileRead {
+        vodOptionalRead {
             send<PlaybackFields>("GET", "/api/clients/${segment(Config.clientId)}/settings", mapOf("userId" to profile),
                                  promptOnLock = false, timeoutMs = 10_000, expectedContext = captured)
         }
@@ -188,3 +188,8 @@ internal fun mergePlaybackSettings(
         automaticLibrarySelectionSupported = automaticLibrarySelectionSupported,
         sourcePolicyAvailable = sourcePolicyAvailable,
     )
+
+/** Missing optional settings may use legacy defaults; an authorization rejection may not. */
+internal suspend fun <T> vodOptionalRead(read:suspend ()->T):T? = try {read()} catch(error:Exception) {
+    error.rethrowVodDenial();null
+}

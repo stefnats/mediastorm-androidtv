@@ -4,6 +4,10 @@ import androidx.media3.common.Player
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.SourceResult
 import com.strmr.tv.api.resolveSource
+import com.strmr.tv.api.rethrowVodDenial
+import com.strmr.tv.api.vodDenial
+import kotlinx.coroutines.CancellationException
+import com.strmr.tv.library.ProfileDataContext
 import com.strmr.tv.api.searchSources
 import com.strmr.tv.app.AppLog
 import com.strmr.tv.ui.settings.AutoSwitchSettings
@@ -23,6 +27,7 @@ import kotlinx.coroutines.launch
 class AutoSwitch(private val controller: PlayerController) {
     private val watch = StallWatch()
     private var job: Job? = null
+    private var resolving:Job?=null
     private var switching = false
     val preparing get() = switching
     /** Sources that failed to resolve on an earlier try from this player. */
@@ -32,7 +37,7 @@ class AutoSwitch(private val controller: PlayerController) {
     private val request get() = controller.request
 
     private val applies: Boolean
-        get() = session.reportsProgress && !session.isLive && session.streamPath != null && request.libraryVersion == null && !session.localFile
+        get() = controller.vodDenied.value==null && controller.dataContext==ProfileDataContext.current && session.reportsProgress && !session.isLive && session.streamPath != null && request.libraryVersion == null && !session.localFile
 
     /** From the start of loading, so a source that never starts is caught too. */
     fun start() {
@@ -46,7 +51,7 @@ class AutoSwitch(private val controller: PlayerController) {
     }
 
     fun cancel() {
-        job?.cancel()
+        job?.cancel();resolving?.cancel();switching=false
     }
 
     private fun sample() {
@@ -73,32 +78,28 @@ class AutoSwitch(private val controller: PlayerController) {
         val tried = (request.autoSwitchTried + failed + listOfNotNull(key(session.releaseName))).toMutableSet()
         AppLog.i(TAG, "$reason at ${controller.player.currentPosition / 1000}s on \"${session.releaseName}\"")
         controller.online.setStatus("Switching to another source…")
-        controller.scope.launch {
-            val results = sources ?: runCatching { ApiClient.searchSources(SourceSwitchRules.query(request), request.title, request.episode?.numbering) }
-                .onFailure { AppLog.w(TAG, "source search failed: ${it.message}") }.getOrNull()?.also { sources = it }.orEmpty()
-            val candidates = results.filter { r ->
-                !SourceSwitchRules.isCurrent(r.title, r.attributes["raw_title"], session.releaseName) &&
-                    keys(r).none { it in tried } && r.health?.state !in setOf("unhealthy", "not_cached")
-            }
-            for (candidate in candidates.take(CANDIDATES)) {
-                if (controller.releaseReportOpen || controller.audioRecoveryActive) { switching = false; watch.reset(); return@launch }
-                if (controller.switchTo.value != null || controller.ended.value) return@launch
-                tried += keys(candidate)
-                try {
-                    val resolved = ApiClient.resolveSource(candidate, request.title.titleId, controller.player.currentPosition / 1000.0)
-                    if (controller.releaseReportOpen || controller.audioRecoveryActive) { switching = false; watch.reset(); return@launch }
-                    if (controller.switchTo.value != null || controller.ended.value) return@launch
-                    switchTo(candidate, resolved, tried)
-                    return@launch
-                } catch (e: Exception) {
-                    AppLog.i(TAG, "\"${candidate.title}\" didn't resolve: ${e.message}")
-                }
-            }
-            AppLog.i(TAG, "no other source to switch to (${results.size} sources)")
-            controller.online.setStatus("No other source to switch to", clearAfterMs = 4_000)
-            failed += tried
-            watch.reset()
-            switching = false
+        resolving=controller.scope.launch {
+            val attempt=com.strmr.tv.api.VodDenialEvents.begin(request.title.titleId,controller.dataContext)
+            try {
+                requirePlaybackContext(controller.dataContext)
+                val results=sources ?: try {ApiClient.searchSources(SourceSwitchRules.query(request),request.title,request.episode?.numbering,controller.dataContext).also {sources=it}}
+                    catch(error:Exception) {error.rethrowVodDenial();emptyList()}
+                val candidates=results.filter {r->!SourceSwitchRules.isCurrent(r.title,r.attributes["raw_title"],session.releaseName) && keys(r).none {it in tried} && r.health?.state !in setOf("unhealthy","not_cached")}
+                val selected=resolveVodFallback(candidates.take(CANDIDATES),attempt={candidate->
+                    requirePlaybackContext(controller.dataContext)
+                    if(controller.releaseReportOpen || controller.audioRecoveryActive || controller.switchTo.value!=null || controller.ended.value || controller.vodDenied.value!=null)throw CancellationException("Source action changed")
+                    tried+=keys(candidate)
+                    val resolved=ApiClient.resolveSource(candidate,request.title.titleId,controller.player.currentPosition/1000.0,controller.dataContext)
+                    requirePlaybackContext(controller.dataContext)
+                    if(controller.releaseReportOpen || controller.audioRecoveryActive || controller.switchTo.value!=null || controller.ended.value || controller.vodDenied.value!=null)throw CancellationException("Source action changed")
+                    resolved
+                })
+                if(selected!=null) {switchTo(selected.first,selected.second,tried);return@launch}
+                controller.online.setStatus("No other source to switch to",clearAfterMs=4_000);failed+=tried
+            } catch(error:CancellationException) {throw error
+            } catch(error:Exception) {
+                error.vodDenial?.let {controller.denyVod(it,attempt)}
+            } finally {watch.reset();switching=false}
         }
     }
 

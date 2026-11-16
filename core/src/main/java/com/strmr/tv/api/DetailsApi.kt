@@ -75,25 +75,9 @@ suspend fun ApiClient.sourceHealth(token: String, expectedContext: Long = Profil
  * resolution is asynchronous. The server also returns its track choice for this profile and
  * title, so manual picks get the same preference as prequeue.
  */
-suspend fun ApiClient.resolveSource(result: SourceResult, titleId: String, startOffset: Double?): Pair<String, TrackSelection?> {
-    val body = buildJsonObject {
-        put("result", result.raw)
-        put("profileId", profileId)
-        put("titleId", titleId)
-        put("clientId", Config.clientId)
-        put("includeTrackSelection", true)
-        startOffset?.let { put("startOffset", it) }
-    }
-    var resolution = json.decodeFromString<PlaybackResolution>(sendRaw("POST", "/api/playback/resolve", body = body, timeoutMs = 90_000))
-    val deadline = System.currentTimeMillis() + 180_000
-    while (resolution.webdavPath.isNullOrEmpty()) {
-        val queueId = resolution.queueId
-        if (queueId == null || queueId <= 0 || System.currentTimeMillis() > deadline) {
-            throw ApiError.NotReady("Source could not be resolved")
-        }
-        delay(1_000)
-        val q = mapOf("includeTrackSelection" to "true", "profileId" to profileId, "titleId" to titleId, "clientId" to Config.clientId)
-        resolution = json.decodeFromString(sendRaw("GET", "/api/playback/queue/$queueId", q, timeoutMs = 60_000))
-    }
-    return resolution.webdavPath!! to resolution.trackSelection
+suspend fun ApiClient.resolveSource(result: SourceResult, titleId: String, startOffset: Double?, expectedContext:Long=ProfileDataContext.current): Pair<String, TrackSelection?> {
+    val (profile,client)=inContext(expectedContext) {profileId to Config.clientId}
+    return resolveManualSource(result,titleId,startOffset,profile,client,expectedContext,
+        post={body->send<PlaybackResolution>("POST","/api/playback/resolve",body=body,timeoutMs=90_000,expectedContext=expectedContext)},
+        poll={id,query->send<PlaybackResolution>("GET","/api/playback/queue/$id",query,timeoutMs=60_000,expectedContext=expectedContext)})
 }

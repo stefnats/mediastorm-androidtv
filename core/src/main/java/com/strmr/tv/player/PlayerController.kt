@@ -46,6 +46,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 class PlayerController(context: Context, val session: PlayerSession, private val onVideoFormat: (Format) -> Unit) {
     val request = session.request
     val dataContext = ProfileDataContext.current
+    private var released=false
     val profileId = ApiClient.profileId
     val player: ExoPlayer
     val isPlaying = MutableStateFlow(false)
@@ -77,7 +78,8 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     private var releaseReports: ReleaseReports? = null
     internal var audioPreferenceSave: Job? = null
     internal var audioPreferenceFailed = false
-    val canReportRelease get() = !session.isLive && !session.localFile && session.reportsProgress && session.prequeueId != null
+    val vodDenied=MutableStateFlow<com.strmr.tv.api.VodAccessDenial?>(null)
+    val canReportRelease get() = vodDenied.value==null && !session.isLive && !session.localFile && session.reportsProgress && session.prequeueId != null
 
     private val recoveryContext = ServerReleaseReportGateway()
     private val audioRecoveryPolicy = AudioRecoveryPolicy()
@@ -101,7 +103,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
                 val next = SourceSwitchRules.resumeAt(request, offset).copy(speed = speed.value,
                     audioRecoveryCount = request.audioRecoveryCount + if (recovery) 1 else 0)
                 switchTo.value = SourceSwitchRequest(next, source, carried, prepared = status)
-            }, beforeOptions = { audioPreferenceSave?.join(); check(!audioPreferenceFailed) { "Audio preference could not be saved" } })
+            }, denialTitleId=request.title.titleId,denialContext=dataContext,beforeOptions = { vodDenied.value?.let {throw com.strmr.tv.api.ApiError.AccessDenied(it)}; audioPreferenceSave?.join(); check(!audioPreferenceFailed) { "Audio preference could not be saved" } })
 
     fun closeReleaseReports() {
         releaseReports?.close()
@@ -109,7 +111,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         releaseReportOpen = false
         audioRecovery.dismiss()
     }
-    private fun canPrepareAudioAlternative() = audioRecoveryEligible(session, AutoSwitchSettings.enabled, recoveryContext.isCurrent()) &&
+    private fun canPrepareAudioAlternative() = vodDenied.value==null && audioRecoveryEligible(session, AutoSwitchSettings.enabled, recoveryContext.isCurrent()) &&
         !releaseReportOpen && !audioRecovery.active && !autoSwitch.preparing && switchTo.value == null && advanceTo.value == null && !ended.value
 
     private fun observeAudioAvailability() {
@@ -166,13 +168,25 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     private val postPlayOffer = PostPlayOffer(dataContext)
 
     val upNext: UpNext? = if (session.reportsProgress && !session.isLive) {
-        UpNext(request, session.streamPath?.takeIf { !session.localFile }, scope, { videoSurface }, onSkip = { seekTo(it) }) { next ->
+        UpNext(request, session.streamPath?.takeIf { !session.localFile }, scope, { videoSurface }, onSkip = { seekTo(it) },onDenied={denyVod(it)}) { next ->
             report(ended = true)
             advanceTo.value = next.copy(speed = speed.value)
         }
     } else null
 
     private val stallLog by lazy { StallLog(player) }
+
+    private val backendMediaHeaders=ApiClient.inContext(dataContext) {ApiClient.mediaHeaders}
+    private val mediaAccess=VodMediaAccess(ApiClient.inContext(dataContext) {ApiClient.baseUrl},
+        enabled=session.reportsProgress && !session.isLive && !session.localFile,backendHeaders=backendMediaHeaders,denialTitleId=request.title.titleId,context=dataContext)
+
+    internal fun denyVod(denial:com.strmr.tv.api.VodAccessDenial,attempt:com.strmr.tv.api.VodAttempt?=null) {
+        if(released || dataContext!=ProfileDataContext.current || vodDenied.value!=null)return
+        attempt?.let {com.strmr.tv.api.VodDenialEvents.reject(it,denial)}
+        vodDenied.value=denial;autoSwitch.cancel();upNext?.cancel();closeReleaseReports();progress.stop()
+        thumbnails?.cancel();online.cancel();external.cancel();switchTo.value=null;advanceTo.value=null
+        player.stop();error.value=denial.message
+    }
 
     private val listener = object : Player.Listener {
         override fun onIsPlayingChanged(playing: Boolean) {
@@ -248,6 +262,8 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         }
 
         override fun onPlayerError(e: PlaybackException) {
+            if(released)return
+            mediaAccess.failure(e)?.let {denyVod(it.reason,it.attempt);return}
             // A passthrough track the output refused: PassthroughGuard now offers PCM, so prepare again once.
             if (e.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED && !audioRetried) {
                 audioRetried = true
@@ -287,12 +303,12 @@ class PlayerController(context: Context, val session: PlayerSession, private val
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true)
             .setMediaCodecSelector(AudioDecoderFallback.selector)
-        val http = OkHttpDataSource.Factory(ApiClient.http).setDefaultRequestProperties(ApiClient.mediaHeaders)
+        val http = OkHttpDataSource.Factory(ApiClient.http.newBuilder().addInterceptor(mediaAccess.interceptor).addNetworkInterceptor(mediaAccess.requestInterceptor).build()).setDefaultRequestProperties(backendMediaHeaders)
         // HTTP(S) through OkHttp as before; `file://` (a phone's downloaded copy) from disk.
         val dataSource = DefaultDataSource.Factory(context, http)
         player = ExoPlayer.Builder(context, renderers)
             // Dolby Vision Profile 7 rewritten for this box's decoders (player/dv7).
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource, Dv7Playback.extractorsFactory()))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource, Dv7Playback.extractorsFactory()).setLoadErrorHandlingPolicy(mediaAccess.loadPolicy))
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
                 true,
@@ -411,6 +427,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
      * request; the activity closes this playback (saving the position) and starts the other.
      */
     fun switchSource(source: SourceResult) {
+        if(vodDenied.value!=null || dataContext!=ProfileDataContext.current)return
         audioRecovery.dismiss()
         val position = player.currentPosition
         val carried = CarriedTracks.capture(player.currentTracks, player.trackSelectionParameters, external.selected.value)
@@ -420,6 +437,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
 
     /** Saves the position and lets go of the player; returns the last report, still finishing. */
     fun release(): Job? {
+        released=true
         if (!ended.value && advanceTo.value == null && postPlay.value == null) report(paused = true, closing = true)
         closeReleaseReports()
         clock.cancel()

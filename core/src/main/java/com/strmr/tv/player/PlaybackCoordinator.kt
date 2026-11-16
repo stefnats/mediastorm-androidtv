@@ -10,6 +10,9 @@ import com.strmr.tv.api.SourceResult
 import com.strmr.tv.api.TrackSelection
 import com.strmr.tv.api.playbackSettings
 import com.strmr.tv.api.resolveSource
+import com.strmr.tv.api.rethrowVodDenial
+import com.strmr.tv.api.VodDenialEvents
+import com.strmr.tv.api.vodDenial
 import com.strmr.tv.api.streamUrl
 import com.strmr.tv.app.App
 import com.strmr.tv.app.AppLog
@@ -94,14 +97,15 @@ object PlaybackCoordinator {
         request: PlaybackRequest, source: SourceResult, manual: ManualSourceTracks? = null, carried: CarriedTracks? = null,
         resolved: Pair<String, TrackSelection?>? = null,
         prepared: com.strmr.tv.api.PrequeueStatus? = null,
-    ) =
+    ) {
+        val expected=ProfileDataContext.current
         // A stream picked over a library copy (Switch Source) is no longer that copy.
-        begin(request.copy(libraryVersion = null), "Preparing…", carried = carried, resolve = {
+        begin(request.copy(libraryVersion = null), "Preparing…", carried = carried, expectedContext=expected, resolve = {
             if (prepared != null) {
                 return@begin ResolvedStream(requireNotNull(prepared.streamPath), prepared.trackSelection, prepared.displayName,
                     prepared.subtitleTracks.orEmpty(), manualTracks = true, source = prequeueSourceHints(prepared), prequeueId = prepared.prequeueId)
             }
-            val (path, tracks) = resolved ?: ApiClient.resolveSource(source, request.title.titleId, request.startPosition)
+            val (path, tracks) = resolved ?: ApiClient.resolveSource(source, request.title.titleId, request.startPosition,expected)
             val hints = SourceHints(source.serviceType.ifEmpty { null }, indexer = source.indexer.ifEmpty { null },
                                     attributes = source.attributes)
             if (manual == null || manual.choice.isEmpty) {
@@ -114,6 +118,7 @@ object PlaybackCoordinator {
                 ResolvedStream(path, applied, source.title, manualTracks = true, source = hints, explicitAudioLanguage = manual.explicitAudioLanguage)
             }
         })
+    }
 
     /** A trailer full screen, in the same player, without progress. */
     fun playTrailer(url: String, name: String) {
@@ -247,6 +252,7 @@ object PlaybackCoordinator {
         _resolving.value = request
         stage.value = firstStage
         detail.value = null
+        val attempt=VodDenialEvents.begin(request.title.titleId,expectedContext ?: ProfileDataContext.current)
         resolveJob = scope.launch {
             try {
                 expectedContext?.let(ProfileDataContext::requireCurrent)
@@ -257,10 +263,9 @@ object PlaybackCoordinator {
                                   isLive = !growing, growingRestart = if (growing) suspend { live(false, null) } else null,
                                   retuneLive = live.takeIf { !growing }, liveChannel = liveChannel, sourceLabel = liveLabel)
                 } else {
-                    val settings = async { runCatching { ApiClient.playbackSettings() }.getOrNull() }
-                    val r = if (resolveWithSettings != null) resolveWithSettings(settings.await()) else resolve()
+                    val settings = try {ApiClient.playbackSettings(expectedContext ?: ProfileDataContext.current)} catch(error:Exception) {error.rethrowVodDenial();null}
+                    val r = if (resolveWithSettings != null) resolveWithSettings(settings) else resolve()
                     if (r == null) {
-                        settings.cancel()
                         if (_resolving.value === request) _resolving.value = null
                         return@launch
                     }
@@ -269,14 +274,13 @@ object PlaybackCoordinator {
                     val claimed = if (expectedContext == null) streamClaim?.invoke(selectedRequest, r)
                         else ApiClient.inContext(expectedContext) { streamClaim?.invoke(selectedRequest, r) }
                     if (claimed == true) {
-                        settings.cancel()
                         AppLog.i("Playback", "resolved stream claimed (cast)")
                         playerStarted()
                         return@launch
                     }
                     PlayerSession(selectedRequest, ApiClient.streamUrl(r.path, selectedRequest.streamMetadata(r.path) + StreamInfo.trackerQuery(r.path, r.source)), r.tracks, streamPath = r.path,
                                   releaseName = r.releaseName?.ifEmpty { null } ?: releaseFileName(r.path), subtitleStreams = r.subtitleStreams,
-                                  playback = settings.await(), manualTracks = r.manualTracks, carried = carried, prequeueId = r.prequeueId, explicitAudioLanguage = r.explicitAudioLanguage,
+                                  playback = settings, manualTracks = r.manualTracks, carried = carried, prequeueId = r.prequeueId, explicitAudioLanguage = r.explicitAudioLanguage,
                                   pickTracksOnDevice = r.pickTracksOnDevice,
                                   sourceLabel = StreamInfo.source(r.path, r.source, selectedRequest.libraryVersion?.origin),
                                   sourceDolbyVision = r.source?.dolbyVisionProfile, sourceHdr10 = r.source?.hdr10 == true)
@@ -294,8 +298,10 @@ object PlaybackCoordinator {
             } catch (e: Exception) {
                 if (_resolving.value === request) {
                     _resolving.value = null
-                    if (expectedContext == null || expectedContext == ProfileDataContext.current)
-                        errorMessage.value = e.message ?: "Playback failed"
+                    if (expectedContext == null || expectedContext == ProfileDataContext.current) {
+                        if(live==null)e.vodDenial?.let {VodDenialEvents.reject(attempt,it)}
+                        errorMessage.value = e.vodDenial?.message ?: e.message ?: "Playback failed"
+                    }
                 }
             }
         }
@@ -334,6 +340,7 @@ object PlaybackCoordinator {
 
     /** Discard old source/track previews after a content source preference changes. */
     fun invalidateWarmSources() = prequeue.invalidateWarm()
+    fun invalidateWarmSources(titleId:String,expected:Long) = prequeue.invalidateWarmFor(titleId,expected)
 
     /** Starts resolving the next episode near the end of this one ([PrequeueResolver.prefetch]); [play] adopts it. */
     fun prefetch(request: PlaybackRequest) = prequeue.prefetch(request)

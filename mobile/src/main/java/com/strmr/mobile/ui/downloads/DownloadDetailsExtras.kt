@@ -31,35 +31,36 @@ import com.strmr.tv.ui.details.DetailsModel
 object DownloadDetailsExtras : DetailsExtraActions {
     @Composable
     override fun RowScope.Actions(context: DetailsActionContext) {
-        DownloadActionItem(downloadTarget(context.model), if (context.model.target.isMovie) null else context.episode)
+        if(context.playbackCurrent)DownloadActionItem(downloadTarget(context.model), if (context.model.target.isMovie) null else context.episode,allowed={context.playbackCurrent})
     }
 
     override fun moreActions(context: DetailsActionContext): List<SheetAction> {
         val model = context.model
-        if (model.target.isMovie) return emptyList()
+        if (!context.playbackCurrent || model.target.isMovie) return emptyList()
         val season = model.currentSeason?.takeIf { it.episodes.isNotEmpty() } ?: return emptyList()
         val name = if (season.number == 0) "Specials" else "Season ${season.number}"
         return listOf(SheetAction("Download $name…", Icons.Outlined.DownloadForOffline) {
-            DownloadActions.pick(DownloadRequest(downloadTarget(model), season = season))
+            if(context.playbackCurrent)DownloadActions.pick(DownloadRequest(downloadTarget(model), season = season))
         })
     }
 
     override fun episodeActions(context: DetailsActionContext, episode: Episode): List<SheetAction> {
+        if(!context.playbackCurrent)return emptyList()
         val target = downloadTarget(context.model)
         val item = Downloads.find(target, episode)
             ?: return listOf(SheetAction("Download ${episode.code}…", Icons.Outlined.Download) {
-                DownloadActions.pick(DownloadRequest(target, episode))
+                if(context.playbackCurrent)DownloadActions.pick(DownloadRequest(target, episode))
             })
         val primary = when (item.status) {
             Status.COMPLETED -> SheetAction("Play Download", Icons.Filled.DownloadDone) {
                 // From the sheet there is no prompt: resume from what the device knows.
-                DownloadPlayback.play(item, OfflineProgress.resumePoint(item) ?: context.model.resumePoint(episode))
+                if(context.playbackCurrent)DownloadPlayback.play(item, OfflineProgress.resumePoint(item) ?: context.model.resumePoint(episode))
                     ?.let(AppToast::show)
             }
             Status.DOWNLOADING, Status.PENDING ->
-                SheetAction("Downloading ${Math.round(item.progress * 100)}% · Pause", Icons.Outlined.Pause) { Downloads.pause(item.id) }
-            Status.PAUSED -> SheetAction("Resume Download", Icons.Outlined.Download) { Downloads.resume(item.id) }
-            Status.FAILED -> SheetAction("Retry Download", Icons.Outlined.Download) { Downloads.resume(item.id) }
+                SheetAction("Downloading ${Math.round(item.progress * 100)}% · Pause", Icons.Outlined.Pause) { if(context.playbackCurrent)Downloads.pause(item.id) }
+            Status.PAUSED -> SheetAction("Resume Download", Icons.Outlined.Download) { if(context.playbackCurrent)Downloads.resume(item.id) }
+            Status.FAILED -> SheetAction("Retry Download", Icons.Outlined.Download) { if(context.playbackCurrent)Downloads.resume(item.id) }
         }
         val delete = SheetAction(if (item.isActive) "Cancel Download" else "Delete Download", Icons.Outlined.Delete, destructive = true) {
             Downloads.delete(item.id)

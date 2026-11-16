@@ -7,9 +7,9 @@ import com.strmr.tv.api.SourceResult
 import com.strmr.tv.player.ManualSourceTracks
 
 @Composable
-fun rememberSourceTracks(expectedContext: Long = com.strmr.tv.library.ProfileDataContext.current,ownerKey:Any?=null,onProbeChanged:(SourceResult)->Unit={},onProbeError:(SourceResult,Exception)->Unit={_,_->}): SourceTracks {
+fun rememberSourceTracks(expectedContext: Long = com.strmr.tv.library.ProfileDataContext.current,ownerKey:Any?=null,onProbeChanged:(SourceResult)->Unit={},onProbeError:(SourceResult,Exception)->Unit={_,_->},denialTitleId:String?=null): SourceTracks {
     val scope = rememberCoroutineScope()
-    return remember(expectedContext,ownerKey) { SourceTracks(scope,expectedContext,onProbeChanged=onProbeChanged,onProbeError=onProbeError) }
+    return remember(expectedContext,ownerKey) { SourceTracks(scope,expectedContext,onProbeChanged=onProbeChanged,onProbeError=onProbeError,denialTitleId=denialTitleId) }
 }
 
 /** The open result's panel ([SourceTracks]); Play hands the result and its tracks to [onPlay]. */

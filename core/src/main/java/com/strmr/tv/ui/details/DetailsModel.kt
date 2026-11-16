@@ -6,6 +6,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.ApiError
+import com.strmr.tv.api.VodAccessDenial
+import com.strmr.tv.api.VodDenialEvents
+import kotlinx.coroutines.CoroutineStart
+import com.strmr.tv.api.vodDenial
 import com.strmr.tv.api.CastMember
 import com.strmr.tv.api.DetailsTarget
 import com.strmr.tv.api.DetailsBundle
@@ -52,9 +56,37 @@ import kotlinx.coroutines.withTimeoutOrNull
  * with per-episode watched / resume, the up-next episode and the server's resume decision
  * (no client thresholds). Reloaded after playback to refresh progress.
  */
-class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope = MainScope()) {
+class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope = MainScope(),
+    private val retireWarm:(String,Long)->Unit={id,context->PlaybackCoordinator.invalidateWarmSources(id,context)},
+    private val lookupLibrary:suspend (DetailsTarget,Long)->List<com.strmr.tv.api.LibraryMatch> = {target,context->ApiClient.libraryMatches(target,context)},
+) {
     val dataContext = ProfileDataContext.current
     private var playJob: Job? = null
+    private var readGeneration=0L
+    private var denialFence=VodDenialEvents.fence()
+    init {
+        scope.launch(start=CoroutineStart.UNDISPATCHED) {
+            VodDenialEvents.observed.collect {event->
+                if(event.attempt.context==dataContext && event.attempt.titleId==target.titleId && event.attempt.sequence>denialFence)retireAccess(event.reason)
+            }
+        }
+    }
+    private var libraryGeneration=0L
+    var accessGeneration by mutableStateOf(0L)
+        private set
+    fun acceptsPlaybackAction(generation:Long)=playable && generation==accessGeneration
+    var vodDenial by mutableStateOf<VodAccessDenial?>(null)
+        private set
+    val playable get()=scope.coroutineContext[Job]?.isActive!=false && vodDenial==null && title!=null && dataContext==ProfileDataContext.current
+
+    private fun retireAccess(denial:VodAccessDenial) {
+        if(dataContext!=ProfileDataContext.current)return
+        readGeneration++;libraryGeneration++;accessGeneration++;playJob?.cancel();retireWarm(target.titleId,dataContext)
+        vodDenial=denial;loadError=denial.message;title=null;seasons=emptyList();trailers=null;similar=emptyList();collectionMovies=emptyList()
+        primaryEpisode=null;privacyEpisode=null;selectedSeason=null;upNext=null;resume=null;library=null;playChoice=null
+        orderings=emptyList();watchedOverrides.clear();serverInWatchlist=null;movieWatched=null
+        libraryLookup.complete(null)
+    }
 
     fun sourcePreferenceChanged() {
         ApiClient.inContext(dataContext) {
@@ -119,14 +151,22 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
     var library by mutableStateOf<LibraryVersions?>(null)
         private set
     /** Completes once the libraries have been asked (with the copies, or null). */
-    private val libraryLookup = CompletableDeferred<LibraryVersions?>()
+    private var libraryLookup = CompletableDeferred<LibraryVersions?>()
 
     /** Looks the title up in the libraries, once per page (not on every reload after playback). */
     suspend fun loadLibrary() {
-        if (libraryLookup.isCompleted) return
-        val versions = runCatching { LibraryVersions.of(ApiClient.libraryMatches(target)) }.getOrNull()?.takeUnless { it.isEmpty }
-        library = versions
-        libraryLookup.complete(versions)
+        if (libraryLookup.isCompleted || vodDenial!=null) return
+        val pending=libraryLookup;val generation=libraryGeneration
+        try {
+            ApiClient.inContext(dataContext) {}
+            val versions=LibraryVersions.of(lookupLibrary(target,dataContext)).takeUnless {it.isEmpty}
+            ApiClient.inContext(dataContext) {if(generation==libraryGeneration && vodDenial==null)library=versions}
+            pending.complete(versions)
+        } catch(error:CancellationException) {pending.complete(null);throw error
+        } catch(error:Exception) {
+            if(generation==libraryGeneration)error.vodDenial?.let(::retireAccess)
+            pending.complete(null)
+        }
     }
 
     /** Play found several copies: the details page lists them to pick from (null: no question). */
@@ -147,29 +187,43 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
     val visibleSeasons: List<Season> get() = seasons.filter { it.number > 0 } + seasons.filter { it.number == 0 }
     val currentSeason: Season? get() = visibleSeasons.firstOrNull { it.number == selectedSeason } ?: visibleSeasons.firstOrNull()
 
-    suspend fun load() {
-        try {
-            val bundle = ApiClient.detailsBundle(target, pickedOrdering)
-            applyBundle(bundle)
-        } catch (e: Exception) {
-            if (title == null) loadError = e.message
-        }
-        title?.collection?.let { c ->
-            if (collectionMovies.isEmpty()) collectionMovies = runCatching { ApiClient.collectionMovies(c.id) }.getOrDefault(emptyList()).distinctBy { it.id }
+    suspend fun load()=load {expected->ApiClient.detailsBundle(target,pickedOrdering,expectedContext=expected)}
+
+    internal suspend fun load(fetch:suspend (Long)->DetailsBundle) {
+        try {readAndApply(fetch)} catch(error:CancellationException) {throw error
+        } catch(error:Exception) {if(dataContext==ProfileDataContext.current && vodDenial==null && title==null)loadError=error.message}
+        if(vodDenial!=null || dataContext!=ProfileDataContext.current)return
+        val generation=readGeneration
+        title?.collection?.let {collection->
+            if(collectionMovies.isEmpty()) {
+                try {
+                    ApiClient.inContext(dataContext) {}
+                    val result=ApiClient.collectionMovies(collection.id)
+                    ApiClient.inContext(dataContext) {if(vodDenial==null && generation==readGeneration)collectionMovies=result.distinctBy {it.id}}
+                } catch(error:CancellationException) {throw error
+                } catch(error:Exception) {if(generation==readGeneration)error.vodDenial?.let(::retireAccess)}
+            }
         }
     }
 
     /** A reminder recovery must prove that fresh page metadata was read successfully. */
-    suspend fun reloadForReminder() = reloadForReminder { expected ->
-        ApiClient.detailsBundle(target,pickedOrdering,expectedContext=expected)
-    }
+    suspend fun reloadForReminder()=reloadForReminder {expected->ApiClient.detailsBundle(target,pickedOrdering,expectedContext=expected)}
+    internal suspend fun reloadForReminder(fetch:suspend (Long)->DetailsBundle)=readAndApply(fetch)
 
-    internal suspend fun reloadForReminder(fetch: suspend (Long) -> DetailsBundle) {
-        val callerContext=currentCoroutineContext()
-        callerContext.ensureActive()
-        ApiClient.inContext(dataContext) {}
-        val bundle=fetch(dataContext)
-        ApiClient.inContext(dataContext) {callerContext.ensureActive();applyBundle(bundle)}
+    private suspend fun readAndApply(fetch:suspend (Long)->DetailsBundle) {
+        val caller=currentCoroutineContext();caller.ensureActive();if(scope.coroutineContext[Job]?.isActive==false)throw CancellationException("Details page closed");ApiClient.inContext(dataContext) {}
+        val generation=++readGeneration
+        val authorizationAttempt=VodDenialEvents.begin(target.titleId,dataContext)
+        try {
+            val bundle=fetch(dataContext)
+            ApiClient.inContext(dataContext) {
+                caller.ensureActive();if(generation!=readGeneration)throw CancellationException("Details read superseded")
+                val wasDenied=vodDenial!=null
+                applyBundle(bundle);vodDenial=null;denialFence=authorizationAttempt.sequence
+                if(wasDenied) {libraryLookup=CompletableDeferred();libraryGeneration++;scope.launch {loadLibrary()}}
+            }
+        } catch(error:CancellationException) {throw error
+        } catch(error:Exception) {caller.ensureActive();ProfileDataContext.requireCurrent(dataContext);if(generation==readGeneration)error.vodDenial?.let(::retireAccess);throw error}
     }
 
     private fun applyBundle(bundle: DetailsBundle) {
@@ -287,6 +341,7 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
 
     val primary: Primary?
         get() {
+            if(!playable)return null
             if (target.isMovie) {
                 val at = resumePoint(null)
                 return if (at != null) Primary(null, at, "Resume") else Primary(null, null, "Play")
@@ -301,12 +356,13 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
      * offer a library picker; explicit Versions and library pages remain deliberate choices.
      */
     fun play(episode: Episode?, start: StartPoint?, picks: PrequeuePick? = null) {
-        if (playJob?.isActive == true || dataContext != ProfileDataContext.current) return
+        if (playJob?.isActive == true || !playable) return
         playJob = scope.launch {
             try {
                 ApiClient.inContext(dataContext) {}
                 val versions = if (libraryLookup.isCompleted) library else withTimeoutOrNull(8_000) { libraryLookup.await() }
                 ApiClient.inContext(dataContext) {
+                    if(!playable)return@inContext
                     PlaybackCoordinator.play(request(episode, start).copy(library = versions), picks) {
                         ApiClient.inContext(dataContext) { playChoice = PlayChoice(episode, start, picks) }
                     }
@@ -321,15 +377,18 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
     }
 
     /** Stream Instead keeps search intent for this title and the episodes after it. */
-    fun streamInstead(choice: PlayChoice) =
-        PlaybackCoordinator.play(request(choice.episode, choice.start).copy(sourceSelection = PlaybackRequest.SourceSelection.SEARCH_ONLY), choice.picks)
+    fun streamInstead(choice: PlayChoice) {
+        if(playable)PlaybackCoordinator.play(request(choice.episode, choice.start).copy(sourceSelection = PlaybackRequest.SourceSelection.SEARCH_ONLY), choice.picks)
+    }
 
     /** A copy picked in Versions. */
-    fun playVersion(version: LibraryVersion, episode: Episode?, start: StartPoint?) =
-        PlaybackCoordinator.playLibrary(request(episode, start), version)
+    fun playVersion(version: LibraryVersion, episode: Episode?, start: StartPoint?) {
+        if(playable)PlaybackCoordinator.playLibrary(request(episode, start), version)
+    }
 
-    fun play(source: SourceResult, episode: Episode?, start: StartPoint?, manual: ManualSourceTracks? = null) =
-        PlaybackCoordinator.play(request(episode, start), source, manual)
+    fun play(source: SourceResult, episode: Episode?, start: StartPoint?, manual: ManualSourceTracks? = null) {
+        if(playable)PlaybackCoordinator.play(request(episode, start), source, manual)
+    }
 
     fun request(episode: Episode?, start: StartPoint?): PlaybackRequest {
         val primaryBackdrop = title?.backdrop?.url ?: target.backdropUrl

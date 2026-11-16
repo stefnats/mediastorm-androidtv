@@ -4,6 +4,9 @@ import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.SkipSegment
 import com.strmr.tv.api.PlaybackSettings
 import com.strmr.tv.api.playbackSettings
+import com.strmr.tv.api.vodDenial
+import com.strmr.tv.api.VodAccessDenial
+import kotlinx.coroutines.CancellationException
 import com.strmr.tv.library.ProfileDataContext
 import com.strmr.tv.ui.settings.EpisodeAutoplayChanges
 import com.strmr.tv.app.AppLog
@@ -28,10 +31,11 @@ class UpNext(
     private val scope: CoroutineScope,
     private val surface: () -> android.view.SurfaceView?,
     private val onSkip: (Long) -> Unit = {},
-    private val readSettings: suspend () -> PlaybackSettings = { ApiClient.playbackSettings() },
+    private val readSettings: (suspend () -> PlaybackSettings)? = null,
     private val creditsEnabled: (Boolean) -> Boolean = CreditsDetectionSettings::enabled,
     private val prepareNext: (PlaybackRequest) -> Unit = PlaybackCoordinator::prefetch,
     private val log: (String) -> Unit = { AppLog.i(TAG, it) },
+    private val onDenied:(VodAccessDenial)->Unit={},
     private val onAdvance: (PlaybackRequest) -> Unit,
 ) {
     val nextEpisode: PlaybackRequest? = request.nextEpisode
@@ -56,7 +60,10 @@ class UpNext(
     init {
         scope.launch {
             val before = EpisodeAutoplayChanges.changes.value
-            val settings = readSettings()
+            if(cancelled || context!=ProfileDataContext.current)return@launch
+            val attempt=com.strmr.tv.api.VodDenialEvents.begin(request.title.titleId,context)
+            val settings = try {readSettings?.invoke() ?: ApiClient.playbackSettings(context)} catch(error:CancellationException) {throw error
+            } catch(error:Exception) {if(!cancelled && context==ProfileDataContext.current)error.vodDenial?.let {com.strmr.tv.api.VodDenialEvents.reject(attempt,it);cancel();onDenied(it)};return@launch}
             if (cancelled || context != ProfileDataContext.current) return@launch
             val latest = EpisodeAutoplayChanges.changes.value
             policy.autoplay = if (latest?.context == context && latest != before) latest.enabled else settings.nextEpisodeAutoPlay

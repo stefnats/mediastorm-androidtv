@@ -6,6 +6,9 @@ import com.strmr.tv.api.Episode
 import com.strmr.tv.api.Season
 import com.strmr.tv.api.SourceResult
 import com.strmr.tv.api.resolveSource
+import com.strmr.tv.api.vodDenial
+import com.strmr.tv.api.VodDenialEvents
+import com.strmr.tv.library.ProfileDataContext
 import com.strmr.tv.home.ReleaseBadge
 import com.strmr.tv.player.SourceSwitchRules
 import kotlinx.coroutines.CancellationException
@@ -43,22 +46,26 @@ object DownloadActions {
 
     /** Resolves the picked release and queues it; returns the message to show. */
     suspend fun queue(result: SourceResult, request: DownloadRequest): String {
-        request.season?.let { return queueSeason(result, it, request.target) }
+        val expected=ProfileDataContext.current
+        request.season?.let { return queueSeason(result, it, request.target,expected) }
+        val attempt=VodDenialEvents.begin(request.target.titleId,expected)
         return try {
-            val (path, tracks) = ApiClient.resolveSource(result, request.target.titleId, null)
+            val (path, tracks) = ApiClient.resolveSource(result, request.target.titleId, null,expected)
+            ProfileDataContext.requireCurrent(expected)
             Downloads.start(request.target, request.episode, path, releaseName(result), result.sizeBytes, tracks)
             "Download started"
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            e.message ?: "The download couldn't start"
+            e.vodDenial?.let {VodDenialEvents.reject(attempt,it)}
+            e.vodDenial?.message ?: "The download couldn't start"
         }
     }
 
     private fun releaseName(r: SourceResult) = SourceSwitchRules.releaseName(r.title, r.attributes["raw_title"])
 
     /** Every aired episode from one pack: in one batch resolve, else one by one. */
-    private suspend fun queueSeason(result: SourceResult, season: Season, target: DetailsTarget): String {
+    private suspend fun queueSeason(result: SourceResult, season: Season, target: DetailsTarget,expected:Long): String {
         val episodes = season.episodes.filter { ReleaseBadge.forEpisode(it.airedDate) == null }
         if (episodes.isEmpty()) return "No episodes to download"
         var queued = 0
@@ -78,34 +85,14 @@ object DownloadActions {
                 lastError = e.message
             }
         }
-        val batch = try {
-            ApiClient.resolveBatch(result, episodes)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            emptyList()
-        }
-        if (batch.isNotEmpty()) {
-            batch.forEach { entry ->
-                val ep = episodes.firstOrNull { it.seasonNumber == entry.seasonNumber && it.episodeNumber == entry.episodeNumber }
-                    ?: return@forEach
-                add(ep, entry.resolution?.webdavPath, entry.resolution?.fileSize)
-            }
-        } else {
-            for (ep in episodes) {
-                val targeted = result.targeting(ep)
-                val path = targeted?.let {
-                    try {
-                        ApiClient.resolveSource(it, target.titleId, null).first
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        null
-                    }
-                }
-                add(ep, path, null)
-            }
-        }
+        var attempt=VodDenialEvents.begin(target.titleId,expected)
+        try {
+            resolveSeasonDownloads(result,episodes,
+                batch={attempt=VodDenialEvents.begin(target.titleId,expected);ApiClient.resolveBatch(result,episodes,expected)},
+                single={targeted->attempt=VodDenialEvents.begin(target.titleId,expected);ApiClient.resolveSource(targeted,target.titleId,null,expected).first},
+                enqueue={episode,path,size->ProfileDataContext.requireCurrent(expected);add(episode,path,size)})
+        } catch(error:CancellationException) {throw error
+        } catch(error:Exception) {error.vodDenial?.let {VodDenialEvents.reject(attempt,it)};return error.vodDenial?.message ?: "The download couldn't start"}
         return when {
             queued == 0 -> lastError ?: "No episodes could be downloaded"
             failed == 0 -> "Downloading $queued episodes"

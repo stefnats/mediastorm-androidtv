@@ -43,6 +43,7 @@ class HttpFailure(val status: Int, val body: String, retryAfterHeader: String? =
 sealed class ApiError(message: String) : Exception(message) {
     class Http(val response: HttpFailure) : ApiError(describe(response))
     class NotReady(message: String) : ApiError(message)
+    class AccessDenied(val denial:VodAccessDenial):ApiError(denial.message)
     /** The session is gone and could not be refreshed; the app returns to sign-in. */
     class SignedOut : ApiError("Your session has ended. Sign in again.")
 
@@ -96,6 +97,7 @@ sealed class ApiError(message: String) : Exception(message) {
         private fun describe(f: HttpFailure): String = when {
             f.code == Code.RATE_LIMITED || (f.code == null && f.status == 429) -> rateLimitMessage(f.retryAfter)
             f.code == Code.PROFILE_LOCKED -> "This profile is locked. Enter its PIN to continue."
+            vodAccessDenial(f.status,f.code)!=null -> requireNotNull(vodAccessDenial(f.status,f.code)).message
             else -> serverMessage(f) ?: "Server returned ${f.status}: ${f.body.take(200)}"
         }
 

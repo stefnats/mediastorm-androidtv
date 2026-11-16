@@ -13,6 +13,9 @@ import com.strmr.mobile.downloads.DownloadItem
 import com.strmr.mobile.downloads.DownloadPlayback
 import com.strmr.mobile.downloads.Downloads
 import com.strmr.tv.api.StartPoint
+import com.strmr.tv.api.vodDenial
+import com.strmr.tv.library.ProfileDataContext
+import kotlinx.coroutines.CancellationException
 import com.strmr.tv.ui.AppToast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -24,7 +27,7 @@ import kotlinx.coroutines.launch
  */
 class DownloadPrompts(private val scope: CoroutineScope) {
     data class Deletion(val ids: List<String>, val title: String)
-    data class Resume(val item: DownloadItem, val start: StartPoint)
+    data class Resume(val item: DownloadItem, val start: StartPoint,val context:Long=ProfileDataContext.current)
 
     var deletion by mutableStateOf<Deletion?>(null)
     var resume by mutableStateOf<Resume?>(null)
@@ -34,14 +37,20 @@ class DownloadPrompts(private val scope: CoroutineScope) {
     fun play(item: DownloadItem) {
         if (checkingResume != null) return
         checkingResume = item.id
+        val expected=ProfileDataContext.current
         scope.launch {
-            val start = DownloadPlayback.resumePoint(item)
-            checkingResume = null
-            if (start != null) resume = Resume(item, start) else start(item, null)
+            try {
+                val start = DownloadPlayback.resumePoint(item,expected)
+                ProfileDataContext.requireCurrent(expected)
+                if (start != null) resume = Resume(item, start,expected) else start(item, null,expected)
+            } catch(error:CancellationException) {throw error
+            } catch(error:Exception) {AppToast.show(error.vodDenial?.message ?: "This download could not be opened.")
+            } finally {checkingResume=null}
         }
     }
 
-    fun start(item: DownloadItem, at: StartPoint?) {
+    fun start(item: DownloadItem, at: StartPoint?,expectedContext:Long=ProfileDataContext.current) {
+        if(expectedContext!=ProfileDataContext.current)return
         DownloadPlayback.play(item, at)?.let(AppToast::show)
     }
 
@@ -87,13 +96,13 @@ fun DownloadPromptDialogs(prompts: DownloadPrompts, onDeleted: () -> Unit = {}) 
             confirmButton = {
                 TextButton(onClick = {
                     prompts.resume = null
-                    prompts.start(r.item, r.start)
+                    prompts.start(r.item, r.start,r.context)
                 }) { Text("Resume") }
             },
             dismissButton = {
                 TextButton(onClick = {
                     prompts.resume = null
-                    prompts.start(r.item, null)
+                    prompts.start(r.item, null,r.context)
                 }) { Text("Start Over") }
             },
         )

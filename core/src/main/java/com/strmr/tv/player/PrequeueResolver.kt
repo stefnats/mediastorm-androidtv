@@ -54,6 +54,10 @@ internal class PrequeueResolver(
         warmValue.value = null
     }
 
+    fun invalidateWarmFor(titleId:String,expected:Long) {
+        warmed?.takeIf {it.context==expected && it.request.title.titleId==titleId}?.let {invalidateWarm()}
+    }
+
     fun prewarm(target: DetailsTarget) {
         if (target.fromLibrary) return
         val expected = ProfileDataContext.current

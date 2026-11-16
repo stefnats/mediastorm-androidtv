@@ -6,6 +6,7 @@ import com.strmr.tv.api.DetailsTarget
 import com.strmr.tv.api.Episode
 import com.strmr.tv.api.EpisodeNumbering
 import com.strmr.tv.api.SourceResult
+import com.strmr.tv.library.ProfileDataContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -59,9 +60,11 @@ data class BatchResolution(
 private data class BatchResponse(val results: List<BatchResolution>? = null)
 
 /** Resolves one season pack for several episodes in one round trip (`/api/playback/resolve-batch`). */
-suspend fun ApiClient.resolveBatch(result: SourceResult, episodes: List<Episode>): List<BatchResolution> {
+suspend fun ApiClient.resolveBatch(result: SourceResult, episodes: List<Episode>,expectedContext:Long=ProfileDataContext.current): List<BatchResolution> {
+    val profile=inContext(expectedContext) {profileId}
     val body = buildJsonObject {
         put("result", result.raw)
+        put("profileId",profile)
         put("episodes", buildJsonArray {
             episodes.forEach { ep ->
                 add(buildJsonObject {
@@ -76,7 +79,7 @@ suspend fun ApiClient.resolveBatch(result: SourceResult, episodes: List<Episode>
     }
     // A usenet pack is imported before episodes are picked, which can take minutes.
     val timeout = if (result.serviceType.equals("debrid", ignoreCase = true)) 120_000L else 900_000L
-    val raw = sendRaw("POST", "/api/playback/resolve-batch", body = body, timeoutMs = timeout)
+    val raw = sendRaw("POST", "/api/playback/resolve-batch", body = body, timeoutMs = timeout,expectedContext=expectedContext)
     return json.decodeFromString<BatchResponse>(raw).results.orEmpty()
 }
 

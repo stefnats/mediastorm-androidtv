@@ -9,6 +9,7 @@ import com.strmr.tv.api.SourceHealth
 import com.strmr.tv.api.SourceResult
 import com.strmr.tv.api.searchSources
 import com.strmr.tv.api.sourceHealth
+import com.strmr.tv.api.vodDenial
 import com.strmr.tv.app.AppLog
 
 /**
@@ -27,10 +28,12 @@ class SourceSwitchCandidates(private val controller: PlayerController) {
 
     /** Searches, then polls pending health until complete; run in the menu's effect. */
     suspend fun load() {
+        if(controller.vodDenied.value!=null)return
         val request = controller.request
         val query = SourceSwitchRules.query(request)
+        var attempt=com.strmr.tv.api.VodDenialEvents.begin(request.title.titleId,controller.dataContext)
         try {
-            val found = ApiClient.searchSources(query, request.title, request.episode?.numbering)
+            val found = ApiClient.searchSources(query, request.title, request.episode?.numbering,controller.dataContext)
             found.forEach { r -> r.health?.let { health[r.index] = it } }
             results = found
             AppLog.i("SourceSwitch", "candidates query=\"$query\" count=${found.size} " +
@@ -38,14 +41,17 @@ class SourceSwitchCandidates(private val controller: PlayerController) {
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            error = e.message ?: "Couldn't load sources"
+            if(e.vodDenial!=null) {results=emptyList();error=e.vodDenial!!.message;controller.denyVod(e.vodDenial!!,attempt);return}
+            error = "Couldn't load sources"
             AppLog.w("SourceSwitch", "candidate search failed: ${e.message}")
             return
         }
         for (token in health.values.filter { it.state == "pending" }.mapNotNull { it.token }.toSet()) {
             var complete = false
             while (!complete) {
-                val snapshot = runCatching { ApiClient.sourceHealth(token) }.getOrNull() ?: break
+                attempt=com.strmr.tv.api.VodDenialEvents.begin(request.title.titleId,controller.dataContext)
+                val snapshot = try {ApiClient.sourceHealth(token,controller.dataContext)} catch(e:kotlinx.coroutines.CancellationException) {throw e
+                } catch(e:Exception) {if(e.vodDenial!=null) {results=emptyList();error=e.vodDenial!!.message;controller.denyVod(e.vodDenial!!,attempt);return};break}
                 snapshot.results.forEach { health[it.index] = it.health }
                 complete = snapshot.complete
             }

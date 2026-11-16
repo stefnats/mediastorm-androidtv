@@ -69,7 +69,7 @@ fun SourcePicker(
     val scope=androidx.compose.runtime.rememberCoroutineScope()
     val target=com.strmr.tv.sources.SourceSearchTarget.from(title,episode)
     val state=remember(expected,target,title.name,title.year,title.imdbId) {com.strmr.tv.sources.SourceSearchState(scope,title,episode,expected)}
-    val tracks=rememberSourceTracks(expected,state to state.sourceGeneration,state::probeChanged,state::probeFailed)
+    val tracks=rememberSourceTracks(expected,state to state.sourceGeneration,state::probeChanged,state::probeFailed,denialTitleId=title.titleId)
     var manualIntent by remember(state,state.sourceGeneration) {mutableStateOf<com.strmr.tv.sources.SourceSearchState.ManualSelection?>(null)}
     val closeTracks={tracks.close();state.endManual();manualIntent=null}
     LaunchedEffect(state.requiresReload) {if(state.requiresReload)closeTracks()}
@@ -101,7 +101,7 @@ fun SourcePicker(
                 }
                 when {
                     state.loading->item("loading") {Row(horizontalArrangement=Arrangement.spacedBy(14.dp),verticalAlignment=Alignment.CenterVertically) {CircularProgressIndicator(Modifier.size(20.dp),color=Accent,strokeWidth=2.dp);Text(if(state.supported)"Applying filters…" else "Searching sources…")}}
-                    state.error!=null->item("error") {Column {Text(state.error!!);androidx.tv.material3.OutlinedButton(onClick={closeTracks();state.retry()}) {Text(if(state.requiresReload)"Reload source list" else "Retry")}}}
+                    state.error!=null->item("error") {Column {Text(state.error!!);if(state.vodDenied==null)androidx.tv.material3.OutlinedButton(onClick={closeTracks();state.retry()}) {Text(if(state.requiresReload)"Reload source list" else "Retry")}}}
                     rows.isEmpty()->item("empty") {Text(if(state.supported && state.applied.active)"No matches in these retained search results." else "No sources found")}
                     else->items(rows,key={"${state.sourceGeneration}:${it.key}"}) {row ->
                         val action=actions[row.result]
@@ -112,7 +112,7 @@ fun SourcePicker(
                             onLongClick={action?.let {state.use(it){current->state.beginManual(current)?.let {intent->manualIntent=intent;tracks.reconcile(current.result,current.expectedFileVersion,state.viewId);tracks.open(current.result)}}}}) {action?.let {state.use(it){current->tracks.reconcile(current.result,current.expectedFileVersion,state.viewId);pick(current.result,tracks.manualFor(current.result))}}}
                     }
                 }
-                state.pageError?.let {message->item("page-error") {Column {Text(message);androidx.tv.material3.OutlinedButton(onClick={closeTracks();state.retry()}) {Text(if(state.expiredNow)"Apply filters again" else "Retry page")}}}}
+                state.pageError?.let {message->item("page-error") {Column {Text(message);if(state.vodDenied==null)androidx.tv.material3.OutlinedButton(onClick={closeTracks();state.retry()}) {Text(if(state.expiredNow)"Apply filters again" else "Retry page")}}}}
                 if(state.hasMore)item("more") {androidx.tv.material3.OutlinedButton(onClick=state::loadMore,enabled=!state.loadingMore) {Text(if(state.loadingMore)"Loading…" else "Load more")}}
             }
         }

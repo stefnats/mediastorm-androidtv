@@ -12,6 +12,7 @@ import com.strmr.tv.sources.*
 @Composable
 fun SourceFilterControls(state:SourceSearchState,onApply:()->Unit,onReload:()->Unit) {
     if(!state.supported)return
+    if(state.vodDenied!=null) {Text(state.vodDenied!!.message);return}
     var field by remember(state) {mutableStateOf<SourceFilterMenus.Field?>(null)}
     val filters=state.draft
     val languages=remember(state.rows,filters.audioLanguage,filters.subtitleLanguage) {

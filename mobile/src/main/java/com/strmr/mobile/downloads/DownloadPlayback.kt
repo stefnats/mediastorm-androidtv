@@ -4,6 +4,8 @@ import android.net.Uri
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.StartPoint
 import com.strmr.tv.api.resumeState
+import com.strmr.tv.api.ResumeState
+import com.strmr.tv.library.ProfileDataContext
 import com.strmr.tv.app.AppLog
 import com.strmr.tv.player.PlaybackCoordinator
 import com.strmr.tv.player.PlaybackRequest
@@ -30,10 +32,9 @@ object DownloadPlayback {
      * Where to offer resuming: the server's resume point when it answers within 2.5 s, else
      * the one kept on the device.
      */
-    suspend fun resumePoint(item: DownloadItem): StartPoint? {
+    suspend fun resumePoint(item: DownloadItem,expectedContext:Long=ProfileDataContext.current): StartPoint? {
         val mediaType = if (item.isMovie) "movie" else "episode"
-        val server = withTimeoutOrNull(2_500) { ApiClient.resumeState(mediaType, item.progressItemId) }
-        return server?.startPoint ?: OfflineProgress.resumePoint(item)
+        return resolveDownloadResume(expectedContext,{ApiClient.resumeState(mediaType,item.progressItemId,expectedContext)},{OfflineProgress.resumePoint(item)})
     }
 
     /** Opens the player on the file; returns an error message when it can't. */
@@ -57,4 +58,12 @@ object DownloadPlayback {
         )
         return null
     }
+}
+
+/** A denied resume read must not silently become permission to play the local file. */
+internal suspend fun resolveDownloadResume(expected:Long,read:suspend ()->ResumeState?,offline:()->StartPoint?):StartPoint? {
+    ProfileDataContext.requireCurrent(expected)
+    val server=withTimeoutOrNull(2_500) {read()}
+    ProfileDataContext.requireCurrent(expected)
+    return server?.startPoint ?: offline()
 }

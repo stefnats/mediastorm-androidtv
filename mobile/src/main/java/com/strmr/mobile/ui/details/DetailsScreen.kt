@@ -61,7 +61,7 @@ import com.strmr.tv.ui.settings.SpoilerSettings
 fun DetailsScreen(target: DetailsTarget, autoplay: Boolean, prewarmOnOpen: Boolean = true) {
     val scope = rememberCoroutineScope()
     val model = remember(target) { DetailsModel(target, scope) }
-    val state = remember(model) { DetailsPageState(model) }
+    val state = remember(model,model.accessGeneration) { DetailsPageState(model) }
     val context = LocalContext.current
     val navigator = LocalNavigator.current
     val trailer = remember(model) { TrailerController(context, scope) }
@@ -70,6 +70,7 @@ fun DetailsScreen(target: DetailsTarget, autoplay: Boolean, prewarmOnOpen: Boole
     val list = rememberLazyListState()
     val extras = DetailsActionContext(model, state.activeEpisode, state::playPrimary)
 
+    LaunchedEffect(model.vodDenial) {if(model.vodDenial!=null)trailer.dismiss("title access denied")}
     LaunchedEffect(model,prewarmOnOpen) { if(prewarmOnOpen) PlaybackCoordinator.prewarm(target) }
     LaunchedEffect(model) { model.loadLibrary() }
     LaunchedEffect(model) { if (!target.isMovie) SpoilerSettings.refresh() }

@@ -30,10 +30,18 @@ data class PendingVersion(val version: LibraryVersion, val episode: Episode?, va
  * pages; a tap on the selected one plays it), and which sheet or prompt is up. Main thread only.
  */
 class DetailsPageState(val model: DetailsModel) {
+    private val generation=model.accessGeneration
+    val playbackCurrent get()=model.acceptsPlaybackAction(generation)
     /** The episode tapped in the carousel; null follows the server's up-next one. */
     var selectedEpisodeId by mutableStateOf<String?>(null)
-    var sourcesFor by mutableStateOf<EpisodeTarget?>(null)
-    var versionsFor by mutableStateOf<EpisodeTarget?>(null)
+    private var sourceChoice by mutableStateOf<EpisodeTarget?>(null)
+    var sourcesFor:EpisodeTarget?
+        get()=sourceChoice.takeIf {playbackCurrent}
+        set(value) {if(value==null || playbackCurrent)sourceChoice=value}
+    private var versionChoice by mutableStateOf<EpisodeTarget?>(null)
+    var versionsFor:EpisodeTarget?
+        get()=versionChoice.takeIf {playbackCurrent}
+        set(value) {if(value==null || playbackCurrent)versionChoice=value}
     var pendingSource by mutableStateOf<PendingSource?>(null)
     var pendingVersion by mutableStateOf<PendingVersion?>(null)
     var episodeSourceHint by mutableStateOf<com.strmr.tv.api.SourceAvailability?>(null)
@@ -68,19 +76,22 @@ class DetailsPageState(val model: DetailsModel) {
 
     /** Play / Resume: library first, else the prequeue with the page's track picks. */
     fun playPrimary() {
+        if(!playbackCurrent)return
         val p = primary ?: return
         model.play(p.episode, p.start, prequeueTracks.pick(PlaybackCoordinator.warm.value))
     }
 
     /** Start Over: what Play plays, from the beginning. */
     fun startOver() {
+        if(!playbackCurrent)return
         val p = primary ?: return
         model.play(p.episode, null, prequeueTracks.pick(PlaybackCoordinator.warm.value))
     }
 
     /** An episode from where it was left (its own resume point). */
-    fun play(episode: Episode, from: StartPoint?) =
-        model.play(episode, from, prequeueTracks.pick(PlaybackCoordinator.warm.value))
+    fun play(episode: Episode, from: StartPoint?) {
+        if(playbackCurrent)model.play(episode, from, prequeueTracks.pick(PlaybackCoordinator.warm.value))
+    }
 
     /** Tap on an episode card: the selected one plays, another becomes the selection. */
     fun tapEpisode(episode: Episode) {
@@ -89,12 +100,14 @@ class DetailsPageState(val model: DetailsModel) {
 
     /** A source picked in the list: asks Resume / Start Over when there is a resume point. */
     fun choose(source: SourceResult, episode: Episode?, manual: ManualSourceTracks?) {
+        if(!playbackCurrent)return
         val resumeAt = model.resumePoint(episode)
         if (resumeAt != null) pendingSource = PendingSource(source, episode, resumeAt, manual) else model.play(source, episode, null, manual)
     }
 
     /** A library copy picked in Versions or the source list. */
     fun chooseVersion(version: LibraryVersion, episode: Episode?) {
+        if(!playbackCurrent)return
         val resumeAt = model.resumePoint(episode)
         if (resumeAt != null) pendingVersion = PendingVersion(version, episode, resumeAt) else model.playVersion(version, episode, null)
     }

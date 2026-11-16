@@ -63,7 +63,7 @@ fun SourcePicker(title:DetailsTarget,episode:Episode?,libraryVersions:List<Libra
     val scope=rememberCoroutineScope();val expected=remember {com.strmr.tv.library.ProfileDataContext.current}
     val target=com.strmr.tv.sources.SourceSearchTarget.from(title,episode)
     val state=remember(expected,target,title.name,title.year,title.imdbId) {com.strmr.tv.sources.SourceSearchState(scope,title,episode,expected)}
-    val tracks=remember(state,state.sourceGeneration) {SourceTracks(scope,expected,onProbeChanged=state::probeChanged,onProbeError=state::probeFailed)}
+    val tracks=remember(state,state.sourceGeneration) {SourceTracks(scope,expected,onProbeChanged=state::probeChanged,onProbeError=state::probeFailed,denialTitleId=title.titleId)}
     var manualIntent by remember(state,state.sourceGeneration) {mutableStateOf<com.strmr.tv.sources.SourceSearchState.ManualSelection?>(null)}
     val closeTracks={tracks.close();state.endManual();manualIntent=null}
     LaunchedEffect(state.requiresReload) {if(state.requiresReload)closeTracks()}
@@ -86,7 +86,7 @@ fun SourcePicker(title:DetailsTarget,episode:Episode?,libraryVersions:List<Libra
                 section("Streams")
                 when {
                     state.loading->item("loading") {Row(Modifier.padding(24.dp),horizontalArrangement=Arrangement.spacedBy(14.dp),verticalAlignment=Alignment.CenterVertically){CircularProgressIndicator(Modifier.size(20.dp),strokeWidth=2.dp);Text(if(state.supported)"Applying filters…" else "Searching sources…")}}
-                    state.error!=null->item("error") {androidx.compose.foundation.layout.Column(Modifier.padding(24.dp)){Text(state.error!!,color=MaterialTheme.colorScheme.error);androidx.compose.material3.OutlinedButton(onClick={closeTracks();state.retry()}){Text(if(state.requiresReload)"Reload source list" else "Retry")}}}
+                    state.error!=null->item("error") {androidx.compose.foundation.layout.Column(Modifier.padding(24.dp)){Text(state.error!!,color=MaterialTheme.colorScheme.error);if(state.vodDenied==null)androidx.compose.material3.OutlinedButton(onClick={closeTracks();state.retry()}){Text(if(state.requiresReload)"Reload source list" else "Retry")}}}
                     rows.isEmpty()->item("empty") {Text(if(state.supported && state.applied.active)"No matches in these retained search results." else "No sources found",Modifier.padding(24.dp))}
                     else->items(rows,key={"${state.sourceGeneration}:${it.key}"}) {row ->
                         val action=actions[row.result]
@@ -96,7 +96,7 @@ fun SourcePicker(title:DetailsTarget,episode:Episode?,libraryVersions:List<Libra
                             onLongClick={action?.let {state.use(it){current->state.beginManual(current)?.let {intent->manualIntent=intent;tracks.reconcile(current.result,current.expectedFileVersion,state.viewId);tracks.open(current.result)}}}}){action?.let {state.use(it){current->tracks.reconcile(current.result,current.expectedFileVersion,state.viewId);pick(current.result,tracks.manualFor(current.result))}}}
                     }
                 }
-                state.pageError?.let {message->item("page-error") {androidx.compose.foundation.layout.Column(Modifier.padding(16.dp)){Text(message);androidx.compose.material3.OutlinedButton(onClick={closeTracks();state.retry()}){Text(if(state.expiredNow)"Apply filters again" else "Retry page")}}}}
+                state.pageError?.let {message->item("page-error") {androidx.compose.foundation.layout.Column(Modifier.padding(16.dp)){Text(message);if(state.vodDenied==null)androidx.compose.material3.OutlinedButton(onClick={closeTracks();state.retry()}){Text(if(state.expiredNow)"Apply filters again" else "Retry page")}}}}
                 if(state.hasMore)item("more") {androidx.compose.material3.OutlinedButton(onClick=state::loadMore,enabled=!state.loadingMore,modifier=Modifier.padding(16.dp)){Text(if(state.loadingMore)"Loading…" else "Load more")}}
             }
         }

@@ -15,7 +15,10 @@ class DetailsActionContext(
     val model: DetailsModel,
     val episode: Episode?,
     val playPrimary: () -> Unit,
-)
+) {
+    private val generation=model.accessGeneration
+    val playbackCurrent get()=model.acceptsPlaybackAction(generation)
+}
 
 /**
  * Actions other features add to the details page without the page knowing them, Downloads

@@ -2,6 +2,10 @@ package com.strmr.tv.player
 
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.ApiError
+import com.strmr.tv.api.VodAccessDenial
+import com.strmr.tv.api.vodDenial
+import com.strmr.tv.api.VodDenialEvents
+import com.strmr.tv.library.ProfileDataContext
 import com.strmr.tv.api.PrequeueStatus
 import com.strmr.tv.api.ReleaseReportOptions
 import com.strmr.tv.api.ReleaseReportReply
@@ -41,7 +45,8 @@ class ServerReleaseReportGateway : ReleaseReportGateway {
     private val profile = ApiClient.profileId
     private val server = ApiClient.baseUrl
     private val account = ApiClient.session?.accountId
-    override fun isCurrent() = profile == ApiClient.profileId && server == ApiClient.baseUrl && account == ApiClient.session?.accountId
+    private val context=com.strmr.tv.library.ProfileDataContext.current
+    override fun isCurrent() = context==com.strmr.tv.library.ProfileDataContext.current && profile == ApiClient.profileId && server == ApiClient.baseUrl && account == ApiClient.session?.accountId
     private fun checkSession() = check(isCurrent()) { "The active profile or server changed. Reopen playback." }
     override suspend fun options(id: String): ReleaseReportOptions { checkSession(); return ApiClient.releaseReportOptions(id) }
     override suspend fun submit(id: String, reporting: Boolean, body: JsonObject): ReleaseReportReply { checkSession(); return ApiClient.submitReleaseAction(id, reporting, body) }
@@ -90,6 +95,7 @@ data class ReleaseReportState(
     val ready: PrequeueStatus? = null,
     val reportId: String? = null,
     val message: String? = null,
+    val denial:VodAccessDenial?=null,
 )
 
 /** Prepares one replacement while playback continues; adoption is always a separate user action. */
@@ -103,6 +109,8 @@ class ReleaseReports(
     private val clientId: String = Config.clientId,
     private val pollDelayMs: Long = 500,
     private val pollAttempts: Int = 120,
+    private val denialTitleId:String?=null,
+    private val denialContext:Long=ProfileDataContext.current,
 ) {
     private val mutable = MutableStateFlow(ReleaseReportState())
     val state: StateFlow<ReleaseReportState> = mutable
@@ -116,12 +124,15 @@ class ReleaseReports(
         if (loadStarted || closed) return
         loadStarted = true
         mutable.value = mutable.value.copy(busy = true, message = null)
+        val attempt=denialTitleId?.let {VodDenialEvents.begin(it,denialContext)}
         try {
             beforeOptions(); checkCurrent()
             val options = gateway.options(sourceId); checkCurrent()
             mutable.value = mutable.value.copy(options = options, busy = false)
         } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { mutable.value = mutable.value.copy(busy = false, message = "Could not load the selected release. This action needs a server with release reporting.") }
+        catch (e: Exception) {
+            if(!closed && gateway.isCurrent() && e is ApiError.Http && attempt!=null)e.vodDenial?.let {VodDenialEvents.reject(attempt,it)}
+            mutable.value = mutable.value.copy(busy=false,options=null,ready=null,denial=e.vodDenial,message=e.vodDenial?.message ?: "Could not load the selected release. This action needs a server with release reporting.") }
     }
 
     fun choose(problem: ReleaseProblem?) {
@@ -135,7 +146,7 @@ class ReleaseReports(
     fun resume(mode: ReleaseResume) { mutable.value = mutable.value.copy(resume = mode) }
 
     fun submit(reporting: Boolean, prepare: Boolean) {
-        if (mutable.value.busy || pending != null || closed) return
+        if (mutable.value.busy || pending != null || closed || mutable.value.denial!=null) return
         val options = mutable.value.options ?: return
         val problem = mutable.value.problem
         if (reporting && (problem == null || (problem == ReleaseProblem.AUDIO && mutable.value.track == null))) return
@@ -147,13 +158,14 @@ class ReleaseReports(
         }
         mutable.value = mutable.value.copy(busy = true, message = if (prepare) "Preparing a suitable alternative. Playback can continue." else "Saving report...")
         job = scope.launch {
+            var attempt=denialTitleId?.let {VodDenialEvents.begin(it,denialContext)}
             try {
                 checkCurrent()
                 // Obtain the replacement ID even if Back is pressed while POST is in flight,
                 // so cancellation can release the preparation instead of leaving an orphan.
                 val reply = withContext(NonCancellable) { withTimeout(12_000) { gateway.submit(sourceId, reporting, body) } }
                 pending = reply.replacement?.prequeueId
-                if (closed || !gateway.isCurrent()) { cleanup(); return@launch }
+                if (closed || mutable.value.denial!=null || !gateway.isCurrent()) { cleanup(); return@launch }
                 mutable.value = mutable.value.copy(reportId = reply.report?.id ?: mutable.value.reportId)
                 if (!prepare) {
                     mutable.value = mutable.value.copy(busy = false, message = "Report saved. Playback can continue.")
@@ -163,6 +175,7 @@ class ReleaseReports(
                 val ready = withTimeout(90_000) {
                     repeat(pollAttempts) {
                         checkCurrent()
+                        attempt=denialTitleId?.let {VodDenialEvents.begin(it,denialContext)}
                         val status = gateway.status(id)
                         checkCurrent()
                         when (status.status) {
@@ -182,8 +195,9 @@ class ReleaseReports(
                 mutable.value = mutable.value.copy(busy = false, message = "Preparation timed out. The current source is unchanged.")
             } catch (e: CancellationException) { cleanup(); throw e }
             catch (e: Exception) {
+                if(!closed && gateway.isCurrent() && e is ApiError.Http)attempt?.let {captured->e.vodDenial?.let {VodDenialEvents.reject(captured,it)}}
                 cleanup()
-                mutable.value = mutable.value.copy(busy = false, message = if (e is ApiError) "The server rejected this action. Reopen the menu to refresh the selection and language." else e.message ?: "Could not prepare another source.")
+                mutable.value = mutable.value.copy(busy = false,options=if(e.vodDenial!=null)null else mutable.value.options,ready=null,denial=e.vodDenial,message = e.vodDenial?.message ?: if (e is ApiError) "The server rejected this action. Reopen the menu to refresh the selection and language." else e.message ?: "Could not prepare another source.")
             }
         }
     }
@@ -191,7 +205,7 @@ class ReleaseReports(
     fun take() {
         val state = mutable.value
         val ready = state.ready ?: return
-        if (closed || !gateway.isCurrent()) {
+        if (closed || state.denial!=null || !gateway.isCurrent()) {
             mutable.value = state.copy(message = "Playback context changed. Reopen this menu.")
             scope.launch { cleanup() }
             return
@@ -205,7 +219,7 @@ class ReleaseReports(
 
     fun undo() {
         val id = mutable.value.reportId ?: return
-        if (mutable.value.busy || closed) return
+        if (mutable.value.busy || closed || mutable.value.denial!=null) return
         mutable.value = mutable.value.copy(busy = true)
         job = scope.launch {
             try {

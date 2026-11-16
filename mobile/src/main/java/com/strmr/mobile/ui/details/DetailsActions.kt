@@ -98,13 +98,13 @@ fun SecondaryActions(state: DetailsPageState, trailer: TrailerController, extras
     val scope = rememberCoroutineScope()
     var watchlistBusy by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Top) {
-        DetailsActionItem("Sources", Icons.Outlined.Search, enabled = target.isMovie || state.activeEpisode != null) {
+        DetailsActionItem("Sources", Icons.Outlined.Search, enabled = state.playbackCurrent && (target.isMovie || state.activeEpisode != null)) {
             state.sourcesFor = EpisodeTarget(state.activeEpisode)
         }
         if (model.libraryVersions(state.activeEpisode).isNotEmpty()) {
             DetailsActionItem("Versions", Icons.Outlined.Storage) { state.versionsFor = EpisodeTarget(state.activeEpisode) }
         }
-        if (trailer.available) {
+        if (model.playable && trailer.available) {
             DetailsActionItem("Trailer", Icons.Outlined.Movie, busy = trailer.preparingFullScreen) { trailer.buttonPressed(target.name) }
         }
         val inList = WatchlistStore.contains(target, model.serverInWatchlist)
