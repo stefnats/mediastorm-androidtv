@@ -20,9 +20,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import com.strmr.tv.library.ProfileDataContext
+import com.strmr.tv.live.RecordingCaptureRules
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -45,13 +49,15 @@ import kotlinx.coroutines.delay
 @Composable
 fun RecordingDetailScreen(id: String) {
     val scope = rememberCoroutineScope()
-    val state = remember { RecordingsState(scope) }
+    val context by ProfileDataContext.changes.collectAsState()
+    val state = remember(id,context) { RecordingsState(scope,context).also {it.selectedId=id} }
+    DisposableEffect(state) {onDispose {state.dispose()}}
     val navigator = LocalNavigator.current
-    val confirmations = remember { RecordingConfirmations(state).also { it.onDeleted = { navigator.pop() } } }
+    val confirmations = remember(state) { RecordingConfirmations(state).also { it.onDeleted = { navigator.pop() } } }
     val sessionsEnded by PlaybackCoordinator.sessionsEnded.collectAsState()
     val r = state.recordings.firstOrNull { it.id == id }
 
-    LaunchedEffect(sessionsEnded) {
+    LaunchedEffect(state,sessionsEnded) {
         while (true) {
             state.load(quiet = true)
             delay(10_000)
@@ -77,7 +83,7 @@ private fun Detail(r: Recording, state: RecordingsState, confirmations: Recordin
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(statusIcon(r.status), contentDescription = null, tint = statusColor(r.status), modifier = Modifier.size(18.dp))
-            Text(RecordingRules.statusLabel(r.status).uppercase(), color = statusColor(r.status), style = MaterialTheme.typography.labelLarge,
+            Text(RecordingCaptureRules.status(r).uppercase(), color = statusColor(r.status), style = MaterialTheme.typography.labelLarge,
                  fontWeight = FontWeight.Bold)
         }
         Text(RecordingRules.title(r), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
@@ -85,12 +91,13 @@ private fun Detail(r: Recording, state: RecordingsState, confirmations: Recordin
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
         Fact("Starts", RecordingRules.dateTime(r.startAt))
         Fact("Ends", RecordingRules.dateTime(r.endAt))
-        RecordingRules.duration(r.startAt, r.endAt).takeIf { it.isNotEmpty() }?.let { Fact("Duration", it) }
-        RecordingRules.size(r.outputSizeBytes)?.let { Fact("Size", it) }
+        RecordingRules.duration(r.startAt, r.endAt).takeIf { it.isNotEmpty() }?.let { Fact(if(r.capture==null)"Duration" else "Scheduled duration", it) }
+        RecordingRules.size(RecordingCaptureRules.dataBytes(r))?.let { Fact(RecordingCaptureRules.dataLabel(r), it) }
         if (!r.ruleId.isNullOrEmpty()) Fact("Scheduled by", "A recurring rule")
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
         Text(r.description?.ifBlank { null } ?: "No program description available.", style = MaterialTheme.typography.bodyMedium)
         if (RecordingRules.canCancel(r)) Text(state.planFor(r.id)?.summary ?: "Recording capacity forecast unavailable.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        RecordingCaptureRules.summary(r)?.let {Text(it,color=MaterialTheme.colorScheme.onSurfaceVariant)}
         RecordingRules.visibleError(r.error)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Spacer(Modifier.size(12.dp))
         RecordingActions.of(r, state.ruleFor(r)).forEach { a ->
@@ -108,6 +115,22 @@ private fun Detail(r: Recording, state: RecordingsState, confirmations: Recordin
                     else ButtonDefaults.outlinedButtonColors(),
                 ) { content() }
             }
+        }
+        RecordingCaptureRules.known(r)?.let {capture ->
+            HorizontalDivider(Modifier.padding(vertical=8.dp))
+            Text("Captured parts",style=MaterialTheme.typography.titleMedium)
+            if(capture.parts.isEmpty())Text("No captured parts yet.",color=MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("${capture.gaps.size} recorded capture gaps · ${capture.sourceChanges ?: 0} source changes",color=MaterialTheme.colorScheme.onSurfaceVariant)
+            capture.parts.forEach {part -> key(part.index) {
+                Text("Part ${part.index}",fontWeight=FontWeight.SemiBold)
+                Fact(RecordingCaptureRules.partDataLabel(part,r),RecordingCaptureRules.partDataSize(part,r))
+                Fact("Capture started",RecordingRules.dateTime(part.startedAt))
+                part.endedAt?.let {Fact("Capture ended",RecordingRules.dateTime(it))}
+                Text(RecordingCaptureRules.endLabel(part,r),color=MaterialTheme.colorScheme.onSurfaceVariant)
+                if(RecordingCaptureRules.closed(part) && !RecordingCaptureRules.playable(r,part))Text("Playback is unavailable for this part.",color=MaterialTheme.colorScheme.onSurfaceVariant)
+                val action=state.partAction(r,part)
+                OutlinedButton(onClick={action?.let(state::playPart)},enabled=!busy && action!=null,modifier=Modifier.fillMaxWidth()) {Text("Play part ${part.index} from start")}
+            }}
         }
         if (!RecordingRules.canDelete(r)) {
             Text("This recording belongs to a recurring rule. Pause or delete the rule under Rules & Buffers.",

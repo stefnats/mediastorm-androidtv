@@ -14,8 +14,8 @@ enum class RecordingFilter(val label: String) {
         ALL -> true
         UPCOMING -> r.status == "pending"
         RECORDING -> r.status == "starting" || r.status == "running"
-        COMPLETED -> r.status == "completed"
-        HISTORY -> r.status == "failed" || r.status == "cancelled"
+        COMPLETED -> r.status == "completed" && !RecordingCaptureRules.incomplete(r)
+        HISTORY -> r.status == "failed" || r.status == "cancelled" || r.status == "completed" && RecordingCaptureRules.incomplete(r)
     }
 }
 
@@ -34,7 +34,14 @@ object RecordingRules {
     fun isRecording(r: Recording) = r.status == "running"
 
     /** A saved file that has started (finished, stopped, failed part way, or still growing). */
-    fun canPlay(r: Recording) = !r.outputPath.isNullOrBlank() && r.status in setOf("completed", "running", "cancelled", "failed")
+    fun canPlay(r: Recording):Boolean {
+        if(RecordingCaptureRules.firstClosed(r)!=null)return true
+        RecordingCaptureRules.known(r)?.let {capture ->
+            val first=capture.parts.singleOrNull() ?: return false
+            if(capture.phase!="capturing" || first.index!=1 || first.endedAt!=null || (first.bytes ?: 0)<=0 || first.streamPath!="recording:${r.id}/parts/1" || !isRecording(r))return false
+        }
+        return !r.outputPath.isNullOrBlank() && r.status in setOf("completed", "running", "cancelled", "failed")
+    }
 
     fun canCancel(r: Recording) = r.status in setOf("pending", "starting", "running")
 

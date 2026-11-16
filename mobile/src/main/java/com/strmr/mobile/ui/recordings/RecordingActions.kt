@@ -17,7 +17,7 @@ object RecordingActions {
      */
     fun of(r: Recording, rule: SeriesRule?): List<RecordingAction> = buildList {
         val recording = RecordingRules.isRecording(r)
-        if (RecordingRules.canPlay(r)) add(RecordingAction(RecordingActionKind.PLAY, if (recording) "Play In Progress" else "Play Recording"))
+        if (RecordingRules.canPlay(r)) add(RecordingAction(RecordingActionKind.PLAY, com.strmr.tv.live.RecordingCaptureRules.playLabel(r)))
         if (RecordingRules.canCancel(r)) {
             add(RecordingAction(RecordingActionKind.CANCEL, if (recording) "Stop Recording" else "Cancel Scheduled Recording"))
         }

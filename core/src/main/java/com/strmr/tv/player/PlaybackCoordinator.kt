@@ -22,6 +22,8 @@ import com.strmr.tv.live.LivePlaybackAttempt
 import com.strmr.tv.live.RecordingInterruptionConsent
 import com.strmr.tv.live.Recording
 import com.strmr.tv.live.RecordingRules
+import com.strmr.tv.live.RecordingCaptureRules
+import com.strmr.tv.live.RecordingPart
 import com.strmr.tv.live.recordingStreamUrl
 import com.strmr.tv.live.startRecordingHls
 import com.strmr.tv.live.startLive
@@ -147,19 +149,34 @@ object PlaybackCoordinator {
      * file, or one still recording over the server's growing HLS session from the start
      * ([RecordingHls]).
      */
-    fun playRecording(recording: Recording) {
-        if (_resolving.value != null) return
+    fun playRecording(recording: Recording, expectedContext:Long=ProfileDataContext.current) {
+        if (expectedContext!=ProfileDataContext.current || _resolving.value != null || !RecordingRules.canPlay(recording)) return
+        RecordingCaptureRules.firstClosed(recording)?.let {part ->
+            playRecordingPart(recording,part,expectedContext);return
+        }
+        if(RecordingCaptureRules.known(recording)?.parts?.size?.let {it>1}==true)return
         val title = RecordingRules.title(recording)
         val request = PlaybackRequest(DetailsTarget(recording.id, title, isMovie = true))
         AppLog.i("Recordings", "play ${recording.id} status=${recording.status}")
         if (RecordingRules.isRecording(recording)) {
-            begin(request, "Starting…", live = { _, _ -> ApiClient.startRecordingHls(recording, title) }, growing = true,
+            begin(request, "Starting…", live = { _, _ -> ApiClient.startRecordingHls(recording, title,expectedContext) }, growing = true, expectedContext=expectedContext,
                   liveLabel = StreamInfo.recording(recording.channelName))
             return
         }
-        pending = PlayerSession(request, ApiClient.recordingStreamUrl(recording, title), null, reportsProgress = false,
-                                sourceLabel = StreamInfo.recording(recording.channelName))
-        launchPlayer()
+        ApiClient.inContext(expectedContext) {
+            pending = PlayerSession(request, ApiClient.recordingStreamUrl(recording, title,expectedContext), null, reportsProgress = false,
+                                    sourceLabel = StreamInfo.recording(recording.channelName))
+            launchPlayer()
+        }
+    }
+
+    fun playRecordingPart(recording:Recording,part:RecordingPart,expectedContext:Long) {
+        if(expectedContext!=ProfileDataContext.current || _resolving.value!=null || !RecordingCaptureRules.playable(recording,part))return
+        ApiClient.inContext(expectedContext) {
+            val title="${RecordingRules.title(recording)} · Part ${part.index}"
+            pending=recordingPartSession(recording,part,ApiClient.recordingStreamUrl(recording,title,expectedContext,part))
+            launchPlayer()
+        }
     }
 
     /**

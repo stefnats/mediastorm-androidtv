@@ -1,0 +1,16 @@
+{
+  "files": {
+    "capturing-parts.json": "RecordingPublic",
+    "create-block.json": "RecordingPublic",
+    "create-epg.json": "RecordingPublic",
+    "first-empty.json": "RecordingPublic",
+    "legacy-completed.json": "RecordingPublic",
+    "multipart-failed.json": "RecordingPublic",
+    "pending.json": "RecordingPublic",
+    "recordings-list.json": "RecordingList",
+    "restored.json": "RecordingPublic",
+    "waiting-capacity.json": "RecordingPublic"
+  },
+  "origin": "actual RecordingsHandler.Get/List/CreateEPG/CreateTimeBlock with owned synthetic account/profile",
+  "version": 1
+}

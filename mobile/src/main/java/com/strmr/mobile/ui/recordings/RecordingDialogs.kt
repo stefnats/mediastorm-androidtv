@@ -25,7 +25,7 @@ class RecordingConfirmations(private val state: RecordingsState) {
     var onDeleted: () -> Unit = {}
 
     fun run(r: Recording, kind: RecordingActionKind) {
-        if (kind == RecordingActionKind.PLAY) PlaybackCoordinator.playRecording(r) else pending = r to kind
+        if (kind == RecordingActionKind.PLAY) state.play(r) else pending = r to kind
     }
 
     fun ruleFor(r: Recording) = state.ruleFor(r)
@@ -41,8 +41,7 @@ class RecordingConfirmations(private val state: RecordingsState) {
             RecordingActionKind.CANCEL -> state.cancel(r)
             RecordingActionKind.CANCEL_SERIES -> state.cancelSeries(r)
             RecordingActionKind.DELETE -> {
-                state.delete(r)
-                onDeleted()
+                state.delete(r,onDeleted)
             }
             RecordingActionKind.PLAY -> Unit
         }

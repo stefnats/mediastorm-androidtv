@@ -16,6 +16,11 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.strmr.tv.live.RecordingCaptureRules
+import com.strmr.tv.live.RecordingPart
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -60,23 +65,25 @@ fun RecordingDetail(
     onDelete: (Recording) -> Unit,
     modifier: Modifier = Modifier,
     plan: RecordingPlanItem? = null,
+    onPlayPart:(Recording,RecordingPart)->Unit={_,_->},
 ) {
     Column(
-        modifier.background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(16.dp)).padding(24.dp),
+        modifier.background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(16.dp)).verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        val label = RecordingRules.statusLabel(r.status).uppercase()
+        val label = RecordingCaptureRules.status(r).uppercase()
         Text(if (RecordingRules.isRecording(r)) "● $label" else label, color = statusColor(r.status),
              style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
         Text(RecordingRules.title(r), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold,
              maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(r.channelName, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text("${RecordingRules.dateTime(r.startAt)} — ${RecordingRules.dateTime(r.endAt)}", color = Muted)
-        val facts = listOfNotNull(RecordingRules.duration(r.startAt, r.endAt).ifEmpty { null }, RecordingRules.size(r.outputSizeBytes))
+        val facts = listOfNotNull(RecordingCaptureRules.scheduledDuration(r),RecordingCaptureRules.dataText(r))
         if (facts.isNotEmpty()) Text(facts.joinToString(" · "), color = Muted)
         Text(r.description?.ifBlank { null } ?: "No program description available.", color = Color.White.copy(alpha = 0.8f),
              maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
         if (RecordingRules.canCancel(r)) Text(plan?.summary ?: "Recording capacity forecast unavailable.", color = if (plan?.state == "conflict") Color(0xFFFFD60A) else Muted)
+        RecordingCaptureRules.summary(r)?.let {Text(it,color=Muted)}
         RecordingRules.visibleError(r.error)?.let { Text(it, color = RecordingRed, maxLines = 3, overflow = TextOverflow.Ellipsis) }
         Spacer(Modifier.height(10.dp))
         // Left from here goes back to the list; entering the row lands on the button last focused.
@@ -92,6 +99,20 @@ fun RecordingDetail(
                     Text(a.label)
                 }
             }
+        }
+        RecordingCaptureRules.known(r)?.let {capture ->
+            Spacer(Modifier.height(12.dp))
+            Text("Captured parts",style=MaterialTheme.typography.titleMedium)
+            if(capture.parts.isEmpty())Text("No captured parts yet.",color=Muted)
+            Text("${capture.gaps.size} recorded capture gaps · ${capture.sourceChanges ?: 0} source changes",color=Muted)
+            capture.parts.forEach {part -> key(part.index) {
+                Text("Part ${part.index} · ${RecordingCaptureRules.partDataLabel(part,r)}: ${RecordingCaptureRules.partDataSize(part,r)}",fontWeight=FontWeight.SemiBold)
+                Text("Capture started ${RecordingRules.dateTime(part.startedAt)}",color=Muted)
+                part.endedAt?.let {Text("Capture ended ${RecordingRules.dateTime(it)}",color=Muted)}
+                Text(RecordingCaptureRules.endLabel(part,r),color=Muted)
+                if(RecordingCaptureRules.closed(part) && !RecordingCaptureRules.playable(r,part))Text("Playback is unavailable for this part.",color=Muted)
+                OutlinedButton(onClick={onPlayPart(r,part)},enabled=!busy && RecordingCaptureRules.playable(r,part)) {Text("Play part ${part.index} from start")}
+            }}
         }
     }
 }
@@ -116,7 +137,7 @@ private data class Action(val kind: Kind, val label: String, val icon: ImageVect
  */
 private fun actions(r: Recording, rule: SeriesRule?): List<Action> = buildList {
     val recording = RecordingRules.isRecording(r)
-    if (RecordingRules.canPlay(r)) add(Action(Kind.PLAY, if (recording) "Play In Progress" else "Play Recording", Icons.Filled.PlayArrow))
+    if (RecordingRules.canPlay(r)) add(Action(Kind.PLAY, com.strmr.tv.live.RecordingCaptureRules.playLabel(r), Icons.Filled.PlayArrow))
     if (RecordingRules.canCancel(r)) add(Action(Kind.CANCEL, if (recording) "Stop Recording" else "Cancel Scheduled Recording", Icons.Filled.Close))
     if (rule != null) add(Action(Kind.CANCEL_SERIES, "Cancel Series Recording", Icons.Filled.DateRange))
     if (RecordingRules.canDelete(r)) add(Action(Kind.DELETE, "Delete Recording", Icons.Filled.Delete))
@@ -130,7 +151,7 @@ fun RecordingMenu(
 ) {
     ChoiceDialog(
         title = RecordingRules.title(r),
-        message = "${r.channelName} · ${RecordingRules.statusLabel(r.status)}",
+        message = "${r.channelName} · ${RecordingCaptureRules.status(r)}",
         choices = actions(r, rule).map { a ->
             DialogChoice(a.label) { a.run(r, { onPlay() }, { onCancel() }, { onCancelSeries() }, { onDelete() }) }
         } +

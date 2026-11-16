@@ -68,7 +68,7 @@ fun statusIcon(status: String): ImageVector = when (status) {
 
 /** "Oct 22, 7:05 PM · 1h" */
 fun recordingWhen(r: Recording): String =
-    listOf(RecordingRules.dateTime(r.startAt), RecordingRules.duration(r.startAt, r.endAt)).filter { it.isNotEmpty() }.joinToString(" · ")
+    listOf(RecordingRules.dateTime(r.startAt), com.strmr.tv.live.RecordingCaptureRules.scheduledDuration(r).orEmpty()).filter { it.isNotEmpty() }.joinToString(" · ")
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -95,11 +95,11 @@ fun RecordingRow(r: Recording, busy: Boolean, onOpen: () -> Unit, onPlay: () -> 
                     RecordingRules.canPlay(r) -> IconButton(onClick = onPlay) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = if (RecordingRules.isRecording(r)) "Play In Progress" else "Play")
                     }
-                    else -> Text(RecordingRules.statusLabel(r.status), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold,
+                    else -> Text(com.strmr.tv.live.RecordingCaptureRules.status(r), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold,
                                  color = color, modifier = Modifier.background(color.copy(alpha = 0.18f), RoundedCornerShape(50))
                                      .padding(horizontal = 8.dp, vertical = 3.dp))
                 }
-                RecordingRules.size(r.outputSizeBytes)?.let {
+                com.strmr.tv.live.RecordingCaptureRules.dataText(r)?.let {
                     Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -127,7 +127,7 @@ fun RecordingMenuSheet(r: Recording, actions: List<RecordingAction>, onDismiss: 
             item {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Text(RecordingRules.title(r), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("${r.channelName} · ${RecordingRules.statusLabel(r.status)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${r.channelName} · ${com.strmr.tv.live.RecordingCaptureRules.status(r)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             items(actions, key = { it.kind }) { a ->

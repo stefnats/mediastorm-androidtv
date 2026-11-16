@@ -17,6 +17,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import com.strmr.tv.library.ProfileDataContext
+import com.strmr.tv.live.RecordingCaptureRules
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -71,16 +74,18 @@ val RecordingRed = Color(0xFFFF453A)
 @Composable
 fun RecordingsScreen(asPage: Boolean = false) {
     val scope = rememberCoroutineScope()
-    val state = remember { RecordingsState(scope) }
+    val context by ProfileDataContext.changes.collectAsState()
+    val state = remember(context) { RecordingsState(scope,context) }
+    DisposableEffect(state) {onDispose {state.dispose()}}
     val actionsFocus = remember { FocusRequester() }
     val firstFilter = remember { FocusRequester() }
     val selectedRow = remember { FocusRequester() }
-    var menuFor by remember { mutableStateOf<Recording?>(null) }
-    var confirm by remember { mutableStateOf<Pair<Recording, Boolean>?>(null) }
-    var cancelSeriesFor by remember { mutableStateOf<Recording?>(null) }
+    var menuFor by remember(state) { mutableStateOf<Recording?>(null) }
+    var confirm by remember(state) { mutableStateOf<Pair<Recording, Boolean>?>(null) }
+    var cancelSeriesFor by remember(state) { mutableStateOf<Recording?>(null) }
     val sessionsEnded by PlaybackCoordinator.sessionsEnded.collectAsState()
 
-    LaunchedEffect(sessionsEnded) {
+    LaunchedEffect(state,sessionsEnded) {
         while (true) {
             state.load(quiet = true)
             delay(10_000)
@@ -147,10 +152,12 @@ fun RecordingsScreen(asPage: Boolean = false) {
                         )
                     }
                 }
+                val partActions=selected.capture?.parts.orEmpty().associate {it.index to state.partAction(selected,it)}
                 RecordingDetail(
                     plan = state.planFor(selected.id),
                     r = selected, rule = state.ruleFor(selected), busy = state.busyId == selected.id, actionsFocus = actionsFocus,
-                    onPlay = { PlaybackCoordinator.playRecording(it) },
+                    onPlay = { state.play(it) },
+                    onPlayPart = {_,part -> partActions[part.index]?.let(state::playPart)},
                     onCancel = { confirm = it to false },
                     onCancelSeries = { cancelSeriesFor = it },
                     onDelete = { confirm = it to true },
@@ -161,7 +168,7 @@ fun RecordingsScreen(asPage: Boolean = false) {
     }
 
     menuFor?.let { r ->
-        RecordingMenu(r, state.ruleFor(r), onPlay = { PlaybackCoordinator.playRecording(r) }, onCancel = { confirm = r to false },
+        RecordingMenu(r, state.ruleFor(r), onPlay = { state.play(r) }, onCancel = { confirm = r to false },
                       onCancelSeries = { cancelSeriesFor = r }, onDelete = { confirm = r to true }, onDismiss = { menuFor = null })
     }
     confirm?.let { (r, delete) ->
@@ -210,7 +217,7 @@ private fun RecordingRow(
         supportingContent = {
             Column {
                 Text(r.channelName, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${RecordingRules.statusLabel(r.status)} · ${RecordingRules.dateTime(r.startAt)}", maxLines = 1,
+                Text("${RecordingCaptureRules.status(r)} · ${RecordingRules.dateTime(r.startAt)}", maxLines = 1,
                      style = MaterialTheme.typography.bodySmall)
             }
         },

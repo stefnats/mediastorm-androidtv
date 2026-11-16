@@ -21,6 +21,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import com.strmr.tv.library.ProfileDataContext
+import com.strmr.tv.live.RecordingCaptureRules
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -51,13 +54,15 @@ import kotlinx.coroutines.delay
 @Composable
 fun RecordingsScreen(asPage: Boolean) {
     val scope = rememberCoroutineScope()
-    val state = remember { RecordingsState(scope) }
-    val confirmations = remember { RecordingConfirmations(state) }
+    val context by ProfileDataContext.changes.collectAsState()
+    val state = remember(context) { RecordingsState(scope,context) }
+    DisposableEffect(state) {onDispose {state.dispose()}}
+    val confirmations = remember(state) { RecordingConfirmations(state) }
     val navigator = LocalNavigator.current
-    var menuFor by remember { mutableStateOf<Recording?>(null) }
+    var menuFor by remember(state) { mutableStateOf<Recording?>(null) }
     val sessionsEnded by PlaybackCoordinator.sessionsEnded.collectAsState()
 
-    LaunchedEffect(sessionsEnded) {
+    LaunchedEffect(state,sessionsEnded) {
         while (true) {
             state.load(quiet = true)
             delay(10_000)
@@ -97,7 +102,7 @@ fun RecordingsScreen(asPage: Boolean) {
                                     plan = state.planFor(r.id),
                                     r = r, busy = state.busyId == r.id,
                                     onOpen = { navigator.push(Route.RecordingDetail(r.id)) },
-                                    onPlay = { PlaybackCoordinator.playRecording(r) },
+                                    onPlay = { state.play(r) },
                                     onMenu = { menuFor = r },
                                 )
                             }

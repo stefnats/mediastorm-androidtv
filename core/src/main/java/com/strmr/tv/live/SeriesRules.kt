@@ -61,12 +61,15 @@ data class SeriesRule(
 @Serializable
 private data class SeriesRulesResponse(val rules: List<SeriesRule>? = null)
 
-suspend fun ApiClient.recordingRules(): List<SeriesRule> =
-    send<SeriesRulesResponse>("GET", "/api/live/recording-rules", mapOf("profileId" to profileId)).rules.orEmpty()
+suspend fun ApiClient.recordingRules(expectedContext:Long=com.strmr.tv.library.ProfileDataContext.current): List<SeriesRule> {
+    val profile=inContext(expectedContext){profileId}
+    return send<SeriesRulesResponse>("GET", "/api/live/recording-rules", mapOf("profileId" to profile),expectedContext=expectedContext).rules.orEmpty()
+}
 
 /** Deletes a rule; the server cancels the airings it scheduled (one recording now keeps going). */
-suspend fun ApiClient.deleteRecordingRule(id: String) {
-    sendRaw("DELETE", "/api/live/recording-rules/${segment(id)}")
+suspend fun ApiClient.deleteRecordingRule(id: String,expectedContext:Long=com.strmr.tv.library.ProfileDataContext.current) {
+    val profile=inContext(expectedContext){profileId}
+    sendRaw("DELETE", "/api/live/recording-rules/${segment(id)}",query=mapOf("profileId" to profile),expectedContext=expectedContext)
 }
 
 /** Switches a rule between every airing and new episodes only; the server reschedules its airings. */
