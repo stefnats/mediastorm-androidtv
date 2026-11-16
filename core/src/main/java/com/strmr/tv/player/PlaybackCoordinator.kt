@@ -75,6 +75,7 @@ object PlaybackCoordinator {
 
     private val scope = MainScope()
     private var resolveJob: Job? = null
+    private var startupAttempt: PlaybackStartupAttempt? = null
     private val prequeue = PrequeueResolver(scope, progress = { s, d -> stage.value = s; detail.value = d })
     private val catalog = CatalogPlaybackResolver(prequeue::resolve)
     /** The details page's prequeue as it resolves, for its Audio & Subtitles button. */
@@ -82,10 +83,11 @@ object PlaybackCoordinator {
 
     /** Automatic catalog playback shares its selection with Up Next and prefetch. */
     fun play(request: PlaybackRequest, picks: PrequeuePick? = null,expectedContext:Long=ProfileDataContext.current, chooseLegacyLibrary: (() -> Unit)? = null) {
+        val startedNanos = PlaybackStartupTiming.now()
         val expected = expectedContext
         if(expected!=ProfileDataContext.current)return
         begin(request, "Searching…", expectedContext = expected,
-            resolveWithSettings = { settings -> catalog.resolve(request, settings, picks, expected, chooseLegacyLibrary) })
+            resolveWithSettings = { settings -> catalog.resolve(request, settings, picks, expected, chooseLegacyLibrary) }, startedNanos = startedNanos)
     }
 
     /**
@@ -99,10 +101,12 @@ object PlaybackCoordinator {
         resolved: Pair<String, TrackSelection?>? = null,
         prepared: com.strmr.tv.api.PrequeueStatus? = null,expectedContext:Long=ProfileDataContext.current,
     ) {
+        val startedNanos = PlaybackStartupTiming.now()
         val expected=expectedContext
         if(expected!=ProfileDataContext.current)return
         // A stream picked over a library copy (Switch Source) is no longer that copy.
-        begin(request.copy(libraryVersion = null), "Preparing…", carried = carried, expectedContext=expected, resolve = {
+        begin(request.copy(libraryVersion = null), "Preparing…", carried = carried, expectedContext=expected, startedNanos=startedNanos,
+            input=startupInput(prepared, resolved != null), resolve = {
             if (prepared != null) {
                 return@begin ResolvedStream(requireNotNull(prepared.streamPath), prepared.trackSelection, prepared.displayName,
                     prepared.subtitleTracks.orEmpty(), manualTracks = true, source = prequeueSourceHints(prepared), prequeueId = prepared.prequeueId)
@@ -124,9 +128,11 @@ object PlaybackCoordinator {
 
     /** A trailer full screen, in the same player, without progress. */
     fun playTrailer(url: String, name: String,expectedContext:Long=ProfileDataContext.current) {
+        val startedNanos = PlaybackStartupTiming.now()
         if (_resolving.value != null) return
         val ownership=PlaybackSessionContext.capture(expectedContext)
-        pending = PlayerSession(PlaybackRequest(DetailsTarget("trailer", name, isMovie = true)), url, null, reportsProgress = false,ownership=ownership)
+        val timing = PlaybackStartupTiming.begin(ownership, StartupInput.DIRECT_INPUT_SUPPLIED, startedNanos)
+        pending = timing.attach(PlayerSession(PlaybackRequest(DetailsTarget("trailer", name, isMovie = true)), url, null, reportsProgress = false,ownership=ownership))
         launchPlayer()
     }
 
@@ -136,6 +142,7 @@ object PlaybackCoordinator {
      * plays from an HLS session that can be paused, rewound and returned to live.
      */
     fun playLive(channel: LiveChannel, programTitle: String?, expectedContext: Long = ProfileDataContext.current) {
+        val startedNanos = PlaybackStartupTiming.now()
         if (expectedContext != ProfileDataContext.current || _resolving.value != null) return
         val request = PlaybackRequest(DetailsTarget(channel.id, programTitle ?: channel.name, isMovie = true, backdropUrl = null, logoUrl = channel.logoUrl))
         val attempt = LivePlaybackAttempt(requireCurrent = { ProfileDataContext.requireCurrent(expectedContext) })
@@ -149,7 +156,7 @@ object PlaybackCoordinator {
             }
         }
         begin(request, "Tuning…", live = live, liveChannel = channel, expectedContext = expectedContext,
-              liveLabel = StreamInfo.live(channel.name))
+              liveLabel = StreamInfo.live(channel.name), startedNanos = startedNanos)
     }
 
     /**
@@ -158,9 +165,10 @@ object PlaybackCoordinator {
      * ([RecordingHls]).
      */
     fun playRecording(recording: Recording, expectedContext:Long=ProfileDataContext.current) {
+        val startedNanos = PlaybackStartupTiming.now()
         if (expectedContext!=ProfileDataContext.current || _resolving.value != null || !RecordingRules.canPlay(recording)) return
         RecordingCaptureRules.firstClosed(recording)?.let {part ->
-            playRecordingPart(recording,part,expectedContext);return
+            playRecordingPartTimed(recording,part,expectedContext,startedNanos);return
         }
         if(RecordingCaptureRules.known(recording)?.parts?.size?.let {it>1}==true)return
         val title = RecordingRules.title(recording)
@@ -168,21 +176,28 @@ object PlaybackCoordinator {
         AppLog.i("Recordings", "play ${recording.id} status=${recording.status}")
         if (RecordingRules.isRecording(recording)) {
             begin(request, "Starting…", live = { _, _ -> ApiClient.startRecordingHls(recording, title,expectedContext) }, growing = true, expectedContext=expectedContext,
-                  liveLabel = StreamInfo.recording(recording.channelName))
+                  liveLabel = StreamInfo.recording(recording.channelName), startedNanos = startedNanos)
             return
         }
         ApiClient.inContext(expectedContext) {
-            pending = PlayerSession(request, ApiClient.recordingStreamUrl(recording, title,expectedContext), null, reportsProgress = false,
-                                    sourceLabel = StreamInfo.recording(recording.channelName),ownership=PlaybackSessionContext.capture(expectedContext))
+            val owner = PlaybackSessionContext.capture(expectedContext)
+            val timing = PlaybackStartupTiming.begin(owner, StartupInput.DIRECT_INPUT_SUPPLIED, startedNanos)
+            pending = timing.attach(PlayerSession(request, ApiClient.recordingStreamUrl(recording, title,expectedContext), null, reportsProgress = false,
+                                    sourceLabel = StreamInfo.recording(recording.channelName),ownership=owner))
             launchPlayer()
         }
     }
 
-    fun playRecordingPart(recording:Recording,part:RecordingPart,expectedContext:Long) {
+    fun playRecordingPart(recording:Recording,part:RecordingPart,expectedContext:Long) =
+        playRecordingPartTimed(recording,part,expectedContext,PlaybackStartupTiming.now())
+
+    private fun playRecordingPartTimed(recording:Recording,part:RecordingPart,expectedContext:Long,startedNanos:Long) {
         if(expectedContext!=ProfileDataContext.current || _resolving.value!=null || !RecordingCaptureRules.playable(recording,part))return
         ApiClient.inContext(expectedContext) {
             val title="${RecordingRules.title(recording)} · Part ${part.index}"
-            pending=recordingPartSession(recording,part,ApiClient.recordingStreamUrl(recording,title,expectedContext,part),PlaybackSessionContext.capture(expectedContext))
+            val owner=PlaybackSessionContext.capture(expectedContext)
+            val timing=PlaybackStartupTiming.begin(owner,StartupInput.DIRECT_INPUT_SUPPLIED,startedNanos)
+            pending=timing.attach(recordingPartSession(recording,part,ApiClient.recordingStreamUrl(recording,title,expectedContext,part),owner))
             launchPlayer()
         }
     }
@@ -193,8 +208,11 @@ object PlaybackCoordinator {
      * file through `/api/video/stream` (providers serve the archive whole, with byte ranges).
      */
     fun playCatchup(channel: LiveChannel, program: EpgProgram) {
+        val startedNanos = PlaybackStartupTiming.now()
         if (_resolving.value != null) return
         val ownership=PlaybackSessionContext.capture()
+        val timing=PlaybackStartupTiming.begin(ownership,startedNanos=startedNanos)
+        startupAttempt=timing
         val request = PlaybackRequest(DetailsTarget("catchup:${channel.id}:${program.start}", program.title, isMovie = true))
         AppLog.i("Catchup", "play ${channel.id} ${program.start} ${program.title}")
         _resolving.value = request
@@ -206,12 +224,14 @@ object PlaybackCoordinator {
                 val archive = ApiClient.liveCatchup(channel, program,expectedContext=ownership.epoch)
                 ownership.requireCurrent()
                 AppLog.i("Catchup", "archive from ${archive.offsetSeconds}s for ${archive.durationSeconds}s")
-                pending = PlayerSession(request, ApiClient.catchupStreamUrl(archive, channel, program, ownership.epoch), null, reportsProgress = false,
-                                        sourceLabel = listOf("Catch-up", channel.name).joinToString(" · "),ownership=ownership)
+                pending = timing.attach(PlayerSession(request, ApiClient.catchupStreamUrl(archive, channel, program, ownership.epoch), null, reportsProgress = false,
+                                        sourceLabel = listOf("Catch-up", channel.name).joinToString(" · "),ownership=ownership))
                 launchPlayer()
             } catch (e: CancellationException) {
+                timing.finish(StartupOutcome.CANCELLED)
                 throw e
             } catch (e: Exception) {
+                timing.finish(StartupOutcome.FAILED)
                 _resolving.value = null
                 errorMessage.value = e.message ?: "Catch-up failed"
             }
@@ -223,18 +243,22 @@ object PlaybackCoordinator {
      * unless another playback is resolving.
      */
     fun playSession(session: PlayerSession) {
+        val startedNanos = PlaybackStartupTiming.now()
         if (_resolving.value != null || !session.canOpenPlayer()) return
-        pending = session
+        pending = PlaybackStartupTiming.begin(requireNotNull(session.ownership),StartupInput.DIRECT_INPUT_SUPPLIED,startedNanos).attach(session)
         launchPlayer()
     }
 
     private fun launchPlayer() {
         AdaptiveThroughput.playbackStarting()
-        App.context.startActivity(Intent(App.context, App.platform.playerActivity).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        try { App.context.startActivity(Intent(App.context, App.platform.playerActivity).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        catch (error: Exception) { pending?.startupTiming?.finish(StartupOutcome.FAILED); throw error }
     }
 
     /** Stops a resolve in flight (Back on the stream-start screen). */
     fun cancelResolve() {
+        startupAttempt?.finish(StartupOutcome.CANCELLED)
+        startupAttempt = null
         resolveJob?.cancel()
         resolveJob = null
         _resolving.value = null
@@ -251,10 +275,14 @@ object PlaybackCoordinator {
         liveLabel: String? = null,
         expectedContext: Long? = null,
         resolveWithSettings: (suspend (PlaybackSettings?) -> ResolvedStream?)? = null,
+        startedNanos: Long = PlaybackStartupTiming.now(),
+        input: StartupInput = StartupInput.UNKNOWN,
         resolve: suspend () -> ResolvedStream = { error("no resolver") },
     ) {
         if (_resolving.value != null) return
         val ownership=PlaybackSessionContext.capture(expectedContext ?: ProfileDataContext.current)
+        val timing=PlaybackStartupTiming.begin(ownership,input,startedNanos)
+        startupAttempt=timing
         AdaptiveThroughput.playbackStarting()
         _resolving.value = request
         stage.value = firstStage
@@ -273,6 +301,7 @@ object PlaybackCoordinator {
                     val settings = try {ApiClient.playbackSettings(expectedContext ?: ProfileDataContext.current)} catch(error:Exception) {error.rethrowVodDenial();null}
                     val r = if (resolveWithSettings != null) resolveWithSettings(settings) else resolve()
                     if (r == null) {
+                        timing.finish(StartupOutcome.CANCELLED)
                         if (_resolving.value === request) _resolving.value = null
                         return@launch
                     }
@@ -281,6 +310,7 @@ object PlaybackCoordinator {
                     val claimed = if (expectedContext == null) streamClaim?.invoke(selectedRequest, r)
                         else ApiClient.inContext(expectedContext) { streamClaim?.invoke(selectedRequest, r) }
                     if (claimed == true) {
+                        timing.finish(StartupOutcome.EXTERNAL_HANDOFF)
                         AppLog.i("Playback", "resolved stream claimed (cast)")
                         playerStarted()
                         return@launch
@@ -294,16 +324,18 @@ object PlaybackCoordinator {
                 }
                 fun publish() {
                     ownership.requireCurrent()
-                    pending = prepared
+                    pending = timing.attach(prepared)
                     stage.value = "Starting…"
                     detail.value = null
                     launchPlayer()
                 }
                 if (expectedContext == null) publish() else ApiClient.inContext(expectedContext) { publish() }
             } catch (e: CancellationException) {
+                timing.finish(StartupOutcome.CANCELLED)
                 if (_resolving.value === request) _resolving.value = null
                 throw e
             } catch (e: Exception) {
+                timing.finish(StartupOutcome.FAILED)
                 if (_resolving.value === request) {
                     _resolving.value = null
                     if (expectedContext == null || expectedContext == ProfileDataContext.current) {
@@ -326,6 +358,7 @@ object PlaybackCoordinator {
 
     /** The player is on screen: the stream-start screen hands over to it. */
     fun playerStarted() {
+        startupAttempt = null
         pending = null
         resolveJob = null
         _resolving.value = null

@@ -77,6 +77,8 @@ data class PlayerSession(
     val localFileAccess:(()->Boolean)?=null,
     /** The original preparation, never the profile selected when the activity finally starts. */
     val ownership:PlaybackSessionContext?=null,
+    /** Local monotonic startup observation; never serialized or used to permit playback. */
+    internal val startupTiming: PlaybackStartupAttempt? = null,
 )
 
 /** A resolved stream: its path, the server's track choice and what online subtitles match against. */

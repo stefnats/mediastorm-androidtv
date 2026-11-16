@@ -186,13 +186,17 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     internal fun denyVod(denial:com.strmr.tv.api.VodAccessDenial,attempt:com.strmr.tv.api.VodAttempt?=null) {
         if(released || dataContext!=ProfileDataContext.current || vodDenied.value!=null)return
         attempt?.let {com.strmr.tv.api.VodDenialEvents.reject(it,denial)}
+        startup.end(StartupOutcome.FAILED)
         vodDenied.value=denial;autoSwitch.cancel();upNext?.cancel();closeReleaseReports();progress.discardFuture()
         recordingHls?.release();catchup?.release();liveRetune?.release()
         thumbnails?.cancel();online.cancel();external.cancel();switchTo.value=null;advanceTo.value=null
         player.stop();error.value=denial.message
     }
 
+    private val startup = PlaybackStartupPlayer(session) { !released && session.canOpenPlayer() && vodDenied.value == null }
     private val listener = object : Player.Listener {
+        override fun onRenderedFirstFrame() { startup.firstFrame() }
+
         override fun onIsPlayingChanged(playing: Boolean) {
             isPlaying.value = playing
             if (playing) {
@@ -266,7 +270,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         }
 
         override fun onPlayerError(e: PlaybackException) {
-            if(!session.canOpenPlayer()) {progress.discardFuture();player.stop();ended.value=true;return}
+            if(!session.canOpenPlayer()) {startup.end(StartupOutcome.OWNER_LOST);progress.discardFuture();player.stop();ended.value=true;return}
             if(released)return
             mediaAccess.failure(e)?.let {denyVod(it.reason,it.attempt);return}
             // A passthrough track the output refused: PassthroughGuard now offers PCM, so prepare again once.
@@ -297,6 +301,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
             audioRecoveryPolicy.terminalFailure(e, canPrepareAudioAlternative())?.let { audioRecovery.suggest(it) }
             AppLog.e("Player", "playback error ${e.errorCodeName}: ${e.message}", e)
             thumbnails?.cancel()
+            startup.end(StartupOutcome.FAILED)
             error.value = e.message ?: e.errorCodeName
         }
     }
@@ -357,14 +362,14 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     /** Retire the entire old scope before queued helpers can read a replacement identity. */
     private val contextWatch=scope.launch {
         ProfileDataContext.changes.collect {
-            if(!session.canOpenPlayer()) {progress.discardFuture();player.stop();ended.value=true;scope.cancel()}
+            if(!session.canOpenPlayer()) {startup.end(StartupOutcome.OWNER_LOST);progress.discardFuture();player.stop();ended.value=true;scope.cancel()}
         }
     }
 
     /** Position for the chrome, skip segments and up next. */
     private val clock: Job = scope.launch {
         while (isActive) {
-            if(!session.playbackAllowed()) {progress.discardFuture();player.stop();ended.value=true;break}
+            if(!session.playbackAllowed()) {startup.end(StartupOutcome.OWNER_LOST);progress.discardFuture();player.stop();ended.value=true;break}
             if (postPlay.value != null) { delay(250); continue }
             position.value = player.currentPosition
             duration.value = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
@@ -452,6 +457,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
 
     /** Saves the position and lets go of the player; returns the last report, still finishing. */
     fun release(): Job? {
+        startup.end(StartupOutcome.RELEASED)
         released=true
         if (!ended.value && advanceTo.value == null && postPlay.value == null) report(paused = true, closing = true)
         closeReleaseReports()
