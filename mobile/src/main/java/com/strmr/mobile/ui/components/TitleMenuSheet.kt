@@ -98,11 +98,12 @@ internal fun TitleMenuSheet(
     val navigator = LocalNavigator.current
     val sourceHint = rememberSourceHint(com.strmr.tv.ui.rememberTitleSourceEvidence(card))
     val target = origin.target
-    val rate = target?.let { com.strmr.tv.ui.rememberRatingAction(it) }
+    val rate = if (card.reloadStoredRating == null) target?.let { com.strmr.tv.ui.rememberRatingAction(it) } else null
     var watched by remember(selection) { mutableStateOf<Boolean?>(null) }
-    var watchedBlocked by remember(selection) { mutableStateOf(false) }
+    var watchedBlocked by remember(selection) { mutableStateOf(card.reloadStoredRating != null) }
     val episode = card.episode
     LaunchedEffect(selection) {
+        if (card.reloadStoredRating != null) return@LaunchedEffect
         if (target == null) return@LaunchedEffect
         // Continue Watching's next episode is unwatched by definition.
         watched = try { when {
@@ -130,7 +131,15 @@ internal fun TitleMenuSheet(
             add(SheetAction(if (library.entry.group.isShow) "Open" else "Play", Icons.Outlined.PlayArrow) { openLibrary(library.entry) })
         }
         if (target == null) return@buildList
-        if (!target.fromLibrary && rate != null) add(SheetAction("Rate for this profile…", Icons.Outlined.Star) { rate() })
+        if (!target.fromLibrary) {
+            val refresh = card.reloadStoredRating
+            if (refresh != null) add(SheetAction("Rate for this profile…", Icons.Outlined.Star, action = TitleListAction(origin, scope) { operation ->
+                try { refresh(target, operation) }
+                catch (error: kotlinx.coroutines.CancellationException) { throw error }
+                catch (error: Exception) { operation.publish { com.strmr.tv.ui.AppToast.show(error.vodDenial?.message ?: "Reload this list and choose Rate again.") } }
+            }))
+            else if (rate != null) add(SheetAction("Rate for this profile…", Icons.Outlined.Star) { rate() })
+        }
         if (card.titleSourceCoordinate() != null && sourceHint != null) {
             add(SheetAction("Check sources again", Icons.Outlined.Refresh) { launchSourceRecheck(scope, target) })
         }

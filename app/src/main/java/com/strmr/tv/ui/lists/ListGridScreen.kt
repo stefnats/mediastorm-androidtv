@@ -84,6 +84,7 @@ fun ListGridScreen(list: BrowseList, query: Map<String, String> = emptyMap(), cu
 
     // Only this list's own changes: an add re-reads it, a removal drops the title in place so focus stays near it.
     LaunchedEffect(customId) { model.followItemChanges() }
+    LaunchedEffect(model) { model.followStoredRatingChanges() }
     LaunchedEffect(model.reloadKey) { model.reload() }
     // A title action (Set Aside, hide / unhide, watched) re-reads the loaded part in place, so its
     // state and badges show while focus stays on the card instead of jumping to the controls.
@@ -135,6 +136,7 @@ fun ListGridScreen(list: BrowseList, query: Map<String, String> = emptyMap(), cu
                         Column {
                             Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                             total?.let { Text(if (it == 1) "1 title" else "$it titles", color = Color.White.copy(alpha = 0.6f)) }
+                            if (list == BrowseList.LovedStored) Text("All visible saved Love ratings, with original-language filters. Loved Titles also shows artwork and watched status.", color = Color.White.copy(alpha = 0.6f))
                         }
                         val parts = (list as? BrowseList.Service)?.parts.orEmpty()
                         // The card size button ends the controls row; a list without controls has it alone.
@@ -148,6 +150,7 @@ fun ListGridScreen(list: BrowseList, query: Map<String, String> = emptyMap(), cu
                                     originalLanguageFilterSupported = model.originalLanguageFilterSupported,
                                 )
                             }
+                            if (list == BrowseList.LovedStored) androidx.tv.material3.OutlinedButton(onClick = { scope.launch { model.reload() } }) { Text("Reload list") }
                             GridCardSizeButton()
                         }
                         model.actionError?.let { Text(it, color = Color(0xFFFF6B6B)) }

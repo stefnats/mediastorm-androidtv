@@ -1,5 +1,7 @@
 package com.strmr.mobile.ui.lists
 
+import com.strmr.tv.home.labelFor
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -47,7 +49,7 @@ import com.strmr.tv.ui.lists.ListGridModel
 
 /** Whether a list shows the filter chip row at all. */
 fun BrowseList.hasChips(): Boolean =
-    filters || this == BrowseList.Hidden || this is BrowseList.Library || (this as? BrowseList.Service)?.parts.orEmpty().size > 1
+    filters || this == BrowseList.Hidden || this == BrowseList.LovedStored || this is BrowseList.Library || (this as? BrowseList.Service)?.parts.orEmpty().size > 1
 
 /**
  * The list's filters as chips, each opening a menu: a streaming service's lists, the rating
@@ -74,7 +76,7 @@ fun BrowseFilterChips(model: ListGridModel, modifier: Modifier = Modifier) {
                 set(options.copy(ratingSource = sources[it]))
             }
         }
-        if (list.filters || list == BrowseList.Hidden && model.originalLanguageFilterSupported) {
+        if (list.filters || (list == BrowseList.Hidden || list == BrowseList.LovedStored) && model.originalLanguageFilterSupported) {
             val kinds = listOf(null) + BrowseKind.entries
             MenuChip(options.kind?.noun ?: "Movies & Shows", options.kind != null, kinds.map { it?.noun ?: "Movies & Shows" }, kinds.indexOf(options.kind)) {
                 set(options.copy(kind = kinds[it]))
@@ -182,7 +184,7 @@ fun SortMenuItems(list: BrowseList, options: BrowseOptions, onPick: (BrowseSort)
         val current = options.sort == sort
         val arrow = if (!current || sort == BrowseSort.DEFAULT) "" else if (options.ascending) "  ↑" else "  ↓"
         DropdownMenuItem(
-            text = { Text(sort.label + arrow) },
+            text = { Text(sort.labelFor(list) + arrow) },
             onClick = { onPick(sort) },
             leadingIcon = { if (current) Icon(Icons.Filled.Check, null) },
         )

@@ -58,6 +58,7 @@ data class TitleRatingState(
     val loading: Boolean = true,
     val saving: Boolean = false,
     val error: String? = null,
+    val requiresReopen: Boolean = false,
 )
 
 /** One editor per prompt, captured before the originating menu is dismissed.
@@ -65,10 +66,13 @@ data class TitleRatingState(
 class TitleRatingEditor(
     val target: DetailsTarget,
     private val gateway: TitleRatingGateway,
+    initialRating: TitleRatingReply? = null,
+    private val receiptReloadHint: String? = null,
     private val onSaved: () -> Unit = TitleRatingChanges::saved,
 ) {
     private val _state = MutableStateFlow(TitleRatingState())
     val state: StateFlow<TitleRatingState> = _state.asStateFlow()
+    private var deliveredInitial = initialRating
     private var closed = false
     private var busy = false
     fun isCurrent() = !closed && gateway.isCurrent()
@@ -76,24 +80,25 @@ class TitleRatingEditor(
     private fun checkCurrent() { if (!isCurrent()) throw CancellationException("Rating context changed") }
 
     suspend fun load() {
-        if (busy) return
+        if (busy || _state.value.requiresReopen) return
         require(target.titleId.isNotBlank() && !target.fromLibrary) { "A catalogue title is required" }
         checkCurrent()
         busy = true
         _state.value = TitleRatingState()
         try {
-            val reply = gateway.read(target)
+            val reply = deliveredInitial?.also { deliveredInitial = null } ?: gateway.read(target)
             checkCurrent()
             _state.value = TitleRatingState(rating = PersonalRating.from(reply.rating), loading = false)
         } catch (error: CancellationException) { throw error
         } catch (error: Exception) {
             checkCurrent()
-            _state.value = TitleRatingState(loading = false, error = ratingFailure(error))
+            val reopen = receiptReloadHint != null && (error as? ApiError)?.statusCode == 409
+            _state.value = TitleRatingState(loading = false, error = if (reopen) receiptReloadHint else ratingFailure(error), requiresReopen = reopen)
         } finally { busy = false }
     }
 
     suspend fun save(value: PersonalRating) {
-        if (busy || _state.value.rating == null) return
+        if (busy || _state.value.rating == null || _state.value.requiresReopen) return
         checkCurrent()
         if (value == _state.value.rating && _state.value.error == null) return
         busy = true
@@ -108,7 +113,8 @@ class TitleRatingEditor(
         } catch (error: CancellationException) { throw error
         } catch (error: Exception) {
             checkCurrent()
-            _state.value = TitleRatingState(rating = previous, loading = false, error = ratingFailure(error))
+            val reopen = receiptReloadHint != null && (error as? ApiError)?.statusCode == 409
+            _state.value = TitleRatingState(rating = previous, loading = false, error = if (reopen) receiptReloadHint else ratingFailure(error), requiresReopen = reopen)
         } finally { busy = false }
     }
 }

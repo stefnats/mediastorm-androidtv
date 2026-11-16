@@ -19,6 +19,8 @@ sealed class BrowseList {
     data object Hidden : BrowseList()
     /** Titles the server keeps resolved until they are removed. */
     data object PermanentPrequeue : BrowseList()
+    /** Complete visible saved Love ratings, separate from the existing enriched Loved view. */
+    data object LovedStored : BrowseList()
     /** Movies and shows together when the kind is null. */
     data class TopTen(val kind: BrowseKind? = null) : BrowseList()
     data class Trending(val kind: BrowseKind) : BrowseList()
@@ -55,6 +57,7 @@ sealed class BrowseList {
             ContinueWatching -> "Continue Watching"
             Hidden -> "Hidden"
             PermanentPrequeue -> "Permanent Prequeue"
+            LovedStored -> "Saved Love Ratings"
             is TopTen -> when (kind) { null -> "Top 10 Today"; BrowseKind.MOVIES -> "Top 10 Movies"; BrowseKind.SHOWS -> "Top 10 Shows" }
             is Trending -> if (kind == BrowseKind.MOVIES) "Trending Movies" else "Trending Shows"
             PopularOnServer -> "Popular on This Server"
@@ -101,6 +104,7 @@ sealed class BrowseList {
             ContinueWatching -> mapOf("source" to "continue-watching")
             Hidden -> mapOf("source" to "hidden")
             PermanentPrequeue -> mapOf("source" to "permanent-prequeue")
+            LovedStored -> mapOf("source" to "loved-stored")
             is TopTen -> mapOf("source" to "top-ten") + (kind?.let { mapOf("mediaType" to it.mediaType) } ?: emptyMap())
             is Trending -> mapOf("source" to "trending", "mediaType" to kind.mediaType)
             PopularOnServer -> mapOf("source" to "popular-on-server")
@@ -177,11 +181,14 @@ data class WatchlistItem(
 
 /** A list entry: discovery sources send titles, custom lists send list items. */
 sealed interface BrowseEntry {
-    data class TitleEntry(val title: Title) : BrowseEntry
+    data class TitleEntry(val title: Title, val storedLove: StoredLoveRow? = null) : BrowseEntry
     data class ItemEntry(val item: WatchlistItem) : BrowseEntry
     data class WatchingEntry(val item: com.strmr.tv.api.ContinueWatchingItem) : BrowseEntry
     data class LibraryItemEntry(val entry: LibraryEntry) : BrowseEntry
 }
+
+/** Saved presentation/ordinal bookkeeping only; never a client edit or content grant. */
+data class StoredLoveRow(val rank: Int, val updatedAt: String)
 
 /** A page of a list, with the genre facets and first letters present when the source filters server-side. */
 data class BrowsePage(val entries: List<BrowseEntry>, val total: Int, val genres: List<String> = emptyList(), val letters: List<String> = emptyList(),

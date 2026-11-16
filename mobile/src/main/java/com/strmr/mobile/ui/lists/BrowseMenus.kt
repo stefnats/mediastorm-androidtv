@@ -75,7 +75,7 @@ fun BrowseActions(model: ListGridModel) {
             else Icon(Icons.Filled.Casino, "Random")
         }
     }
-    if (list.sorts.isNotEmpty() && (list != BrowseList.Hidden || model.originalLanguageFilterSupported)) {
+    if (list.sorts.isNotEmpty() && (list != BrowseList.Hidden && list != BrowseList.LovedStored || model.originalLanguageFilterSupported)) {
         Box {
             IconButton(onClick = { sorting = true }) { Icon(Icons.AutoMirrored.Filled.Sort, "Sort") }
             DropdownMenu(expanded = sorting, onDismissRequest = { sorting = false }) {

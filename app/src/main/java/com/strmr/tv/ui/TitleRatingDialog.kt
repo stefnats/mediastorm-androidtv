@@ -32,9 +32,9 @@ fun TitleRatingDialog() {
             if (state.loading || state.saving) Text(if (state.saving) "Saving…" else "Loading…")
             state.error?.let { Text(it) }
             if (!state.loading && !state.saving) {
-                if (state.rating == null) {
+                if (state.rating == null && !state.requiresReopen) {
                     Button(onClick = { scope.launch { editor.load() } }, modifier = Modifier.focusRequester(first)) { Text("Retry") }
-                } else {
+                } else if (!state.requiresReopen) {
                     PersonalRating.entries.forEachIndexed { index, rating ->
                         Button(onClick = { scope.launch { editor.save(rating) } }, modifier = Modifier.fillMaxWidth().then(if (index == 0) Modifier.focusRequester(first) else Modifier)) {
                             Text(rating.label + if (state.rating == rating) " (selected)" else "")
@@ -42,7 +42,7 @@ fun TitleRatingDialog() {
                     }
                 }
             }
-            Button(onClick = TitleRatingPrompt::dismiss, modifier = Modifier.then(if (state.loading || state.saving) Modifier.focusRequester(first) else Modifier)) { Text("Done") }
+            Button(onClick = TitleRatingPrompt::dismiss, modifier = Modifier.then(if (state.loading || state.saving || state.requiresReopen) Modifier.focusRequester(first) else Modifier)) { Text("Done") }
         }
     }
 }

@@ -87,6 +87,8 @@ data class HomeCard(
     val sourceAvailability: com.strmr.tv.api.SourceAvailability? = null,
     /** Row context for the Unhide menu only; never playback or mutation authority. */
     val hiddenManagementEntry: Boolean = false,
+    /** Explicit stored-row Rate action; original page receipt, not a backend edit grant. */
+    val reloadStoredRating: (suspend (DetailsTarget, com.strmr.tv.library.CustomListOperation) -> Unit)? = null,
 ) {
     val target: DetailsTarget? get() = (link as? HomeLink.Details)?.target
 

@@ -27,8 +27,8 @@ fun TitleRatingSheet() {
             Text("Your rating for this profile", modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
             if (state.loading || state.saving) LinearProgressIndicator(Modifier.fillMaxWidth())
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(24.dp)) }
-            if (!state.loading && state.rating == null) TextButton(onClick = { scope.launch { editor.load() } }) { Text("Retry") }
-            if (state.rating != null) PersonalRating.entries.forEach { rating ->
+            if (!state.loading && state.rating == null && !state.requiresReopen) TextButton(onClick = { scope.launch { editor.load() } }) { Text("Retry") }
+            if (state.rating != null && !state.requiresReopen) PersonalRating.entries.forEach { rating ->
                 ListItem(
                     headlineContent = { Text(rating.label) },
                     leadingContent = { RadioButton(selected = rating == state.rating, onClick = null) },

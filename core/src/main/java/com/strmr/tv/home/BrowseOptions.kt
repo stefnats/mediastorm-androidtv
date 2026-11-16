@@ -67,7 +67,7 @@ data class BrowseOptions(
     }
 
     fun query(list: BrowseList): Map<String, String> = buildMap {
-        if (list == BrowseList.Hidden) {
+        if (list == BrowseList.Hidden || list == BrowseList.LovedStored) {
             require(watch == WatchFilter.ALL && genres.isEmpty() && sort in list.sorts) { "Unsupported hidden management options" }
             if (sort != BrowseSort.DEFAULT) { put("sortBy", sort.value); put("sortDirection", if (ascending) "asc" else "desc") }
             kind?.let { put("filterMediaType", it.mediaType) }
@@ -102,20 +102,20 @@ val BrowseList.sorts: List<BrowseSort>
         is BrowseList.Custom, BrowseList.Watchlist, BrowseList.PermanentPrequeue -> BrowseSort.entries
         is BrowseList.Genre, is BrowseList.Decade, is BrowseList.Remote, is BrowseList.Service, is BrowseList.Trending ->
             listOf(BrowseSort.DEFAULT, BrowseSort.NAME, BrowseSort.YEAR, BrowseSort.RATING)
-        BrowseList.Hidden -> listOf(BrowseSort.DEFAULT, BrowseSort.ADDED, BrowseSort.NAME, BrowseSort.YEAR)
+        BrowseList.Hidden, BrowseList.LovedStored -> listOf(BrowseSort.DEFAULT, BrowseSort.ADDED, BrowseSort.NAME, BrowseSort.YEAR)
         is BrowseList.Library -> listOf(BrowseSort.DEFAULT, BrowseSort.ADDED, BrowseSort.NAME, BrowseSort.YEAR)
         else -> emptyList()
     }
 
 /** The A–Z index under a Name sort: the profile's own lists and libraries. */
-val BrowseList.indexesLetters: Boolean get() = filters || this == BrowseList.Hidden || this is BrowseList.Library
+val BrowseList.indexesLetters: Boolean get() = filters || this == BrowseList.Hidden || this == BrowseList.LovedStored || this is BrowseList.Library
 
 /** Movies / Shows, watch status, genre facets and the A–Z index: the profile's own lists. */
 val BrowseList.filters: Boolean
     get() = this is BrowseList.Custom || this == BrowseList.Watchlist || this == BrowseList.PermanentPrequeue
 
 /** Actual response capability still gates these controls; this is eligibility, never a claim of support. */
-val BrowseList.originalLanguageEligible: Boolean get() = filters || this == BrowseList.Hidden || this is BrowseList.Library
+val BrowseList.originalLanguageEligible: Boolean get() = filters || this == BrowseList.Hidden || this == BrowseList.LovedStored || this is BrowseList.Library
 
 /** Only catalogue language parameters, shared by stored pages and local library cards. */
 fun BrowseOptions.originalLanguageQuery(): Map<String, String> = buildMap {
@@ -176,3 +176,6 @@ object BrowseOriginalLanguageMenu {
         return if (options.includeUnknownOriginalLanguage) "$languages + unknown" else languages
     }
 }
+
+/** Rating timestamps are distinct from catalogue/date-added fields in the stored view. */
+fun BrowseSort.labelFor(list: BrowseList): String = if (list == BrowseList.LovedStored && this == BrowseSort.ADDED) "Rating updated" else label

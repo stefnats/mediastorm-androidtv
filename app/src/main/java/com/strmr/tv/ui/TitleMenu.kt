@@ -44,14 +44,15 @@ fun TitleMenu(
     val target = origin.target ?: return
     val continueWatching = selection.continueWatching
     DisposableEffect(selection) { onDispose { selection.close() } }
-    val rate = rememberRatingAction(target)
+    val rate = if (card.reloadStoredRating == null) rememberRatingAction(target) else null
     val sourceHint = rememberSourceHint(com.strmr.tv.ui.rememberTitleSourceEvidence(card))
     val navigator = LocalNavigator.current
     val inWatchlist = WatchlistStore.contains(target)
     var watched by remember(selection) { mutableStateOf<Boolean?>(null) }
-    var watchedBlocked by remember(selection) { mutableStateOf(false) }
+    var watchedBlocked by remember(selection) { mutableStateOf(card.reloadStoredRating != null) }
     val episode = card.episode
     LaunchedEffect(selection) {
+        if (card.reloadStoredRating != null) return@LaunchedEffect
         // Continue Watching's next episode is unwatched by definition.
         watched = try { when {
             target.isMovie -> ApiClient.isMovieWatched(target, origin.context)
@@ -73,7 +74,15 @@ fun TitleMenu(
     fun act(action: suspend () -> Unit) = scope.launch { action() }
 
     val choices = buildList {
-        if (!target.fromLibrary) add(DialogChoice("Rate for this profile…") { rate() })
+        if (!target.fromLibrary) {
+            val refresh = card.reloadStoredRating
+            if (refresh != null) add(DialogChoice("Rate for this profile…", TitleListAction(origin, scope) { operation ->
+                try { refresh(target, operation) }
+                catch (error: kotlinx.coroutines.CancellationException) { throw error }
+                catch (error: Exception) { operation.publish { com.strmr.tv.ui.AppToast.show(error.vodDenial?.message ?: "Reload this list and choose Rate again.") } }
+            }))
+            else if (rate != null) add(DialogChoice("Rate for this profile…") { rate() })
+        }
         if (card.titleSourceCoordinate() != null && sourceHint != null) {
             add(DialogChoice("Check sources again") { launchSourceRecheck(scope, target, onError = onError) })
         }

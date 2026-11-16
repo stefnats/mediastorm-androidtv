@@ -66,6 +66,7 @@ fun BrowseGridPage(list: BrowseList, query: Map<String, String>, showBack: Boole
     var refreshing by remember { mutableStateOf(false) }
 
     LaunchedEffect(model) { model.followItemChanges() }
+    LaunchedEffect(model) { model.followStoredRatingChanges() }
     LaunchedEffect(model.reloadKey) {
         model.reload()
         gridState.scrollToItem(0)
@@ -130,6 +131,7 @@ private fun BrowseGrid(model: ListGridModel, gridState: LazyGridState, retry: ()
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                if (list == BrowseList.LovedStored) Text("All visible saved Love ratings, with original-language filters. Loved Titles also shows artwork and watched status.", style = MaterialTheme.typography.bodySmall)
                 if (list.hasChips()) BrowseFilterChips(model, Modifier.bleed(16.dp))
                 if (list.indexesLetters && model.options.sort == BrowseSort.NAME && model.letters.isNotEmpty()) {
                     LetterStrip(Modifier.bleed(16.dp), model.letters, model.options.letter) { model.options = model.options.copy(letter = it) }

@@ -10,6 +10,12 @@ import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.vodDenial
 import com.strmr.tv.home.*
 import com.strmr.tv.library.CustomListOperations
+import com.strmr.tv.library.CustomListOperation
+import com.strmr.tv.api.DetailsTarget
+import com.strmr.tv.app.Config
+import com.strmr.tv.ratings.*
+import com.strmr.tv.ui.TitleRatingPrompt
+import kotlinx.coroutines.Job
 import com.strmr.tv.library.CustomListsStore
 import com.strmr.tv.library.HiddenItemsStore
 import com.strmr.tv.library.ProfileDataContext
@@ -21,6 +27,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.collectLatest
 
 /** Server-paged list state. Every page/random reply belongs to immutable options and an original profile epoch. */
 @Stable
@@ -31,9 +38,15 @@ class ListGridModel(
     val dataContext: Long = ProfileDataContext.current,
     private val readPage: (suspend (BrowseList, Int, Int, Map<String, String>, BrowseOptions, Long) -> BrowsePage)? = null,
     private val randomOffset: (Int) -> Int = { (0 until it).random() },
+    private val clientIdentity: () -> String = { Config.clientId },
+    private val ratingGateway: (Long) -> TitleRatingGateway = { expected -> ApiClient.inContext(expected) { ServerTitleRatingGateway() } },
+    private val openRating: (TitleRatingEditor) -> Unit = TitleRatingPrompt::open,
+    private val pageSize: Int = PAGE,
 ) {
     private val query = query.toMap()
-    val isCurrent get() = dataContext == ProfileDataContext.current
+    private val storedClient = if (list == BrowseList.LovedStored) ApiClient.inContext(dataContext) { clientIdentity() } else null
+    val isCurrent get() = dataContext == ProfileDataContext.current &&
+        (storedClient == null || storedClient == clientIdentity() && scope.coroutineContext[Job]?.isActive != false)
     private var generation = 0L
     private var selection by mutableLongStateOf(0)
     private var optionState by mutableStateOf(BrowseOptions())
@@ -49,14 +62,16 @@ class ListGridModel(
     var part: Int
         get() = partState
         set(value) { if (isCurrent && value != partState) { partState = value; selection++; invalidateRows() } }
+    private var publishedRatingVersion by mutableLongStateOf(TitleRatingChanges.generation.value)
+    private fun rowsCurrent() = list != BrowseList.LovedStored || publishedRatingVersion == TitleRatingChanges.generation.value
     private var entryState by mutableStateOf<List<BrowseEntry>>(emptyList())
     var entries: List<BrowseEntry>
-        get() = if (isCurrent) entryState else emptyList()
+        get() = if (isCurrent && rowsCurrent()) entryState else emptyList()
         private set(value) { entryState = value }
     var fetched by mutableIntStateOf(0); private set
     private var totalState by mutableStateOf<Int?>(null)
     var total: Int?
-        get() = if (isCurrent) totalState else null
+        get() = if (isCurrent && rowsCurrent()) totalState else null
         private set(value) { totalState = value }
     var genres by mutableStateOf<List<String>>(emptyList()); private set
     var letters by mutableStateOf<List<String>>(emptyList()); private set
@@ -83,8 +98,14 @@ class ListGridModel(
     val cards: List<HomeCard>
         get() {
             val ranked = shown is BrowseList.TopTen
-            return entries.mapIndexed { i, entry -> HomeCard.from(entry).let { if (ranked) it.ranked(i + 1) else if (list == BrowseList.Hidden) it.copy(hiddenManagementEntry = true) else it } }
-                .filter { list == BrowseList.Hidden || it.target?.let(HiddenItemsStore::isHidden) != true }
+            val requested = capture()
+            return entries.mapIndexed { i, entry ->
+                val card = HomeCard.from(entry).let { if (ranked) it.ranked(i + 1) else if (list == BrowseList.Hidden) it.copy(hiddenManagementEntry = true) else it }
+                if (list == BrowseList.LovedStored && entry is BrowseEntry.TitleEntry && entry.storedLove != null) {
+                    card.copy(reloadStoredRating = { target, operation -> refreshStoredRating(requested, entry, card, target, operation) })
+                } else card
+            }
+                .filter { list == BrowseList.Hidden || list == BrowseList.LovedStored || it.target?.let(HiddenItemsStore::isHidden) != true }
         }
 
     init {
@@ -103,9 +124,9 @@ class ListGridModel(
         entries = emptyList(); fetched = 0; total = null; loadError = null; blockedGeneration = null
         loading = null; loadingFor = null; hiddenLegacyMode = null
     }
-    private class Read(val key: Any, val generation: Long, val list: BrowseList, val options: BrowseOptions)
-    private fun capture() = Read(reloadKey, generation, shown, options.copy(genres = options.genres.toSet(), originalLanguages = options.originalLanguages.toSet()))
-    private fun current(read: Read) = isCurrent && read.generation == generation && read.key == reloadKey
+    private class Read(val key: Any, val generation: Long, val list: BrowseList, val options: BrowseOptions, val ratingVersion: Long?)
+    private fun capture() = Read(reloadKey, generation, shown, options.copy(genres = options.genres.toSet(), originalLanguages = options.originalLanguages.toSet()), if (list == BrowseList.LovedStored) TitleRatingChanges.generation.value else null)
+    private fun current(read: Read) = isCurrent && read.generation == generation && read.key == reloadKey && (read.ratingVersion == null || read.ratingVersion == TitleRatingChanges.generation.value)
     private suspend fun read(read: Read, limit: Int, offset: Int, extra: Map<String, String> = query): BrowsePage = coroutineScope {
         val pending = async { readPageOwned(read, limit, offset, extra) }
         pageReads += pending
@@ -118,7 +139,7 @@ class ListGridModel(
             ?: ApiClient.browsePage(read.list, limit, offset, extra, options = read.options, expectedContext = dataContext, hiddenLegacyMode = hiddenLegacyMode)
         currentCoroutineContext().ensureActive(); ProfileDataContext.requireCurrent(dataContext)
         if (!current(read)) throw CancellationException("List selection changed")
-        if (read.list.originalLanguageEligible && read.options.originalLanguageActive && !page.originalLanguageFilterSupported) throw LanguageFilterUnavailable()
+        if ((read.list == BrowseList.LovedStored || read.list.originalLanguageEligible && read.options.originalLanguageActive) && !page.originalLanguageFilterSupported) throw LanguageFilterUnavailable()
         if (read.list == BrowseList.Hidden) {
             val mode = !page.originalLanguageFilterSupported
             if (hiddenLegacyMode != null && hiddenLegacyMode != mode) throw ManagementPageFailure()
@@ -129,7 +150,7 @@ class ListGridModel(
     private class LanguageFilterUnavailable : Exception("This server cannot apply the original language filter. Clear the filter or reload this list.")
     private fun failed(read: Read, error: Exception) {
         if (!current(read)) return
-        if (error is LanguageFilterUnavailable || error is ManagementPageFailure || read.list == BrowseList.Hidden) {
+        if (error is LanguageFilterUnavailable || error is ManagementPageFailure || read.list == BrowseList.Hidden || read.list == BrowseList.LovedStored) {
             // Preserve selected intent and its clear controls; never replace it with an unfiltered page.
             entries = emptyList(); fetched = 0; total = null; blockedGeneration = generation
             loadError = error.vodDenial?.message ?: if (error is LanguageFilterUnavailable || error is ManagementPageFailure) error.message else "Unable to load this management view. Reload the list."
@@ -148,10 +169,10 @@ class ListGridModel(
         try {
             val offset = fetched
             val quick = requested.list.quickPageQuery
-            val page = read(requested, PAGE, offset, query + quick.orEmpty())
+            val page = read(requested, pageSize, offset, query + quick.orEmpty())
             if (quick != null) scope.launch {
                 try {
-                    val full = read(requested, PAGE, offset)
+                    val full = read(requested, pageSize, offset)
                     val byId = full.entries.associateBy { HomeCard.from(it).id }
                     if (current(requested)) entries = entries.map { byId[HomeCard.from(it).id] ?: it }
                 } catch (error: CancellationException) { throw error }
@@ -162,6 +183,7 @@ class ListGridModel(
             fetched += page.entries.size
             val seen = entries.map { HomeCard.from(it).id }.toMutableSet()
             entries = entries + page.entries.filter { seen.add(HomeCard.from(it).id) }
+            publishedRatingVersion = requested.ratingVersion ?: publishedRatingVersion
             total = page.listSize(fetched); loadError = null
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) { failed(requested, error) }
@@ -185,17 +207,54 @@ class ListGridModel(
         try {
             val result = mutableListOf<BrowseEntry>(); var first: BrowsePage? = null; var size: Int
             do {
-                val page = read(requested, PAGE, result.size)
+                val page = read(requested, pageSize, result.size)
                 if (first == null) first = page
                 result += page.entries; size = page.listSize(result.size)
             } while (page.entries.isNotEmpty() && result.size < wanted && result.size < size)
             val seen = mutableSetOf<String>()
+            publishedRatingVersion = requested.ratingVersion ?: publishedRatingVersion
             entries = result.filter { seen.add(HomeCard.from(it).id) }; fetched = result.size; total = size
             genres = first?.genres.orEmpty(); letters = first?.letters.orEmpty(); languageSupport = requested.list.originalLanguageEligible && first?.originalLanguageFilterSupported == true
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) { failed(requested, error) }
         finally { if (loading === requested) { loading = null; loadingFor = null } }
     }
+    /** Explicit Rate only: one exact row delivery, then the existing authoritative rating read. */
+    private suspend fun refreshStoredRating(read: Read, entry: BrowseEntry.TitleEntry, card: HomeCard, target: DetailsTarget, operation: CustomListOperation) {
+        suspend fun check() {
+            currentCoroutineContext().ensureActive(); operation.requireTarget(target)
+            if (!current(read) || target !== card.target || operation.owner.epoch != dataContext || entries.none { it === entry }) throw CancellationException("Stored rating selection changed")
+        }
+        check()
+        val ordinal = requireNotNull(entry.storedLove).rank - 1
+        val page = this.read(read, 1, ordinal)
+        check()
+        val actual = (page.entries.singleOrNull() as? BrowseEntry.TitleEntry)?.title
+        if (!page.originalLanguageFilterSupported || actual?.id != target.titleId || actual.mediaType != if (target.isMovie) "movie" else "series") throw StoredRatingReloadRequired()
+        val server = operation.owner.use { ratingGateway(dataContext) }
+        val bound = object : TitleRatingGateway {
+            override fun isCurrent() = current(read) && entries.any { it === entry } && server.isCurrent()
+            private fun checkTarget(value: DetailsTarget) { if (value !== target || !isCurrent()) throw CancellationException("Rating owner changed") }
+            override suspend fun read(value: DetailsTarget): TitleRatingReply { checkTarget(value); return server.read(value).also { checkTarget(value) } }
+            override suspend fun write(value: DetailsTarget, rating: PersonalRating): TitleRatingReply { checkTarget(value); return server.write(value, rating).also { checkTarget(value) } }
+        }
+        if (!bound.isCurrent()) throw CancellationException("Rating owner changed")
+        val reply = bound.read(target)
+        PersonalRating.from(reply.rating)
+        check()
+        val editor = TitleRatingEditor(target, bound, initialRating = reply,
+            receiptReloadHint = "Close this prompt and choose Rate again to refresh this title.")
+        if (!operation.publish { if (current(read)) openRating(editor) else editor.close() }) editor.close()
+    }
+
+    suspend fun followStoredRatingChanges() {
+        if (list != BrowseList.LovedStored) return
+        var seen = TitleRatingChanges.generation.value
+        TitleRatingChanges.generation.collectLatest { next ->
+            if (next != seen && isCurrent) { seen = next; reload() }
+        }
+    }
+
     fun remove(card: HomeCard) {
         if (!isCurrent) return
         val id = customId ?: return
@@ -236,3 +295,6 @@ class ListGridModel(
     }
     companion object { const val PAGE = 60 }
 }
+
+/** A live sorted collection moved; no different row may renew or open the old title editor. */
+class StoredRatingReloadRequired : Exception("This list changed. Reload the list and choose Rate again.")

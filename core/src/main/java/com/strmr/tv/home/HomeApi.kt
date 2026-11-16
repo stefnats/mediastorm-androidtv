@@ -243,6 +243,7 @@ suspend fun ApiClient.browsePage(
         ProfileDataContext.requireCurrent(expectedContext)
         return BrowsePage(all.drop(offset).take(limit).map { BrowseEntry.WatchingEntry(it) }, all.size)
     }
+    if (list == BrowseList.LovedStored) return storedLovedPage(limit, offset, extra, options ?: BrowseOptions(), expectedContext)
     if (list == BrowseList.Hidden) return hiddenManagementPage(limit, offset, extra, options ?: BrowseOptions(), expectedContext, hiddenLegacyMode)
     val query = inContext(expectedContext) { browseQuery(list, limit, offset, extra, options, phase) }
     // Series counts the server hasn't cached yet are fetched in the background once asked for.
@@ -388,3 +389,64 @@ private fun decodeHiddenRows(value: JsonElement?): List<WatchlistItem> {
         WatchlistItem(id, kind, optional("name").orEmpty(), year = year, posterUrl = optional("posterUrl"), backdropUrl = optional("backdropUrl"), externalIds = ids)
     }
 }
+
+/** Normal complete-list request; neither a capability probe nor a rating permission grant. */
+internal data class StoredLovedRequest(val path: String, val query: Map<String, String>, val headers: Map<String, String>)
+internal fun storedLovedRequest(profile: String, client: String, limit: Int, offset: Int, options: BrowseOptions, extra: Map<String, String> = emptyMap()): StoredLovedRequest {
+    require(profile.isNotBlank() && client.isNotBlank() && client.length <= 128) { "A profile and client are required" }
+    if (limit < 0 || offset < 0 || extra.keys.any { it != "titleFilter" } || options.ratingSource != RatingSource.IMDB) throw ManagementPageFailure()
+    val selected = try { options.query(BrowseList.LovedStored) } catch (_: IllegalArgumentException) { throw ManagementPageFailure() }
+    return StoredLovedRequest("/api/users/${ApiClient.segment(profile)}/display-list",
+        mapOf("source" to "loved-stored", "limit" to limit.toString(), "offset" to offset.toString()) + extra + selected,
+        mapOf("X-Client-ID" to client))
+}
+private suspend fun ApiClient.storedLovedPage(limit: Int, offset: Int, extra: Map<String, String>, options: BrowseOptions, expected: Long): BrowsePage {
+    val request = inContext(expected) { storedLovedRequest(profileId, Config.clientId, limit, offset, options, extra) }
+    val raw = sendRaw("GET", request.path, request.query, headers = request.headers, expectedContext = expected)
+    currentCoroutineContext().ensureActive(); ProfileDataContext.requireCurrent(expected)
+    return decodeStoredLovedPage(raw, limit, offset)
+}
+
+/** Every row is checked, with no defaulted/lossy Title list and no promotion of enrichment fields. */
+internal fun decodeStoredLovedPage(raw: String, limit: Int? = null, offset: Int = 0): BrowsePage = try {
+    val root = ApiJson.parseToJsonElement(raw) as? JsonObject ?: throw ManagementPageFailure()
+    fun text(value: JsonElement?): String = (value as? JsonPrimitive)?.takeIf { it.isString }?.content ?: throw ManagementPageFailure()
+    fun integer(value: JsonElement?): Int = (value as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull ?: throw ManagementPageFailure()
+    if (text(root["source"]) != "loved-stored") throw ManagementPageFailure()
+    val marker = root["originalLanguageFilterSupported"] as? JsonPrimitive
+    if (marker?.isString != false || marker.booleanOrNull != true) throw ManagementPageFailure()
+    val total = integer(root["total"])
+    val rows = root["items"] as? JsonArray ?: throw ManagementPageFailure()
+    if (total < 0 || offset < 0 || rows.isNotEmpty() && offset.toLong() + rows.size > total) throw ManagementPageFailure()
+    if (limit != null) {
+        val remaining = maxOf(0, total - offset)
+        val expectedRows = if (limit == 0) remaining else minOf(limit, remaining)
+        if (rows.size != expectedRows) throw ManagementPageFailure()
+    }
+    val entries = rows.mapIndexed { index, entry ->
+        val row = entry as? JsonObject ?: throw ManagementPageFailure()
+        val rank = integer(row["rank"])
+        if (rank != offset + index + 1 || rank > total) throw ManagementPageFailure()
+        val updated = text(row["updatedAt"])
+        if (!Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:[Zz]|[+-][0-9]{2}:[0-9]{2})").matches(updated)) throw ManagementPageFailure()
+        java.time.OffsetDateTime.parse(updated)
+        val title = row["title"] as? JsonObject ?: throw ManagementPageFailure()
+        val id = text(title["id"]).takeIf { it.isNotBlank() && it.length <= 128 } ?: throw ManagementPageFailure()
+        val kind = text(title["mediaType"]).takeIf { it == "movie" || it == "series" } ?: throw ManagementPageFailure()
+        val name = text(title["name"])
+        if (text(title["personalRating"]) != "love") throw ManagementPageFailure()
+        fun optionalText(key: String) = title[key]?.takeUnless { it == JsonNull }?.let(::text)
+        val year = title["year"]?.takeUnless { it == JsonNull }?.let(::integer)
+        fun provider(key: String): Long? = title[key]?.takeUnless { it == JsonNull }?.let { value ->
+            val number = (value as? JsonPrimitive)?.takeIf { !it.isString } ?: throw ManagementPageFailure()
+            number.content.toLongOrNull() ?: throw ManagementPageFailure()
+        }
+        // Only saved bare presentation/identity is consumed. No source, artwork or watched claims.
+        BrowseEntry.TitleEntry(Title(id, name, year = year, mediaType = kind, personalRating = "love",
+            tmdbId = provider("tmdbId"), tvdbId = provider("tvdbId"), imdbId = optionalText("imdbId"), certification = optionalText("certification")), StoredLoveRow(rank, updated))
+    }
+    val alphabet = root["alphabetBuckets"]?.takeUnless { it == JsonNull }?.let { value ->
+        (value as? JsonArray ?: throw ManagementPageFailure()).map(::text)
+    }.orEmpty()
+    BrowsePage(entries, total, letters = alphabet, originalLanguageFilterSupported = true)
+} catch (_: Exception) { throw ManagementPageFailure() }

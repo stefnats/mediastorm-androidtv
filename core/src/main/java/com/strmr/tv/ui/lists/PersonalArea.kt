@@ -23,6 +23,8 @@ object PersonalArea {
             art = continueWatching?.take(4)?.let { first -> TileArt(first.mapNotNull { it.textPosterUrl ?: it.posterUrl }, first.mapNotNull { it.backdropUrl }) }),
         TileSpec(BrowseList.Watchlist, title = "My List", count = watchlistCount),
         TileSpec(loved, previewRevision = preferenceRevision),
+        // Explicit entry only: no automatic preview request or rating-receipt renewal.
+        TileSpec(BrowseList.LovedStored, subtitle = "Complete collection · Original-language filters", art = TileArt()),
         // Recommendations run only after selection, never to decorate this entry.
         TileSpec(BrowseList.Personalized, title = "For You", art = TileArt()),
     )

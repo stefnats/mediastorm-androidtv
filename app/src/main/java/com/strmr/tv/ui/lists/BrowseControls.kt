@@ -1,5 +1,7 @@
 package com.strmr.tv.ui.lists
 
+import com.strmr.tv.home.labelFor
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -64,12 +66,12 @@ fun BrowseControls(
     var panel by remember { mutableStateOf<Panel?>(null) }
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         if (parts.size > 1) Control(parts.getOrElse(part) { "" }) { panel = Panel.PART }
-        if (list.sorts.isNotEmpty() && (list != BrowseList.Hidden || originalLanguageFilterSupported)) {
+        if (list.sorts.isNotEmpty() && (list != BrowseList.Hidden && list != BrowseList.LovedStored || originalLanguageFilterSupported)) {
             val arrow = if (options.sort == BrowseSort.DEFAULT) "" else if (options.ascending) " ↑" else " ↓"
-            Control("Sort: ${options.sort.label}$arrow") { panel = Panel.SORT }
+            Control("Sort: ${options.sort.labelFor(list)}$arrow") { panel = Panel.SORT }
             if (options.sort == BrowseSort.RATING && list.filters) Control(options.ratingSource.label) { panel = Panel.RATING }
         }
-        if (list.filters || list == BrowseList.Hidden && originalLanguageFilterSupported) {
+        if (list.filters || (list == BrowseList.Hidden || list == BrowseList.LovedStored) && originalLanguageFilterSupported) {
             Control(options.kind?.noun ?: "Movies & Shows") { panel = Panel.KIND }
             if (list.filters) Control(options.watch.label) { panel = Panel.WATCH }
             if (genres.isNotEmpty()) {
@@ -92,7 +94,7 @@ fun BrowseControls(
     }
 
     when (panel) {
-        Panel.SORT -> PickerDialog("Sort By", list.sorts.map { it.label }, list.sorts.indexOf(options.sort),
+        Panel.SORT -> PickerDialog("Sort By", list.sorts.map { it.labelFor(list) }, list.sorts.indexOf(options.sort),
             onPick = { onOptions(options.choose(list.sorts[it])) }, onDismiss = { panel = null })
         Panel.RATING -> PickerDialog("Rating Source", RatingSource.entries.map { it.label }, options.ratingSource.ordinal,
             onPick = { onOptions(options.copy(ratingSource = RatingSource.entries[it])) }, onDismiss = { panel = null })

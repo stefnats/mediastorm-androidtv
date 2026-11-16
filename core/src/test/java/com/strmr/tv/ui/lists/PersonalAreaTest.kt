@@ -26,7 +26,7 @@ class PersonalAreaTest {
         val loading = PersonalArea.tiles(null, null, 0)
         val empty = PersonalArea.tiles(emptyList(), 0, 0)
         val loaded = PersonalArea.tiles(listOf(ContinueWatchingItem("tmdb:movie:1", "Synthetic movie")), 5, 3)
-        val expected = listOf(BrowseList.ContinueWatching, BrowseList.Watchlist, PersonalArea.loved, BrowseList.Personalized)
+        val expected = listOf(BrowseList.ContinueWatching, BrowseList.Watchlist, PersonalArea.loved, BrowseList.LovedStored, BrowseList.Personalized)
         for (tiles in listOf(loading, empty, loaded)) assertEquals(expected, tiles.map { it.list })
     }
 
