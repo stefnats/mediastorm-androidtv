@@ -40,6 +40,11 @@ import androidx.compose.ui.unit.dp
 import com.strmr.tv.api.DetailsTarget
 import com.strmr.tv.home.CustomList
 import com.strmr.tv.home.WatchlistItem
+import com.strmr.mobile.ui.lists.ListNameDialog
+import com.strmr.tv.library.CustomListOperations
+import com.strmr.tv.library.CustomListSelectionKey
+import androidx.compose.runtime.DisposableEffect
+import kotlinx.coroutines.CancellationException
 import com.strmr.tv.library.CustomListsStore
 import kotlinx.coroutines.launch
 
@@ -52,38 +57,59 @@ import kotlinx.coroutines.launch
 @Composable
 fun AddToListSheet(target: DetailsTarget, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var memberships by remember { mutableStateOf<Map<String, WatchlistItem>?>(null) }
-    var busy by remember { mutableStateOf(emptySet<String>()) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var naming by remember { mutableStateOf(false) }
-    LaunchedEffect(target.titleId) {
-        CustomListsStore.refresh()
-        memberships = CustomListsStore.memberships(target)
+    val expected = CustomListsStore.pickingOwner(target)?.epoch ?: Long.MIN_VALUE
+    val operations = remember(expected, CustomListSelectionKey(target)) {
+        CustomListOperations(expected, target) { CustomListsStore.picking === target }
     }
-
+    DisposableEffect(operations) { onDispose { operations.close() } }
+    var memberships by remember(operations) { mutableStateOf<Map<String, WatchlistItem>?>(null) }
+    var busy by remember(operations) { mutableStateOf(emptySet<String>()) }
+    var error by remember(operations) { mutableStateOf<String?>(null) }
+    var naming by remember(operations) { mutableStateOf(false) }
+    val close = {
+        if (operations.isCurrent) {
+            CustomListsStore.clearPicking(target, expected)
+            operations.close()
+            onDismiss()
+        }
+    }
+    LaunchedEffect(operations) {
+        val operation = operations.begin(key = "load") ?: return@LaunchedEffect
+        try {
+            operations.run(operation) {
+                CustomListsStore.refresh(expected, it)
+                val loaded = CustomListsStore.memberships(target, expected, it)
+                it.publish { memberships = loaded }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { operation.publish { error = "Unable to load lists. Try again." } }
+    }
     fun toggle(list: CustomList) {
-        if (list.id in busy) return
+        if (list.id in busy || memberships == null || !operations.isCurrent) return
+        val stored = memberships?.get(list.id)
+        operations.retire("load")
+        val operation = operations.begin(list.id, stored) ?: return
         busy = busy + list.id
         scope.launch {
             try {
-                val item = memberships?.get(list.id)
-                if (item != null) {
-                    CustomListsStore.remove(item, list.id)
-                    memberships = memberships.orEmpty() - list.id
-                } else {
-                    CustomListsStore.add(target, list.id)
-                    memberships = CustomListsStore.memberships(target)
+                operations.run(operation) {
+                    if (stored != null) CustomListsStore.remove(stored, list.id, operation = it, expectedContext = expected)
+                    else CustomListsStore.add(target, list.id, it, expected)
+                    val updated = CustomListsStore.memberships(target, expected, it)[list.id]
+                    it.publish {
+                        memberships = memberships.orEmpty().toMutableMap().apply {
+                            if (updated == null) remove(list.id) else put(list.id, updated)
+                        }
+                        error = null
+                    }
                 }
-                error = null
-            } catch (e: Exception) {
-                error = e.message ?: "Couldn't update the list."
-            } finally {
-                busy = busy - list.id
-            }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { operation.publish { error = "Unable to update this list. Try again." } }
+            finally { operation.publish { busy = busy - list.id } }
         }
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState()) {
+    ModalBottomSheet(onDismissRequest = close, sheetState = rememberModalBottomSheetState()) {
         Column(Modifier.navigationBarsPadding()) {
             SheetHeader("Add to List", target.name, null)
             error?.let {
@@ -121,48 +147,27 @@ fun AddToListSheet(target: DetailsTarget, onDismiss: () -> Unit) {
                         headlineContent = { Text("New List…") },
                         leadingContent = { Icon(Icons.Outlined.Add, contentDescription = null) },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        modifier = Modifier.clickable { naming = true },
+                        modifier = Modifier.clickable { if (operations.isCurrent) naming = true },
                     )
                 }
             }
         }
     }
     if (naming) {
-        NewListDialog(target, onDismiss = { naming = false }) { name ->
-            scope.launch {
-                try {
-                    val list = CustomListsStore.create(name)
-                    CustomListsStore.add(target, list.id)
-                    onDismiss()
-                } catch (e: Exception) {
-                    error = e.message ?: "Couldn't create the list."
+        ListNameDialog(
+            title = "New List", message = "The new list will start with ${target.name}.",
+            confirm = "Create and Add", onDismiss = { naming = false },
+            expectedContext = expected, target = target, selected = { operations.isCurrent },
+        ) { name, operation ->
+            operations.retire("load")
+            val initial = memberships == null
+            val list = CustomListsStore.createAndAdd(name, target, operation)
+            val updated = CustomListsStore.memberships(target, expected, operation)
+            operation.publish {
+                memberships = if (initial) updated else memberships.orEmpty().toMutableMap().apply {
+                    updated[list.id]?.let { put(list.id, it) }
                 }
             }
         }
     }
-}
-
-/** "New List": a name, checked against the reserved and taken names before it is created. */
-@Composable
-private fun NewListDialog(target: DetailsTarget, onDismiss: () -> Unit, onCreate: (String) -> Unit) {
-    var name by remember { mutableStateOf("") }
-    val problem = if (name.isBlank()) null else CustomListsStore.nameProblem(name)
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("New List") },
-        text = {
-            Column {
-                Text("The new list will start with ${target.name}.")
-                OutlinedTextField(
-                    name, { name = it }, label = { Text("Name") }, singleLine = true,
-                    isError = problem != null, supportingText = problem?.let { { Text(it) } },
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onDismiss(); onCreate(name.trim()) }, enabled = name.isNotBlank() && problem == null) { Text("Create and Add") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
 }

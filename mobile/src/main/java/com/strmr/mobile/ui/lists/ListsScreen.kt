@@ -35,6 +35,8 @@ import com.strmr.tv.home.StreamingService
 import com.strmr.tv.home.decades
 import com.strmr.tv.home.genres
 import com.strmr.tv.library.CustomListsStore
+import com.strmr.tv.library.ProfileDataContext
+import androidx.compose.runtime.collectAsState
 import com.strmr.tv.library.HiddenItemsStore
 import com.strmr.tv.library.ListsTabStore
 import com.strmr.tv.ui.lists.TileSpec
@@ -55,7 +57,8 @@ import kotlinx.coroutines.launch
 fun ListsScreen(asPage: Boolean) {
     // null is All: both kinds' rows.
     var kind by rememberSaveable { mutableStateOf<BrowseKind?>(null) }
-    var naming by remember { mutableStateOf(false) }
+    val listContext by ProfileDataContext.changes.collectAsState()
+    var naming by remember(listContext) { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -93,7 +96,7 @@ fun ListsScreen(asPage: Boolean) {
                     HorizontalDivider()
                     DropdownMenuItem(
                         text = { Text("New List…") }, leadingIcon = { Icon(Icons.Filled.Add, null) },
-                        onClick = { menu = false; naming = true },
+                        onClick = { menu = false; if (listContext == ProfileDataContext.current) naming = true },
                     )
                 }
             }
@@ -112,7 +115,7 @@ fun ListsScreen(asPage: Boolean) {
                 item("for-you") { TileRow("For You", personalTiles(continueWatching, lists?.firstOrNull { it.isSetAside }, hiddenCount, hiddenShown)) }
                 if (lists != null) item("yours") {
                     TileRow("Your Lists", lists.filterNot { it.isSetAside }.map { TileSpec(BrowseList.Custom(it.id, it.name), count = it.itemCount) }) {
-                        naming = true
+                        if (listContext == ProfileDataContext.current) naming = true
                     }
                 }
                 val libraries = ListsTabStore.libraries
@@ -147,8 +150,8 @@ fun ListsScreen(asPage: Boolean) {
     }
 
     if (naming) {
-        ListNameDialog("New List", "Add titles to it with “Manage Lists…” on any title.", confirm = "Create", onDismiss = { naming = false }) { name ->
-            CustomListsStore.create(name)
+        ListNameDialog("New List", "Add titles to it with “Manage Lists…” on any title.", confirm = "Create", expectedContext = listContext, onDismiss = { naming = false }) { name, operation ->
+            CustomListsStore.create(name, operation)
         }
     }
 }

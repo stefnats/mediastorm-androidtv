@@ -2,124 +2,147 @@ package com.strmr.tv.library
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.referentialEqualityPolicy
 import androidx.compose.runtime.setValue
-import com.strmr.tv.api.ApiClient
-import com.strmr.tv.api.ApiError
-import com.strmr.tv.api.DetailsTarget
+import com.strmr.tv.api.*
 import com.strmr.tv.home.CustomList
 import com.strmr.tv.home.WatchlistItem
 import com.strmr.tv.home.customListItems
 import com.strmr.tv.home.customLists
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
+import com.strmr.tv.player.PlaybackSessionContext
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/**
- * The profile's custom lists, shared by the Lists tab, the list grids and every "Add to
- * List…" action so a change in one shows everywhere. Main thread only.
- */
+/** Current-profile custom lists. Owned dialog operations never recapture a replacement profile. */
 object CustomListsStore {
-    /** In the server's order; null until the first load. */
-    var lists by mutableStateOf<List<CustomList>?>(null)
-        private set
-    /** The title whose "Add to List" dialog is up (set from any card or details page). */
-    var picking by mutableStateOf<DetailsTarget?>(null)
-    /**
-     * One list's item change: an add ([removed] null; that list's open grids re-read it) or a
-     * removal of [removed] (they drop it in place). Only the changed list's grids react, so
-     * the others keep their cards and focus.
-     */
+    private var storedLists by mutableStateOf<List<CustomList>?>(null)
+    private var listOwner: Long? = null
+    val lists: List<CustomList>? get() = storedLists.takeIf { listOwner == ProfileDataContext.current }
+    private var picked: DetailsTarget? by mutableStateOf(null, referentialEqualityPolicy())
+    private var pickedOwner: PlaybackSessionContext? = null
+    var picking: DetailsTarget?
+        get() = picked.takeIf { pickedOwner?.isCurrent() == true }
+        set(value) { pickedOwner = value?.let { PlaybackSessionContext.capture() }; picked = value }
+    fun pickingOwner(target: DetailsTarget): PlaybackSessionContext? = pickedOwner?.takeIf { picked === target && it.isCurrent() }
+    fun clearPicking(target: DetailsTarget, expected: Long) {
+        ApiClient.inContext(expected) { if (picked === target && pickedOwner?.epoch == expected) { picked = null; pickedOwner = null } }
+    }
     data class ItemChange(val listId: String, val removed: WatchlistItem? = null)
     private val _itemChanges = MutableSharedFlow<ItemChange>(extraBufferCapacity = 16)
     val itemChanges: SharedFlow<ItemChange> = _itemChanges
     private val refreshes = ProfileRefresh()
-
-    /** The lists a title can be added to: all but the reserved Set Aside list. */
+    private var revision = 0L
+    private var mutexEpoch: Long? = null
+    private var mutex = Mutex()
     val userLists: List<CustomList> get() = lists.orEmpty().filterNot { it.isSetAside }
 
-    suspend fun refresh() = refresh { ApiClient.customLists() }
-
-    internal suspend fun refresh(load: suspend () -> List<CustomList>) {
-        refreshes.run(load, success = { lists = it })
-    }
-
-    /** Forgets everything (profile switch). */
-    fun reset() {
-        refreshes.reset()
-        lists = null
-        picking = null
-    }
-
-    /** The stored item matching the title in each list that has it, by list ID; lists that couldn't be read are left out. */
-    suspend fun memberships(target: DetailsTarget): Map<String, WatchlistItem> = coroutineScope {
-        val context = ProfileDataContext.current
-        userLists.filter { (it.itemCount ?: 1) > 0 }.map { list ->
-            async {
-                ProfileDataContext.requireCurrent(context)
-                optionalProfileRead { ApiClient.customListItems(list.id).also { ProfileDataContext.requireCurrent(context) } }
-                    ?.firstOrNull { WatchlistStore.matches(it, target) }?.let { list.id to it }
-            }
-        }.awaitAll().filterNotNull().toMap()
-    }
-
-    suspend fun create(name: String): CustomList {
-        val context = ProfileDataContext.current
-        val list = ApiClient.send<CustomList>("POST", "${ApiClient.profilePath}/custom-lists", body = buildJsonObject { put("name", name) })
-        ProfileDataContext.requireCurrent(context)
-        refresh()
-        ProfileDataContext.requireCurrent(context)
-        return list
-    }
-
-    suspend fun rename(id: String, name: String) {
-        val context = ProfileDataContext.current
-        ApiClient.sendRaw("PATCH", "${ApiClient.profilePath}/custom-lists/${ApiClient.segment(id)}", body = buildJsonObject { put("name", name) })
-        ProfileDataContext.requireCurrent(context)
-        refresh()
-    }
-
-    suspend fun delete(id: String) {
-        val context = ProfileDataContext.current
-        ApiClient.sendRaw("DELETE", "${ApiClient.profilePath}/custom-lists/${ApiClient.segment(id)}")
-        ProfileDataContext.requireCurrent(context)
-        lists = lists?.filterNot { it.id == id }
-        refresh()
-    }
-
-    suspend fun add(target: DetailsTarget, listId: String) {
-        val context = ProfileDataContext.current
-        ApiClient.sendRaw("POST", "${ApiClient.profilePath}/custom-lists/${ApiClient.segment(listId)}/items", body = WatchlistStore.upsert(target))
-        ProfileDataContext.requireCurrent(context)
-        _itemChanges.tryEmit(ItemChange(listId))
-        refresh()
-    }
-
-    /**
-     * Removes a stored item (its own media type and ID, as the list returned it); a 404
-     * (already gone) counts as success. A grid that already dropped the item passes
-     * `reloadGrids = false` to keep its place.
-     */
-    suspend fun remove(item: WatchlistItem, listId: String, reloadGrids: Boolean = true) {
-        val context = ProfileDataContext.current
-        try {
-            ApiClient.sendRaw(
-                "DELETE",
-                "${ApiClient.profilePath}/custom-lists/${ApiClient.segment(listId)}/items/" +
-                    "${ApiClient.segment(item.mediaType)}/${ApiClient.segment(item.id)}",
-            )
-        } catch (e: ApiError) {
-            if (e.statusCode != 404) throw e
+    private fun owner(operation: CustomListOperation?, expected: Long?): PlaybackSessionContext {
+        if (operation != null) {
+            operation.check()
+            if (expected != null && expected != operation.owner.epoch) throw CancellationException("List context changed")
+            return operation.owner
         }
-        ProfileDataContext.requireCurrent(context)
-        if (reloadGrids) _itemChanges.tryEmit(ItemChange(listId, removed = item))
-        refresh()
+        return PlaybackSessionContext.capture(expected ?: ProfileDataContext.current)
+    }
+    private fun changed() { revision++; refreshes.reset() }
+    private fun mutex(owner: PlaybackSessionContext): Mutex = owner.use {
+        if (mutexEpoch != owner.epoch) { mutexEpoch = owner.epoch; mutex = Mutex() }
+        mutex
+    }
+    internal suspend fun <T> write(owner: PlaybackSessionContext, operation: CustomListOperation?, action: suspend () -> T): T {
+        owner.requireCurrent(); operation?.check()
+        return mutex(owner).withLock {
+            checkedListStage(owner, operation) { changed(); action() }
+        }
+    }
+    suspend fun refresh(expectedContext: Long? = null, operation: CustomListOperation? = null) {
+        val owner = owner(operation, expectedContext)
+        if (operation != null) refreshes.reset()
+        val requestedRevision = revision
+        refreshes.run(load = {
+            try { checkedListStage(owner, operation) { ApiClient.customLists(owner.epoch) } }
+            catch (error: CancellationException) { throw error }
+            catch (error: Exception) { if (operation != null) error.rethrowVodDenial(); throw error }
+        }, success = { result -> owner.use {
+            operation?.check()
+            if (revision == requestedRevision) { storedLists = result; listOwner = owner.epoch }
+        } }, failure = { error -> if (operation != null) error.rethrowVodDenial() })
+    }
+    /** Existing isolated refresh test seam; no write or permission is inferred from its data. */
+    internal suspend fun refresh(load: suspend () -> List<CustomList>) {
+        val owner = PlaybackSessionContext.capture(); val requestedRevision = revision
+        refreshes.run(load, success = { result -> owner.use { if (revision == requestedRevision) { storedLists = result; listOwner = owner.epoch } } })
+    }
+    fun reset() { changed(); storedLists = null; listOwner = null; picked = null; pickedOwner = null }
+
+    suspend fun memberships(target: DetailsTarget, expectedContext: Long? = null, operation: CustomListOperation? = null): Map<String, WatchlistItem> = coroutineScope {
+        val owner = owner(operation, expectedContext); operation?.requireTarget(target)
+        val selected = owner.use { userLists.filter { (it.itemCount ?: 1) > 0 }.toList() }
+        selected.map { list -> async {
+            try {
+                checkedListStage(owner, operation) { ApiClient.customListItems(list.id, owner.epoch) }
+                    .firstOrNull { WatchlistStore.matches(it, target) }?.let { list.id to it }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { if (operation != null) error.rethrowVodDenial(); null }
+        } }.awaitAll().filterNotNull().toMap().also { owner.requireCurrent(); operation?.check() }
     }
 
-    /** Names other clients treat specially, or that are already taken. */
+    suspend fun create(name: String, operation: CustomListOperation? = null, expectedContext: Long? = null): CustomList {
+        val owner = owner(operation, expectedContext); operation?.requireCreate()
+        return write(owner, operation) {
+            val request = customListRequest("POST", "", buildJsonObject { put("name", name) }, owner, operation)
+            val list = checkedListStage(owner, operation) { ApiClient.send<CustomList>(request.method, request.path, body = request.body, expectedContext = request.expected) }
+            operation?.created(list.id); changed(); refresh(owner.epoch, operation)
+            list
+        }
+    }
+    suspend fun createAndAdd(name: String, target: DetailsTarget, operation: CustomListOperation): CustomList {
+        operation.requireTarget(target)
+        return createListAndAdd(operation,
+            create = { create(name, operation) },
+            add = { add(target, it.id, operation) },
+        )
+    }
+    suspend fun rename(id: String, name: String, operation: CustomListOperation? = null, expectedContext: Long? = null) {
+        val owner = owner(operation, expectedContext); operation?.requireList(id)
+        write(owner, operation) {
+            val request = customListRequest("PATCH", "/${ApiClient.segment(id)}", buildJsonObject { put("name", name) }, owner, operation)
+            checkedListStage(owner, operation) { ApiClient.sendRaw(request.method, request.path, body = request.body, expectedContext = request.expected) }
+            changed(); refresh(owner.epoch, operation)
+        }
+    }
+    suspend fun delete(id: String, operation: CustomListOperation? = null, expectedContext: Long? = null) {
+        val owner = owner(operation, expectedContext); operation?.requireList(id)
+        write(owner, operation) {
+            val request = customListRequest("DELETE", "/${ApiClient.segment(id)}", null, owner, operation)
+            checkedListStage(owner, operation) { ApiClient.sendRaw(request.method, request.path, expectedContext = request.expected) }
+            changed(); owner.use { operation?.check(); storedLists = lists?.filterNot { it.id == id }; listOwner = owner.epoch }
+            refresh(owner.epoch, operation)
+        }
+    }
+    suspend fun add(target: DetailsTarget, listId: String, operation: CustomListOperation? = null, expectedContext: Long? = null) {
+        val owner = owner(operation, expectedContext); operation?.requireList(listId); operation?.requireTarget(target)
+        write(owner, operation) {
+            val body = owner.use { WatchlistStore.upsert(target) }
+            val request = customListRequest("POST", "/${ApiClient.segment(listId)}/items", body, owner, operation)
+            checkedListStage(owner, operation) { ApiClient.sendRaw(request.method, request.path, body = request.body, expectedContext = request.expected) }
+            changed(); owner.use { operation?.check(); _itemChanges.tryEmit(ItemChange(listId)) }; refresh(owner.epoch, operation)
+        }
+    }
+    suspend fun remove(item: WatchlistItem, listId: String, reloadGrids: Boolean = true, operation: CustomListOperation? = null, expectedContext: Long? = null) {
+        val owner = owner(operation, expectedContext); operation?.requireList(listId); operation?.requireItem(item)
+        write(owner, operation) {
+            val request = customListRequest("DELETE", "/${ApiClient.segment(listId)}/items/${ApiClient.segment(item.mediaType)}/${ApiClient.segment(item.id)}", null, owner, operation)
+            try { checkedListStage(owner, operation) { ApiClient.sendRaw(request.method, request.path, expectedContext = request.expected) } }
+            catch (error: ApiError) { if (error.statusCode != 404) throw error; owner.requireCurrent(); operation?.check() }
+            changed(); owner.use { operation?.check(); if (reloadGrids) _itemChanges.tryEmit(ItemChange(listId, item)) }; refresh(owner.epoch, operation)
+        }
+    }
     fun nameProblem(name: String, renaming: String? = null): String? {
         val trimmed = name.trim()
         return when {

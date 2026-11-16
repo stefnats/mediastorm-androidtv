@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,6 +39,8 @@ import com.strmr.tv.home.filters
 import com.strmr.tv.home.indexesLetters
 import com.strmr.tv.home.offersRandom
 import com.strmr.tv.home.sorts
+import kotlinx.coroutines.CancellationException
+import com.strmr.tv.library.CustomListOperations
 import com.strmr.tv.library.CustomListsStore
 import com.strmr.tv.library.TitleActions
 import com.strmr.tv.ui.ChoiceDialog
@@ -59,12 +62,15 @@ import kotlinx.coroutines.launch
  * removes a title.
  */
 @Composable
-fun ListGridScreen(list: BrowseList, query: Map<String, String> = emptyMap()) {
+fun ListGridScreen(list: BrowseList, query: Map<String, String> = emptyMap(), currentPage: () -> Boolean = { true }) {
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
     val model = remember { ListGridModel(list, query, scope) }
-    var renaming by remember { mutableStateOf(false) }
-    var deleting by remember { mutableStateOf(false) }
+    val active = currentPage()
+    val operations = remember(model, active) { CustomListOperations(model.dataContext, selected = currentPage) }
+    DisposableEffect(operations) { onDispose { operations.close() } }
+    var renaming by remember(operations) { mutableStateOf(false) }
+    var deleting by remember(operations) { mutableStateOf(false) }
     val first = remember { FocusRequester() }
     val status = remember { FocusRequester() }
 
@@ -137,8 +143,8 @@ fun ListGridScreen(list: BrowseList, query: Map<String, String> = emptyMap()) {
                                 BrowseControls(
                                     list, options, { model.options = it }, model.genres, parts, model.part, { model.part = it }, model.picking,
                                     onRandom = if (list.offersRandom) ::pickRandom else null,
-                                    onRename = if (manageable) { { renaming = true } } else null,
-                                    onDelete = if (manageable) { { deleting = true } } else null,
+                                    onRename = if (manageable) { { if (operations.isCurrent) renaming = true } } else null,
+                                    onDelete = if (manageable) { { if (operations.isCurrent) deleting = true } } else null,
                                     originalLanguageFilterSupported = model.originalLanguageFilterSupported,
                                 )
                             }
@@ -175,28 +181,28 @@ fun ListGridScreen(list: BrowseList, query: Map<String, String> = emptyMap()) {
     }
 
     if (renaming && customId != null) {
-        ListNameDialog("Rename List", confirm = "Rename", initial = title, renaming = customId, onDismiss = { renaming = false }) { name ->
-            if (name != title) CustomListsStore.rename(customId, name)
+        ListNameDialog("Rename List", confirm = "Rename", initial = title, renaming = customId,
+            expectedContext = model.dataContext, selected = { operations.isCurrent }, onDismiss = { renaming = false }) { name, operation ->
+            if (name != title) CustomListsStore.rename(customId, name, operation)
         }
     }
-    if (deleting && customId != null) {
+    val deletion = remember(deleting, operations, customId) { if (deleting && customId != null) operations.begin(customId, key = "delete") else null }
+    if (deleting && customId != null && deletion != null) {
+        val dismiss = { if (deletion.publish { deleting = false }) operations.retire("delete") }
         ChoiceDialog(
-            title = "Delete “$title”?",
-            message = "The titles stay in your library; only the list goes.",
+            title = "Delete “$title”?", message = "The titles stay in your library; only the list goes.",
+            dismissOnChoice = false,
             choices = listOf(
                 DialogChoice("Delete List") {
-                    scope.launch {
+                    if (deletion.publish { deleting = false }) scope.launch {
                         try {
-                            CustomListsStore.delete(customId)
-                            navigator.close()
-                        } catch (e: Exception) {
-                            model.actionError = e.message
-                        }
+                            operations.run(deletion) { CustomListsStore.delete(customId, it); it.publish { navigator.close() } }
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { deletion.publish { model.actionError = "Unable to delete this list. Try again." } }
                     }
                 },
-                DialogChoice("Cancel") {},
-            ),
-            onDismiss = { deleting = false },
+                DialogChoice("Cancel", dismiss),
+            ), onDismiss = dismiss,
         )
     }
 }

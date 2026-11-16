@@ -25,6 +25,8 @@ import com.strmr.tv.home.StreamingService
 import com.strmr.tv.home.decades
 import com.strmr.tv.home.genres
 import com.strmr.tv.library.CustomListsStore
+import com.strmr.tv.library.ProfileDataContext
+import androidx.compose.runtime.collectAsState
 import com.strmr.tv.library.HiddenItemsStore
 import com.strmr.tv.library.ListsTabStore
 import com.strmr.tv.library.WatchlistStore
@@ -41,7 +43,8 @@ import com.strmr.tv.ui.PickerDialog
 fun ListsScreen() {
     // null is All: both kinds' rows.
     var kind by rememberSaveable { mutableStateOf<BrowseKind?>(null) }
-    var naming by remember { mutableStateOf(false) }
+    val listContext by ProfileDataContext.changes.collectAsState()
+    var naming by remember(listContext) { mutableStateOf(false) }
     var choosingKind by remember { mutableStateOf(false) }
     // On every visit: lists made or changed elsewhere show up. Everything here is loaded with
     // the shell, so the rows draw at once and only update in place.
@@ -67,7 +70,7 @@ fun ListsScreen() {
         item("for-you") { TileRow("For You", personalTiles(continueWatching, lists?.firstOrNull { it.isSetAside }, hiddenCount, hiddenShown)) }
         if (lists != null) item("yours") {
             TileRow("Your Lists", lists.filterNot { it.isSetAside }.map { TileSpec(BrowseList.Custom(it.id, it.name), count = it.itemCount) }) {
-                naming = true
+                if (listContext == ProfileDataContext.current) naming = true
             }
         }
         // The profile's local, Plex and Jellyfin libraries, each opening its titles.
@@ -109,8 +112,8 @@ fun ListsScreen() {
         PickerDialog("Browse", kinds.map { it?.noun ?: "All" }, kinds.indexOf(kind), onPick = { kind = kinds[it] }, onDismiss = { choosingKind = false })
     }
     if (naming) {
-        ListNameDialog("New List", "Add titles to it with “Manage Lists…” on any title.", confirm = "Create", onDismiss = { naming = false }) { name ->
-            CustomListsStore.create(name)
+        ListNameDialog("New List", "Add titles to it with “Manage Lists…” on any title.", confirm = "Create", expectedContext = listContext, onDismiss = { naming = false }) { name, operation ->
+            CustomListsStore.create(name, operation)
         }
     }
 }

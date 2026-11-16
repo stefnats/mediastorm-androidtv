@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.vodDenial
 import com.strmr.tv.home.*
+import com.strmr.tv.library.CustomListOperations
 import com.strmr.tv.library.CustomListsStore
 import com.strmr.tv.library.HiddenItemsStore
 import com.strmr.tv.library.ProfileDataContext
@@ -24,7 +25,7 @@ class ListGridModel(
     val list: BrowseList,
     query: Map<String, String>,
     private val scope: CoroutineScope,
-    private val dataContext: Long = ProfileDataContext.current,
+    val dataContext: Long = ProfileDataContext.current,
     private val readPage: suspend (BrowseList, Int, Int, Map<String, String>, BrowseOptions, Long) -> BrowsePage = { shown, limit, offset, extra, options, expected ->
         ApiClient.browsePage(shown, limit, offset, extra, options = options, expectedContext = expected)
     },
@@ -185,12 +186,16 @@ class ListGridModel(
         val id = customId ?: return
         val entry = entries.firstOrNull { HomeCard.from(it).id == card.id } as? BrowseEntry.ItemEntry ?: return
         val requested = capture(); val previous = Triple(entries, fetched, total)
+        val operations = CustomListOperations(dataContext)
+        val operation = operations.begin(id, entry.item) ?: return
         entries = entries - entry; fetched = maxOf(0, fetched - 1); total = total?.let { maxOf(0, it - 1) }
         scope.launch {
-            if (!current(requested)) return@launch
-            try { CustomListsStore.remove(entry.item, id, reloadGrids = false); if (current(requested)) actionError = null }
+            try {
+                if (!current(requested)) return@launch
+                operations.run(operation) { CustomListsStore.remove(entry.item, id, operation = it, expectedContext = dataContext, reloadGrids = false) }; if (current(requested)) actionError = null }
             catch (error: CancellationException) { throw error }
             catch (_: Exception) { if (current(requested)) { entries = previous.first; fetched = previous.second; total = previous.third; actionError = "Unable to remove this title. Try again." } }
+            finally { operations.close() }
         }
     }
     fun pickRandom(open: (HomeLink) -> Unit) {

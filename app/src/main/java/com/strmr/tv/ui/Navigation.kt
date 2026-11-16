@@ -126,7 +126,7 @@ fun PageStack(content: @Composable () -> Unit) {
             ) {
                 when (page) {
                     is Page.Details -> DetailsScreen(page.target, page.openWatchState, page.autoplay)
-                    is Page.Grid -> ListGridScreen(page.list, page.query)
+                    is Page.Grid -> ListGridScreen(page.list, page.query, currentPage = { stack.lastOrNull() === page })
                     is Page.Person -> PersonScreen(page.person)
                     Page.HomeLayout -> HomeLayoutSettings()
                     Page.TopMenu -> TopMenuSettings()

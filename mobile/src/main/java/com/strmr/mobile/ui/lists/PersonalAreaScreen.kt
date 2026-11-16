@@ -17,6 +17,8 @@ import com.strmr.mobile.ui.shell.LocalNavigator
 import com.strmr.mobile.ui.shell.PageScaffold
 import com.strmr.tv.app.AppSession
 import com.strmr.tv.library.CustomListsStore
+import com.strmr.tv.library.ProfileDataContext
+import androidx.compose.runtime.collectAsState
 import com.strmr.tv.library.ListsTabStore
 import com.strmr.tv.library.WatchlistStore
 import com.strmr.tv.ratings.TitleRatingChanges
@@ -39,7 +41,8 @@ fun PersonalAreaScreen(asPage: Boolean) {
     val scope = rememberCoroutineScope()
     var refreshing by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
-    var naming by remember { mutableStateOf(false) }
+    val listContext by ProfileDataContext.changes.collectAsState()
+    var naming by remember(listContext) { mutableStateOf(false) }
     val preferenceRevision by TitleRatingChanges.generation.collectAsState()
     suspend fun refresh() {
         if (refreshing) return
@@ -69,13 +72,13 @@ fun PersonalAreaScreen(asPage: Boolean) {
             item("reminders") {
                 TextButton(onClick = { navigator.push(com.strmr.mobile.ui.shell.Route.Reminders) }, modifier = Modifier.padding(horizontal = 16.dp)) { Text("Reminders & Inbox") }
             }
-            item("your-lists") { TileRow("Your Lists", PersonalArea.ownLists(lists)) { naming = true } }
+            item("your-lists") { TileRow("Your Lists", PersonalArea.ownLists(lists)) { if (listContext == ProfileDataContext.current) naming = true } }
             if (!refreshing && (failed || lists == null || watching == null || WatchlistStore.loadError != null)) item("retry") {
                 Text("Some saved items could not be loaded. Select Refresh to try again.", modifier = Modifier.padding(horizontal = 16.dp))
             }
         }
     }
-    if (naming) ListNameDialog("New List", "Add titles from a title's menu.", confirm = "Create", onDismiss = { naming = false }) { name ->
-        CustomListsStore.create(name)
+    if (naming) ListNameDialog("New List", "Add titles from a title's menu.", confirm = "Create", expectedContext = listContext, onDismiss = { naming = false }) { name, operation ->
+        CustomListsStore.create(name, operation)
     }
 }

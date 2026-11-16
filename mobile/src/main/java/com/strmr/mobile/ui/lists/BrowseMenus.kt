@@ -33,6 +33,12 @@ import com.strmr.tv.home.HomeLink
 import com.strmr.tv.home.offersRandom
 import com.strmr.tv.home.sorts
 import com.strmr.tv.library.CustomListsStore
+import com.strmr.tv.library.CustomListOperations
+import com.strmr.tv.library.CustomListOperation
+import com.strmr.tv.library.CustomListSelectionKey
+import com.strmr.tv.library.ProfileDataContext
+import androidx.compose.runtime.DisposableEffect
+import kotlinx.coroutines.CancellationException
 import com.strmr.tv.ui.lists.ListGridModel
 import kotlinx.coroutines.launch
 
@@ -42,10 +48,16 @@ fun BrowseActions(model: ListGridModel) {
     val navigator = LocalNavigator.current
     val openLibrary = rememberLibraryOpener()
     val scope = rememberCoroutineScope()
+    val originalSection = remember(model) { navigator.section }
+    val originalPage = remember(model) { navigator.current.lastOrNull() }
+    val selected = { navigator.section == originalSection && navigator.current.lastOrNull() === originalPage && model.isCurrent }
+    val active = selected()
+    val operations = remember(model, active) { CustomListOperations(model.dataContext, selected = selected) }
+    DisposableEffect(operations) { onDispose { operations.close() } }
     var sorting by remember { mutableStateOf(false) }
-    var managing by remember { mutableStateOf(false) }
-    var renaming by remember { mutableStateOf(false) }
-    var deleting by remember { mutableStateOf(false) }
+    var managing by remember(operations) { mutableStateOf(false) }
+    var renaming by remember(operations) { mutableStateOf(false) }
+    var deleting by remember(operations) { mutableStateOf(false) }
     val list = model.list
 
     if (list.offersRandom) {
@@ -75,15 +87,15 @@ fun BrowseActions(model: ListGridModel) {
     }
     if (model.manageable) {
         Box {
-            IconButton(onClick = { managing = true }) { Icon(Icons.Filled.MoreVert, "List Actions") }
+            IconButton(onClick = { if (operations.isCurrent) managing = true }) { Icon(Icons.Filled.MoreVert, "List Actions") }
             DropdownMenu(expanded = managing, onDismissRequest = { managing = false }) {
                 DropdownMenuItem(
                     text = { Text("Rename…") }, leadingIcon = { Icon(Icons.Filled.Edit, null) },
-                    onClick = { managing = false; renaming = true },
+                    onClick = { if (operations.isCurrent) { managing = false; renaming = true } },
                 )
                 DropdownMenuItem(
                     text = { Text("Delete List…") }, leadingIcon = { Icon(Icons.Filled.Delete, null) },
-                    onClick = { managing = false; deleting = true },
+                    onClick = { if (operations.isCurrent) { managing = false; deleting = true } },
                 )
             }
         }
@@ -91,29 +103,28 @@ fun BrowseActions(model: ListGridModel) {
 
     val customId = model.customId
     if (renaming && customId != null) {
-        ListNameDialog("Rename List", confirm = "Rename", initial = model.title, renaming = customId, onDismiss = { renaming = false }) { name ->
-            if (name != model.title) CustomListsStore.rename(customId, name)
+        ListNameDialog("Rename List", confirm = "Rename", initial = model.title, renaming = customId,
+            expectedContext = model.dataContext, selected = { operations.isCurrent }, onDismiss = { renaming = false }) { name, operation ->
+            if (name != model.title) CustomListsStore.rename(customId, name, operation)
         }
     }
-    if (deleting && customId != null) {
+    val deletion = remember(deleting, operations, customId) { if (deleting && customId != null) operations.begin(customId, key = "delete") else null }
+    if (deleting && customId != null && deletion != null) {
+        val dismiss = { if (deletion.publish { deleting = false }) operations.retire("delete") }
         AlertDialog(
-            onDismissRequest = { deleting = false },
-            title = { Text("Delete “${model.title}”?") },
+            onDismissRequest = dismiss, title = { Text("Delete “${model.title}”?") },
             text = { Text("The titles stay in your library; only the list goes.") },
             confirmButton = {
                 TextButton(onClick = {
-                    deleting = false
-                    scope.launch {
+                    if (deletion.publish { deleting = false }) scope.launch {
                         try {
-                            CustomListsStore.delete(customId)
-                            navigator.pop()
-                        } catch (e: Exception) {
-                            model.actionError = e.message
-                        }
+                            operations.run(deletion) { CustomListsStore.delete(customId, it); it.publish { navigator.pop() } }
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { deletion.publish { model.actionError = "Unable to delete this list. Try again." } }
                     }
                 }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { deleting = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } },
         )
     }
 }
@@ -130,29 +141,34 @@ fun ListNameDialog(
     initial: String = "",
     renaming: String? = null,
     onDismiss: () -> Unit,
-    onSubmit: suspend (String) -> Unit,
+    expectedContext: Long,
+    target: com.strmr.tv.api.DetailsTarget? = null,
+    selected: () -> Boolean = { true },
+    onSubmit: suspend (String, CustomListOperation) -> Unit,
 ) {
-    var name by remember { mutableStateOf(initial) }
-    var problem by remember { mutableStateOf<String?>(null) }
-    var working by remember { mutableStateOf(false) }
+    val operations = remember(expectedContext, renaming, CustomListSelectionKey(target)) { CustomListOperations(expectedContext, target, selected) }
+    DisposableEffect(operations) { onDispose { operations.close() } }
+    var name by remember(operations) { mutableStateOf(initial) }
+    var problem by remember(operations) { mutableStateOf<String?>(null) }
+    var working by remember(operations) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val dismiss = { if (operations.isCurrent) { operations.close(); onDismiss() } }
     fun submit() {
-        if (working) return
+        if (working || !operations.isCurrent) return
         CustomListsStore.nameProblem(name, renaming)?.let { problem = it; return }
+        val submitted = name.trim()
+        val operation = operations.begin(listId = renaming, key = "submit") ?: return
         working = true
         scope.launch {
             try {
-                onSubmit(name.trim())
-                onDismiss()
-            } catch (e: Exception) {
-                problem = e.message
-            } finally {
-                working = false
-            }
+                operations.run(operation) { onSubmit(submitted, it); it.publish(onDismiss) }
+            } catch (error: CancellationException) { throw error
+            } catch (_: Exception) { operation.publish { problem = "Unable to save this list. Try again." }
+            } finally { operation.publish { working = false } }
         }
     }
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = dismiss,
         title = { Text(title) },
         text = {
             Column {
@@ -164,6 +180,6 @@ fun ListNameDialog(
             }
         },
         confirmButton = { TextButton(onClick = ::submit, enabled = !working) { Text(if (working) "Saving…" else confirm) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } },
     )
 }

@@ -45,6 +45,12 @@ import com.strmr.tv.api.DetailsTarget
 import com.strmr.tv.home.CustomList
 import com.strmr.tv.home.WatchlistItem
 import com.strmr.tv.library.CustomListsStore
+import com.strmr.tv.library.CustomListOperations
+import com.strmr.tv.library.CustomListOperation
+import com.strmr.tv.library.CustomListSelectionKey
+import com.strmr.tv.library.ProfileDataContext
+import androidx.compose.runtime.DisposableEffect
+import kotlinx.coroutines.CancellationException
 import com.strmr.tv.ui.SidePanelDialog
 import com.strmr.tv.ui.onboarding.FormField
 import kotlinx.coroutines.launch
@@ -58,41 +64,58 @@ import kotlinx.coroutines.launch
 @Composable
 fun AddToListDialog(target: DetailsTarget) {
     val scope = rememberCoroutineScope()
-    /** The matching stored item per list ID; null while loading. */
-    var memberships by remember { mutableStateOf<Map<String, WatchlistItem>?>(null) }
-    var busy by remember { mutableStateOf(setOf<String>()) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var naming by remember { mutableStateOf(false) }
-    val first = remember { FocusRequester() }
-    val close = { CustomListsStore.picking = null }
-    LaunchedEffect(target) {
-        CustomListsStore.refresh()
-        memberships = CustomListsStore.memberships(target)
-        // The rows exist a frame after the memberships arrive.
-        withFrameNanos { }
-        runCatching { first.requestFocus() }
+    val expected = CustomListsStore.pickingOwner(target)?.epoch ?: Long.MIN_VALUE
+    val operations = remember(expected, CustomListSelectionKey(target)) {
+        CustomListOperations(expected, target) { CustomListsStore.picking === target }
     }
-
-    // Repeat presses on a list with a change in flight are ignored (disabling the focused row would drop focus).
+    DisposableEffect(operations) { onDispose { operations.close() } }
+    var memberships by remember(operations) { mutableStateOf<Map<String, WatchlistItem>?>(null) }
+    var busy by remember(operations) { mutableStateOf(emptySet<String>()) }
+    var error by remember(operations) { mutableStateOf<String?>(null) }
+    var naming by remember(operations) { mutableStateOf(false) }
+    val close = {
+        if (operations.isCurrent) {
+            CustomListsStore.clearPicking(target, expected)
+            operations.close()
+        }
+    }
+    val first = remember { FocusRequester() }
+    LaunchedEffect(operations) {
+        val operation = operations.begin(key = "load") ?: return@LaunchedEffect
+        try {
+            operations.run(operation) {
+                CustomListsStore.refresh(expected, it)
+                val loaded = CustomListsStore.memberships(target, expected, it)
+                it.publish { memberships = loaded }
+                withFrameNanos { }
+                it.check()
+                runCatching { first.requestFocus() }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { operation.publish { error = "Unable to load lists. Try again." } }
+    }
     fun toggle(list: CustomList) {
-        if (list.id in busy) return
+        if (list.id in busy || memberships == null || !operations.isCurrent) return
+        val stored = memberships?.get(list.id)
+        operations.retire("load")
+        val operation = operations.begin(list.id, stored) ?: return
         busy = busy + list.id
         scope.launch {
             try {
-                val stored = memberships?.get(list.id)
-                if (stored != null) {
-                    CustomListsStore.remove(stored, list.id)
-                    memberships = memberships.orEmpty() - list.id
-                } else {
-                    CustomListsStore.add(target, list.id)
-                    memberships = CustomListsStore.memberships(target)
+                operations.run(operation) {
+                    if (stored != null) CustomListsStore.remove(stored, list.id, operation = it, expectedContext = expected)
+                    else CustomListsStore.add(target, list.id, it, expected)
+                    val updated = CustomListsStore.memberships(target, expected, it)[list.id]
+                    it.publish {
+                        memberships = memberships.orEmpty().toMutableMap().apply {
+                            if (updated == null) remove(list.id) else put(list.id, updated)
+                        }
+                        error = null
+                    }
                 }
-                error = null
-            } catch (e: Exception) {
-                error = e.message
-            } finally {
-                busy = busy - list.id
-            }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { operation.publish { error = "Unable to update this list. Try again." } }
+            finally { operation.publish { busy = busy - list.id } }
         }
     }
 
@@ -119,7 +142,7 @@ fun AddToListDialog(target: DetailsTarget) {
         }
         item {
             ListItem(
-                selected = false, onClick = { naming = true },
+                selected = false, onClick = { if (operations.isCurrent) naming = true },
                 modifier = if (loaded != null && CustomListsStore.userLists.isEmpty()) Modifier.focusRequester(first) else Modifier,
                 leadingContent = { Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(20.dp)) },
                 headlineContent = { Text("New List…") },
@@ -129,14 +152,19 @@ fun AddToListDialog(target: DetailsTarget) {
 
     if (naming) {
         ListNameDialog(
-            title = "New List",
-            message = "The new list will start with ${target.name}.",
-            confirm = "Create and Add",
-            onDismiss = { naming = false },
-        ) { name ->
-            val list = CustomListsStore.create(name)
-            CustomListsStore.add(target, list.id)
-            memberships = CustomListsStore.memberships(target)
+            title = "New List", message = "The new list will start with ${target.name}.",
+            confirm = "Create and Add", onDismiss = { naming = false },
+            expectedContext = expected, target = target, selected = { operations.isCurrent },
+        ) { name, operation ->
+            operations.retire("load")
+            val initial = memberships == null
+            val list = CustomListsStore.createAndAdd(name, target, operation)
+            val updated = CustomListsStore.memberships(target, expected, operation)
+            operation.publish {
+                memberships = if (initial) updated else memberships.orEmpty().toMutableMap().apply {
+                    updated[list.id]?.let { put(list.id, it) }
+                }
+            }
         }
     }
 }
@@ -153,30 +181,35 @@ fun ListNameDialog(
     initial: String = "",
     renaming: String? = null,
     onDismiss: () -> Unit,
-    onSubmit: suspend (String) -> Unit,
+    expectedContext: Long,
+    target: com.strmr.tv.api.DetailsTarget? = null,
+    selected: () -> Boolean = { true },
+    onSubmit: suspend (String, CustomListOperation) -> Unit,
 ) {
-    var name by remember { mutableStateOf(initial) }
-    var problem by remember { mutableStateOf<String?>(null) }
-    var working by remember { mutableStateOf(false) }
+    val operations = remember(expectedContext, renaming, CustomListSelectionKey(target)) { CustomListOperations(expectedContext, target, selected) }
+    DisposableEffect(operations) { onDispose { operations.close() } }
+    var name by remember(operations) { mutableStateOf(initial) }
+    var problem by remember(operations) { mutableStateOf<String?>(null) }
+    var working by remember(operations) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val field = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { field.requestFocus() } }
+    val dismiss = { if (operations.isCurrent) { operations.close(); onDismiss() } }
     fun submit() {
-        if (working) return
+        if (working || !operations.isCurrent) return
         CustomListsStore.nameProblem(name, renaming)?.let { problem = it; return }
+        val submitted = name.trim()
+        val operation = operations.begin(listId = renaming, key = "submit") ?: return
         working = true
         scope.launch {
             try {
-                onSubmit(name.trim())
-                onDismiss()
-            } catch (e: Exception) {
-                problem = e.message
-            } finally {
-                working = false
-            }
+                operations.run(operation) { onSubmit(submitted, it); it.publish(onDismiss) }
+            } catch (error: CancellationException) { throw error
+            } catch (_: Exception) { operation.publish { problem = "Unable to save this list. Try again." }
+            } finally { operation.publish { working = false } }
         }
     }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)), contentAlignment = Alignment.Center) {
             Column(
                 Modifier.width(460.dp).background(Color(0xFF1C1C1E), RoundedCornerShape(20.dp)).padding(28.dp),
@@ -187,7 +220,7 @@ fun ListNameDialog(
                 FormField(name, { name = it; problem = null }, "Name", imeAction = ImeAction.Done, onSubmit = ::submit, modifier = Modifier.focusRequester(field))
                 problem?.let { Text(it, fontSize = 14.sp, color = Color(0xFFFF6B6B)) }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
-                    OutlinedButton(onClick = onDismiss) { Text("Cancel") }
+                    OutlinedButton(onClick = dismiss) { Text("Cancel") }
                     Button(onClick = ::submit) { Text(if (working) "Saving…" else confirm) }
                 }
             }

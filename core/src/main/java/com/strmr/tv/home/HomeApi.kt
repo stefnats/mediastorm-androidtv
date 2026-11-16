@@ -160,10 +160,15 @@ suspend fun ApiClient.surprise(filter: HomeMediaFilter = HomeMediaFilter.ALL): T
     timeoutMs = 60_000,
 ).title
 
-suspend fun ApiClient.customLists(): List<CustomList> = sendList("GET", "$profilePath/custom-lists")
+suspend fun ApiClient.customLists(expectedContext: Long = ProfileDataContext.current): List<CustomList> {
+    val path = inContext(expectedContext) { "$profilePath/custom-lists" }
+    return sendList("GET", path, expectedContext = expectedContext)
+}
 
-suspend fun ApiClient.customListItems(id: String): List<WatchlistItem> =
-    sendList("GET", "$profilePath/custom-lists/${segment(id)}/items")
+suspend fun ApiClient.customListItems(id: String, expectedContext: Long = ProfileDataContext.current): List<WatchlistItem> {
+    val path = inContext(expectedContext) { "$profilePath/custom-lists/${segment(id)}/items" }
+    return sendList("GET", path, expectedContext = expectedContext)
+}
 
 /**
  * One page of a list, as titles whatever the source's item shape. `extra` adds query
