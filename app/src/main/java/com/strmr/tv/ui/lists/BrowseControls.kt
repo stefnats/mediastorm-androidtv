@@ -25,6 +25,7 @@ import androidx.tv.material3.FilterChip
 import androidx.tv.material3.Icon
 import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
+import com.strmr.tv.home.BrowseOriginalLanguageMenu
 import com.strmr.tv.home.BrowseKind
 import com.strmr.tv.home.BrowseList
 import com.strmr.tv.home.BrowseOptions
@@ -38,7 +39,7 @@ import com.strmr.tv.ui.DialogChoice
 import com.strmr.tv.ui.MultiPickerDialog
 import com.strmr.tv.ui.PickerDialog
 
-private enum class Panel { SORT, RATING, KIND, WATCH, GENRES, PART, MANAGE }
+private enum class Panel { SORT, RATING, KIND, WATCH, GENRES, LANGUAGE, PART, MANAGE }
 
 /**
  * Sort, filter and random-pick buttons over a list grid; each shows its current choice and
@@ -58,6 +59,7 @@ fun BrowseControls(
     onRandom: (() -> Unit)?,
     onRename: (() -> Unit)?,
     onDelete: (() -> Unit)?,
+    originalLanguageFilterSupported: Boolean = false,
 ) {
     var panel by remember { mutableStateOf<Panel?>(null) }
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -70,6 +72,7 @@ fun BrowseControls(
         if (list.filters) {
             Control(options.kind?.noun ?: "Movies & Shows") { panel = Panel.KIND }
             Control(options.watch.label) { panel = Panel.WATCH }
+            if (originalLanguageFilterSupported) Control(BrowseOriginalLanguageMenu.label(options)) { panel = Panel.LANGUAGE }
             if (genres.isNotEmpty()) {
                 Control(when (options.genres.size) { 0 -> "Any Genre"; 1 -> options.genres.first(); else -> "${options.genres.size} Genres" }) {
                     panel = Panel.GENRES
@@ -108,6 +111,11 @@ fun BrowseControls(
             },
             onDismiss = { panel = null },
         )
+        Panel.LANGUAGE -> if (originalLanguageFilterSupported) {
+            val codes = BrowseOriginalLanguageMenu.codes(options)
+            MultiPickerDialog("Original language (catalogue, max 32)", BrowseOriginalLanguageMenu.labels(codes), BrowseOriginalLanguageMenu.selected(options, codes),
+                onToggle = { onOptions(BrowseOriginalLanguageMenu.toggle(options, codes, it)) }, onDismiss = { panel = null })
+        }
         Panel.PART -> PickerDialog("List", parts, part, onPick = onPart, onDismiss = { panel = null })
         Panel.MANAGE -> ChoiceDialog(
             title = list.title,

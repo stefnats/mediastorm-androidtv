@@ -184,7 +184,10 @@ sealed interface BrowseEntry {
 }
 
 /** A page of a list, with the genre facets and first letters present when the source filters server-side. */
-data class BrowsePage(val entries: List<BrowseEntry>, val total: Int, val genres: List<String> = emptyList(), val letters: List<String> = emptyList()) {
+data class BrowsePage(val entries: List<BrowseEntry>, val total: Int, val genres: List<String> = emptyList(), val letters: List<String> = emptyList(),
+    /** Explicit support for complete stored-list filtering before server pagination. */
+    val originalLanguageFilterSupported: Boolean = false,
+) {
     /**
      * The list's size once [fetched] items have been read, this page's included. Servers return
      * short pages mid-list (TMDB genre and decade pages are capped at 50; hidden, kids-rated and

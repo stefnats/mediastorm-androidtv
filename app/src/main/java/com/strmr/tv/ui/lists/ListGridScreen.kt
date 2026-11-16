@@ -139,6 +139,7 @@ fun ListGridScreen(list: BrowseList, query: Map<String, String> = emptyMap()) {
                                     onRandom = if (list.offersRandom) ::pickRandom else null,
                                     onRename = if (manageable) { { renaming = true } } else null,
                                     onDelete = if (manageable) { { deleting = true } } else null,
+                                    originalLanguageFilterSupported = model.originalLanguageFilterSupported,
                                 )
                             }
                             GridCardSizeButton()

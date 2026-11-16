@@ -3,203 +3,216 @@ package com.strmr.tv.ui.lists
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.strmr.tv.api.ApiClient
-import com.strmr.tv.home.BrowseEntry
-import com.strmr.tv.home.BrowseList
-import com.strmr.tv.home.BrowseOptions
-import com.strmr.tv.home.BrowsePage
-import com.strmr.tv.home.HomeCard
-import com.strmr.tv.home.HomeLink
-import com.strmr.tv.home.browsePage
+import com.strmr.tv.api.vodDenial
+import com.strmr.tv.home.*
 import com.strmr.tv.library.CustomListsStore
 import com.strmr.tv.library.HiddenItemsStore
+import com.strmr.tv.library.ProfileDataContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
-/**
- * A whole list's grid state, shared by the TV and phone list pages: paged from `display-list`
- * ([PAGE] at a time) as the grid nears its end, sorted and filtered by the server
- * ([BrowseOptions]; any change reloads from the first page). [scope] is the page's own, so
- * its requests end with it. Main thread only.
- */
+/** Server-paged list state. Every page/random reply belongs to immutable options and an original profile epoch. */
 @Stable
 class ListGridModel(
     val list: BrowseList,
-    private val query: Map<String, String>,
+    query: Map<String, String>,
     private val scope: CoroutineScope,
+    private val dataContext: Long = ProfileDataContext.current,
+    private val readPage: suspend (BrowseList, Int, Int, Map<String, String>, BrowseOptions, Long) -> BrowsePage = { shown, limit, offset, extra, options, expected ->
+        ApiClient.browsePage(shown, limit, offset, extra, options = options, expectedContext = expected)
+    },
+    private val randomOffset: (Int) -> Int = { (0 until it).random() },
 ) {
-    var options by mutableStateOf(BrowseOptions())
-    /** A streaming service's list ([BrowseList.Service.parts]). */
-    var part by mutableIntStateOf((list as? BrowseList.Service)?.part ?: 0)
-    var entries by mutableStateOf<List<BrowseEntry>>(emptyList()); private set
-    /** Items read so far (duplicates dropped from `entries` included). */
+    private val query = query.toMap()
+    val isCurrent get() = dataContext == ProfileDataContext.current
+    private var generation = 0L
+    private var selection by mutableLongStateOf(0)
+    private var optionState by mutableStateOf(BrowseOptions())
+    var options: BrowseOptions
+        get() = optionState
+        set(value) {
+            if (!isCurrent) return
+            val next = value.canonical() ?: return
+            if (next == optionState) return
+            optionState = next; selection++; invalidateRows()
+        }
+    private var partState by mutableIntStateOf((list as? BrowseList.Service)?.part ?: 0)
+    var part: Int
+        get() = partState
+        set(value) { if (isCurrent && value != partState) { partState = value; selection++; invalidateRows() } }
+    private var entryState by mutableStateOf<List<BrowseEntry>>(emptyList())
+    var entries: List<BrowseEntry>
+        get() = if (isCurrent) entryState else emptyList()
+        private set(value) { entryState = value }
     var fetched by mutableIntStateOf(0); private set
-    var total by mutableStateOf<Int?>(null); private set
+    private var totalState by mutableStateOf<Int?>(null)
+    var total: Int?
+        get() = if (isCurrent) totalState else null
+        private set(value) { totalState = value }
     var genres by mutableStateOf<List<String>>(emptyList()); private set
     var letters by mutableStateOf<List<String>>(emptyList()); private set
+    private var languageSupport by mutableStateOf(false)
+    val originalLanguageFilterSupported get() = isCurrent && shown.filters && languageSupport
     var loadError by mutableStateOf<String?>(null); private set
-    /** A failed remove; shown over the grid. */
     var actionError by mutableStateOf<String?>(null)
-    /** The [reloadKey] a page is loading for; null while idle. */
     var loadingFor by mutableStateOf<Any?>(null); private set
     var picking by mutableStateOf(false); private set
-    /** Bumped when a title is added to this list elsewhere (Add to List…), so it re-reads. */
     private var added by mutableIntStateOf(0)
+    private var blockedGeneration: Long? = null
+    private var loading: Read? = null
+    private var randomGeneration = 0L
 
     val shown: BrowseList get() = if (list is BrowseList.Service) list.copy(part = part) else list
     val customId: String? get() = (list as? BrowseList.Custom)?.id
-    /** The profile's list as the store has it (renamed here or elsewhere), when this is one. */
-    val current get() = customId?.let { id -> CustomListsStore.lists?.firstOrNull { it.id == id } }
+    val current get() = if (isCurrent) customId?.let { id -> CustomListsStore.lists?.firstOrNull { it.id == id } } else null
     val title: String get() = current?.name ?: shown.title
-    /** The profile's own lists, but Set Aside, can be renamed, deleted and have titles removed. */
     val manageable: Boolean get() = current?.let { !it.isSetAside } == true
-    /** Changes whenever the grid must reload from its first page. */
-    val reloadKey: Any get() = listOf(options, part, added)
+    val reloadKey: Any get() = listOf(options, part, added, selection)
     val loadingMore: Boolean get() = loadingFor == reloadKey
-
-    /** The cards to draw: ranked for Top 10, without titles hidden from the profile (but in Hidden). */
     val cards: List<HomeCard>
         get() {
             val ranked = shown is BrowseList.TopTen
-            return entries.mapIndexed { i, e -> HomeCard.from(e).let { if (ranked) it.ranked(i + 1) else it } }
+            return entries.mapIndexed { i, entry -> HomeCard.from(entry).let { if (ranked) it.ranked(i + 1) else it } }
                 .filter { list == BrowseList.Hidden || it.target?.let(HiddenItemsStore::isHidden) != true }
         }
 
-    /** Starts over from the first page (the effect keyed on [reloadKey] calls it). */
-    suspend fun reload() {
-        entries = emptyList()
-        fetched = 0
-        total = null
-        loadError = null
-        loadPage()
+    init {
+        scope.launch {
+            ProfileDataContext.changes.collect {
+                if (!isCurrent) {
+                    invalidateRows(); languageSupport = false; genres = emptyList(); letters = emptyList()
+                    loadError = "Profile changed. Reopen this list."
+                }
+            }
+        }
+    }
+    private fun invalidateRows() {
+        generation++; randomGeneration++; picking = false
+        entries = emptyList(); fetched = 0; total = null; loadError = null; blockedGeneration = null
+        loading = null; loadingFor = null
+    }
+    private class Read(val key: Any, val generation: Long, val list: BrowseList, val options: BrowseOptions)
+    private fun capture() = Read(reloadKey, generation, shown, options.copy(genres = options.genres.toSet(), originalLanguages = options.originalLanguages.toSet()))
+    private fun current(read: Read) = isCurrent && read.generation == generation && read.key == reloadKey
+    private suspend fun read(read: Read, limit: Int, offset: Int, extra: Map<String, String> = query): BrowsePage {
+        currentCoroutineContext().ensureActive(); ProfileDataContext.requireCurrent(dataContext)
+        if (!current(read)) throw CancellationException("List selection changed")
+        val page = readPage(read.list, limit, offset, extra, read.options, dataContext)
+        currentCoroutineContext().ensureActive(); ProfileDataContext.requireCurrent(dataContext)
+        if (!current(read)) throw CancellationException("List selection changed")
+        if (read.list.filters && read.options.originalLanguageActive && !page.originalLanguageFilterSupported) throw LanguageFilterUnavailable()
+        return page
+    }
+    private class LanguageFilterUnavailable : Exception("This server cannot apply the original language filter. Clear the filter or reload this list.")
+    private fun failed(read: Read, error: Exception) {
+        if (!current(read)) return
+        if (error is LanguageFilterUnavailable) {
+            // Preserve selected intent and its clear controls; never replace it with an unfiltered page.
+            entries = emptyList(); fetched = 0; total = null; blockedGeneration = generation
+            loadError = error.message
+        } else if (entries.isEmpty()) loadError = error.vodDenial?.message ?: "Unable to load this list. Try again."
     }
 
-    /** Reads the next page, unless one is loading or the list has ended. */
+    suspend fun reload() {
+        if (!isCurrent) return
+        currentCoroutineContext().ensureActive()
+        invalidateRows()
+        loadPage()
+    }
     suspend fun loadPage() {
-        val requested = reloadKey
-        if (loadingFor == requested || total?.let { fetched >= it } == true) return
-        loadingFor = requested
+        if (!isCurrent || blockedGeneration == generation || loading != null || total?.let { fetched >= it } == true) return
+        val requested = capture(); loading = requested; loadingFor = requested.key
         try {
             val offset = fetched
-            val quick = shown.quickPageQuery
-            val page = ApiClient.browsePage(shown, limit = PAGE, offset = offset, extra = query + quick.orEmpty(), options = options)
-            // The sort or a filter changed while this page was loading; that reload wins.
-            if (requested != reloadKey) return
-            // Then the full page's cards (same titles, with their text posters) replace the quick ones in place.
+            val quick = requested.list.quickPageQuery
+            val page = read(requested, PAGE, offset, query + quick.orEmpty())
             if (quick != null) scope.launch {
-                val full = runCatching { ApiClient.browsePage(shown, limit = PAGE, offset = offset, extra = query, options = options) }.getOrNull()
-                if (full == null || requested != reloadKey) return@launch
-                val byId = full.entries.associateBy { HomeCard.from(it).id }
-                entries = entries.map { byId[HomeCard.from(it).id] ?: it }
+                try {
+                    val full = read(requested, PAGE, offset)
+                    val byId = full.entries.associateBy { HomeCard.from(it).id }
+                    if (current(requested)) entries = entries.map { byId[HomeCard.from(it).id] ?: it }
+                } catch (error: CancellationException) { throw error }
+                catch (error: Exception) { failed(requested, error) }
             }
-            if (fetched == 0) {
-                genres = page.genres
-                letters = page.letters
-            }
+            if (fetched == 0) { genres = page.genres; letters = page.letters }
+            languageSupport = requested.list.filters && page.originalLanguageFilterSupported
             fetched += page.entries.size
             val seen = entries.map { HomeCard.from(it).id }.toMutableSet()
             entries = entries + page.entries.filter { seen.add(HomeCard.from(it).id) }
-            total = page.listSize(fetched)
-            loadError = null
-        } catch (e: Exception) {
-            if (entries.isEmpty() && requested == reloadKey) loadError = e.message
-        } finally {
-            if (loadingFor == requested) loadingFor = null
-        }
+            total = page.listSize(fetched); loadError = null
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) { failed(requested, error) }
+        finally { if (loading === requested) { loading = null; loadingFor = null } }
     }
-
-    /**
-     * Follows this list's own changes until cancelled: an add re-reads it, a removal drops the
-     * title in place (so the grid keeps its place).
-     */
     suspend fun followItemChanges() {
         val id = customId ?: return
         CustomListsStore.itemChanges.collect { change ->
-            if (change.listId != id) return@collect
+            if (!isCurrent || change.listId != id) return@collect
+            generation++; randomGeneration++; picking = false
             val removed = change.removed ?: return@collect run { added++ }
-            val gone = entries.filter { (it as? BrowseEntry.ItemEntry)?.item?.let { i -> i.mediaType == removed.mediaType && i.id == removed.id } == true }
-            if (gone.isEmpty()) return@collect
-            entries = entries - gone.toSet()
-            fetched = maxOf(0, fetched - gone.size)
-            total = total?.let { maxOf(0, it - gone.size) }
+            val gone = entries.filter { (it as? BrowseEntry.ItemEntry)?.item?.let { item -> item.mediaType == removed.mediaType && item.id == removed.id } == true }
+            entries = entries - gone.toSet(); fetched = maxOf(0, fetched - gone.size); total = total?.let { maxOf(0, it - gone.size) }
         }
     }
-
-    /**
-     * Re-reads what is loaded in place (a title action changed a state or badge), paging as
-     * [loadPage] does up to what was loaded, so the cards below the first page stay.
-     */
     suspend fun rereadLoaded() {
-        if (loadingFor != null || total == null) return
-        val requested = reloadKey
-        val wanted = fetched
-        val read = mutableListOf<BrowseEntry>()
-        var firstPage: BrowsePage? = null
-        var size: Int
-        do {
-            val page = runCatching { ApiClient.browsePage(shown, limit = PAGE, offset = read.size, extra = query, options = options) }.getOrNull()
-            if (page == null || requested != reloadKey) return
-            if (firstPage == null) firstPage = page
-            read += page.entries
-            size = page.listSize(read.size)
-        } while (page.entries.isNotEmpty() && read.size < wanted && read.size < size)
-        val seen = mutableSetOf<String>()
-        entries = read.filter { seen.add(HomeCard.from(it).id) }
-        fetched = read.size
-        total = size
-        genres = firstPage?.genres.orEmpty()
-        letters = firstPage?.letters.orEmpty()
+        if (!isCurrent || loading != null || total == null || blockedGeneration == generation) return
+        generation++; randomGeneration++; picking = false
+        val requested = capture(); val wanted = fetched
+        loading = requested; loadingFor = requested.key
+        try {
+            val result = mutableListOf<BrowseEntry>(); var first: BrowsePage? = null; var size: Int
+            do {
+                val page = read(requested, PAGE, result.size)
+                if (first == null) first = page
+                result += page.entries; size = page.listSize(result.size)
+            } while (page.entries.isNotEmpty() && result.size < wanted && result.size < size)
+            val seen = mutableSetOf<String>()
+            entries = result.filter { seen.add(HomeCard.from(it).id) }; fetched = result.size; total = size
+            genres = first?.genres.orEmpty(); letters = first?.letters.orEmpty(); languageSupport = requested.list.filters && first?.originalLanguageFilterSupported == true
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) { failed(requested, error) }
+        finally { if (loading === requested) { loading = null; loadingFor = null } }
     }
-
-    /** Drops the title here at once, then tells the server; a failure puts it back. */
     fun remove(card: HomeCard) {
+        if (!isCurrent) return
         val id = customId ?: return
         val entry = entries.firstOrNull { HomeCard.from(it).id == card.id } as? BrowseEntry.ItemEntry ?: return
-        val previous = Triple(entries, fetched, total)
-        entries = entries - entry
-        fetched = maxOf(0, fetched - 1)
-        total = total?.let { maxOf(0, it - 1) }
+        val requested = capture(); val previous = Triple(entries, fetched, total)
+        entries = entries - entry; fetched = maxOf(0, fetched - 1); total = total?.let { maxOf(0, it - 1) }
         scope.launch {
-            try {
-                CustomListsStore.remove(entry.item, id, reloadGrids = false)
-                actionError = null
-            } catch (e: Exception) {
-                entries = previous.first
-                fetched = previous.second
-                total = previous.third
-                actionError = e.message
-            }
+            if (!current(requested)) return@launch
+            try { CustomListsStore.remove(entry.item, id, reloadGrids = false); if (current(requested)) actionError = null }
+            catch (error: CancellationException) { throw error }
+            catch (_: Exception) { if (current(requested)) { entries = previous.first; fetched = previous.second; total = previous.third; actionError = "Unable to remove this title. Try again." } }
         }
     }
-
-    /**
-     * One title at a random position of the whole (filtered) list, not just the pages loaded so
-     * far; [open] gets its details link, or a library show's. A library's unmatched files have
-     * no page to open, so a few other picks are tried.
-     */
     fun pickRandom(open: (HomeLink) -> Unit) {
+        if (!isCurrent || picking || blockedGeneration == generation || loading != null) return
         val count = total ?: fetched
-        if (picking || count <= 0) return
+        if (count <= 0) return
+        val requested = capture(); val cached = entries.toList(); val countRead = fetched; val token = ++randomGeneration
         picking = true
         scope.launch {
             try {
+                if (!current(requested) || token != randomGeneration) return@launch
                 repeat(6) {
-                    val offset = (0 until count).random()
-                    val entry = if (offset < entries.size && fetched == entries.size) entries[offset]
-                    else runCatching { ApiClient.browsePage(shown, limit = 1, offset = offset, extra = query, options = options).entries.firstOrNull() }.getOrNull()
-                        ?: return@launch
+                    val offset = randomOffset(count).coerceIn(0, count - 1)
+                    val entry = if (offset < cached.size && countRead == cached.size) cached[offset] else read(requested, 1, offset).entries.firstOrNull() ?: return@launch
+                    if (!current(requested) || token != randomGeneration) return@launch
                     val link = HomeCard.from(entry).link
-                    if (link is HomeLink.Details || (link is HomeLink.Library && link.entry.group.isShow)) return@launch open(link)
+                    if (link is HomeLink.Details || link is HomeLink.Library && link.entry.group.isShow) return@launch open(link)
                 }
-            } finally {
-                picking = false
-            }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { failed(requested, error) }
+            finally { if (token == randomGeneration) picking = false }
         }
     }
-
-    companion object {
-        const val PAGE = 60
-    }
+    companion object { const val PAGE = 60 }
 }

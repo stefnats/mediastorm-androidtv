@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.strmr.tv.home.BrowseOriginalLanguageMenu
 import com.strmr.tv.home.BrowseKind
 import com.strmr.tv.home.BrowseList
 import com.strmr.tv.home.BrowseOptions
@@ -81,6 +82,7 @@ fun BrowseFilterChips(model: ListGridModel, modifier: Modifier = Modifier) {
             MenuChip(options.watch.label, options.watch != WatchFilter.ALL, watch.map { it.label }, options.watch.ordinal) {
                 set(options.copy(watch = watch[it]))
             }
+            if (model.originalLanguageFilterSupported) OriginalLanguageChip(options, set)
             if (model.genres.isNotEmpty()) GenreChip(model.genres, options.genres) { set(options.copy(genres = it)) }
         }
     }
@@ -131,6 +133,29 @@ private fun GenreChip(genres: List<String>, chosen: Set<String>, onChange: (Set<
                     trailingContent = { Checkbox(checked = on, onCheckedChange = null) },
                     modifier = Modifier.clickable { onChange(if (on) chosen - genre else chosen + genre) },
                 )
+            }
+        }
+    }
+}
+
+/** Catalogue original-language metadata, separate from the selected release's audio tracks. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun OriginalLanguageChip(options: BrowseOptions, onChange: (BrowseOptions) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    FilterChip(selected = options.originalLanguageActive, onClick = { open = true }, label = { Text(BrowseOriginalLanguageMenu.label(options)) },
+        trailingIcon = { Icon(Icons.Filled.ArrowDropDown, null) })
+    if (!open) return
+    val codes = remember(options.originalLanguages) { BrowseOriginalLanguageMenu.codes(options) }
+    val labels = BrowseOriginalLanguageMenu.labels(codes)
+    val selected = BrowseOriginalLanguageMenu.selected(options, codes)
+    ModalBottomSheet(onDismissRequest = { open = false }) {
+        Text("Original language", Modifier.padding(horizontal = 24.dp), style = MaterialTheme.typography.titleLarge)
+        Text("Catalogue metadata, not audio tracks. Choose up to 32 languages.", Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyMedium)
+        LazyColumn(Modifier.navigationBarsPadding(), contentPadding = PaddingValues(bottom = 16.dp)) {
+            items(labels.indices.toList(), key = { it }) { index ->
+                ListItem(headlineContent = { Text(labels[index]) }, trailingContent = { Checkbox(checked = index in selected, onCheckedChange = null) },
+                    modifier = Modifier.clickable { onChange(BrowseOriginalLanguageMenu.toggle(options, codes, index)) })
             }
         }
     }

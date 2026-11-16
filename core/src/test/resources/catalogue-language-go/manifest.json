@@ -1,0 +1,7 @@
+{
+  "producer": "TestCatalogueLanguageActualHandlerWireAndOpenAPI",
+  "responses": 10,
+  "route": "GET /api/users/{userID}/display-list",
+  "scope": "Actual serialized handler with real metadata cache reader; synthetic saved data and observed sidecars; no authentication-traffic claim",
+  "version": 1
+}

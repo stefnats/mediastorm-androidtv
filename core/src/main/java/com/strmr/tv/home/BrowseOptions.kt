@@ -1,5 +1,7 @@
 package com.strmr.tv.home
 
+import com.strmr.tv.sources.SourceFilterLanguages
+
 enum class BrowseSort(val value: String, val label: String) {
     DEFAULT("default", "Default"),
     ADDED("added", "Date Added"),
@@ -39,8 +41,23 @@ data class BrowseOptions(
     val watch: WatchFilter = WatchFilter.ALL,
     val genres: Set<String> = emptySet(),
     val letter: String? = null,
+    /** Catalogue metadata only; these do not describe a selected release's spoken audio. */
+    val originalLanguages: Set<String> = emptySet(),
+    val includeUnknownOriginalLanguage: Boolean = false,
 ) {
-    val isFiltered: Boolean get() = kind != null || watch != WatchFilter.ALL || genres.isNotEmpty()
+    val originalLanguageActive: Boolean get() = originalLanguages.isNotEmpty() || includeUnknownOriginalLanguage
+    val isFiltered: Boolean get() = kind != null || watch != WatchFilter.ALL || genres.isNotEmpty() || originalLanguageActive
+    fun canonical(): BrowseOptions? {
+        val languages = originalLanguages.map { SourceFilterLanguages.canonical(it) ?: return null }.toSet()
+        if (languages.size > 32) return null
+        return copy(genres = genres.toSet(), originalLanguages = languages)
+    }
+    val originalLanguageLabel: String get() = when {
+        !originalLanguageActive -> "Any original language"
+        originalLanguages.isEmpty() -> "Original language: Unknown"
+        else -> "Original language: " + originalLanguages.sorted().joinToString(", ") { SourceFilterLanguages.label(it) } +
+            if (includeUnknownOriginalLanguage) " + Unknown" else ""
+    }
 
     /** Picks a sort, or flips the direction when it is already the current one. */
     fun choose(sort: BrowseSort): BrowseOptions {
@@ -61,6 +78,9 @@ data class BrowseOptions(
         if (watch != WatchFilter.ALL) put("watchStatus", watch.value)
         if (genres.isNotEmpty()) put("genres", genres.sorted().joinToString(","))
         letter?.let { put("alphabet", it) }
+        val languages = requireNotNull(canonical()) { "Invalid original language filter" }.originalLanguages
+        if (languages.isNotEmpty()) put("originalLanguages", languages.sorted().joinToString(","))
+        if (includeUnknownOriginalLanguage) put("includeUnknownOriginalLanguage", "true")
     }
 }
 
@@ -112,3 +132,28 @@ private val tvGenres = listOf(
     TmdbGenre(99, "Documentary"), TmdbGenre(18, "Drama"), TmdbGenre(10751, "Family"), TmdbGenre(10762, "Kids"), TmdbGenre(9648, "Mystery"),
     TmdbGenre(10764, "Reality"), TmdbGenre(10765, "Sci-Fi & Fantasy"), TmdbGenre(10768, "War & Politics"), TmdbGenre(37, "Western"),
 )
+
+/** Shared TV/phone catalogue-language choices; no release or audio-track inference. */
+object BrowseOriginalLanguageMenu {
+    fun codes(options: BrowseOptions): List<String> = SourceFilterLanguages.choices(options.originalLanguages)
+    fun labels(codes: List<String>): List<String> = listOf("Any original language", "Include unknown") + codes.map(SourceFilterLanguages::label)
+    fun selected(options: BrowseOptions, codes: List<String>): Set<Int> = buildSet {
+        if (!options.originalLanguageActive) add(0)
+        if (options.includeUnknownOriginalLanguage) add(1)
+        codes.forEachIndexed { index, code -> if (code in options.originalLanguages) add(index + 2) }
+    }
+    fun toggle(options: BrowseOptions, codes: List<String>, index: Int): BrowseOptions = when (index) {
+        0 -> options.copy(originalLanguages = emptySet(), includeUnknownOriginalLanguage = false)
+        1 -> options.copy(includeUnknownOriginalLanguage = !options.includeUnknownOriginalLanguage)
+        else -> codes.getOrNull(index - 2)?.let { code -> options.copy(originalLanguages = if (code in options.originalLanguages) options.originalLanguages - code else options.originalLanguages + code) } ?: options
+    }
+    fun label(options: BrowseOptions): String {
+        if (!options.originalLanguageActive) return "Any original language"
+        val languages = when (options.originalLanguages.size) {
+            0 -> return "Unknown original language"
+            1 -> SourceFilterLanguages.label(options.originalLanguages.first())
+            else -> "${options.originalLanguages.size} original languages"
+        }
+        return if (options.includeUnknownOriginalLanguage) "$languages + unknown" else languages
+    }
+}

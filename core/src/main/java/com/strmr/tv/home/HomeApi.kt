@@ -1,6 +1,15 @@
 package com.strmr.tv.home
 
 import com.strmr.tv.api.ApiClient
+import com.strmr.tv.api.ApiJson
+import com.strmr.tv.library.ProfileDataContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import com.strmr.tv.api.libraryPage
 import com.strmr.tv.api.ContinueWatchingItem
 import com.strmr.tv.api.DisplayListPage
@@ -163,8 +172,10 @@ suspend fun ApiClient.customListItems(id: String): List<WatchlistItem> =
  */
 suspend fun ApiClient.browsePage(
     list: BrowseList, limit: Int, offset: Int = 0, extra: Map<String, String> = emptyMap(), phase: ShelfPhase? = null,
-    options: BrowseOptions? = null,
+    options: BrowseOptions? = null, expectedContext: Long = ProfileDataContext.current,
 ): BrowsePage {
+    currentCoroutineContext().ensureActive()
+    ProfileDataContext.requireCurrent(expectedContext)
     if (list is BrowseList.Library) return libraryPage(list.library, options, limit, offset)
     if (list is BrowseList.Service && list.lists.size > 1) return mergedServicePage(list, limit, offset, extra, options)
     // Continue Watching's own shape: the whole feed, paged here.
@@ -183,26 +194,50 @@ suspend fun ApiClient.browsePage(
         }
         return BrowsePage(all.drop(offset).take(limit).map { BrowseEntry.ItemEntry(it) }, all.size)
     }
-    val query = (list.query + extra + (options?.query(list) ?: emptyMap())).toMutableMap()
-    query["limit"] = limit.toString()
-    query["offset"] = offset.toString()
-    if (phase != null && list.loadsProgressively) query += phase.query
+    val query = inContext(expectedContext) { browseQuery(list, limit, offset, extra, options, phase) }
     // Series counts the server hasn't cached yet are fetched in the background once asked for.
-    if (com.strmr.tv.ui.settings.BadgeSettings.visibility.unwatchedCount) query["includeUnwatchedCounts"] = "true"
-    // An AI answer can take well over the usual 30 s the first time it is asked, and so can a
-    // long list's complete pass on a cold server (it runs behind cards already showing).
+    val path = inContext(expectedContext) {
+        if (com.strmr.tv.ui.settings.BadgeSettings.visibility.unwatchedCount) query["includeUnwatchedCounts"] = "true"
+        browsePath(expectedContext)
+    }
     val timeout = when {
         query["source"] == "custom-ai" -> 120_000L
         phase == ShelfPhase.COMPLETE && list.loadsProgressively -> 180_000L
         else -> 30_000L
     }
-    val path = "$profilePath/display-list"
-    fun <T> DisplayListPage<T>.page(entry: (T) -> BrowseEntry) = BrowsePage(
-        items.map(entry), maxOf(sourceTotal ?: total, items.size), genres.orEmpty(), alphabetBuckets.orEmpty(),
+    val raw = sendRaw("GET", path, query, timeoutMs = timeout, expectedContext = expectedContext)
+    currentCoroutineContext().ensureActive()
+    ProfileDataContext.requireCurrent(expectedContext)
+    return decodeBrowsePage(raw, list)
+
+}
+
+/** Additive malformed capability never discards the containing legacy page. */
+internal fun decodeBrowsePage(raw: String, list: BrowseList): BrowsePage {
+    val root = ApiJson.parseToJsonElement(raw)
+    val marker = ((root as? JsonObject)?.get("originalLanguageFilterSupported") as? JsonPrimitive)
+    val supported = list.filters && marker?.isString == false && marker.booleanOrNull == true
+    fun <T> page(value: DisplayListPage<T>, entry: (T) -> BrowseEntry) = BrowsePage(
+        value.items.map(entry), maxOf(if (supported) value.total else value.sourceTotal ?: value.total, value.items.size), value.genres.orEmpty(), value.alphabetBuckets.orEmpty(), supported,
     )
     return when {
-        list.itemShaped -> send<DisplayListPage<WatchlistItem>>("GET", path, query, timeoutMs = timeout).page { BrowseEntry.ItemEntry(it) }
-        list.titleShaped -> send<DisplayListPage<Title>>("GET", path, query, timeoutMs = timeout).page { BrowseEntry.TitleEntry(it) }
-        else -> send<DisplayListPage<ListedTitle>>("GET", path, query, timeoutMs = timeout).page { BrowseEntry.TitleEntry(it.title) }
+        list == BrowseList.PermanentPrequeue -> page(ApiJson.decodeFromJsonElement<DisplayListPage<JsonElement>>(root)) { row ->
+            // Losing a wire row would move the next offset backwards. Reject a malformed page.
+            if ((row as? JsonObject)?.get("title") is JsonObject) BrowseEntry.TitleEntry(ApiJson.decodeFromJsonElement<ListedTitle>(row).title)
+            else BrowseEntry.ItemEntry(ApiJson.decodeFromJsonElement<WatchlistItem>(row))
+        }
+        list.itemShaped -> page(ApiJson.decodeFromJsonElement<DisplayListPage<WatchlistItem>>(root)) { BrowseEntry.ItemEntry(it) }
+        list.titleShaped -> page(ApiJson.decodeFromJsonElement<DisplayListPage<Title>>(root)) { BrowseEntry.TitleEntry(it) }
+        else -> page(ApiJson.decodeFromJsonElement<DisplayListPage<ListedTitle>>(root)) { BrowseEntry.TitleEntry(it.title) }
     }
 }
+
+/** Actual display-list query builder shared with portable request-contract tests. */
+internal fun browseQuery(list: BrowseList, limit: Int, offset: Int, extra: Map<String, String> = emptyMap(), options: BrowseOptions? = null, phase: ShelfPhase? = null): MutableMap<String, String> =
+    (list.query + extra + options?.query(list).orEmpty()).toMutableMap().apply {
+        put("limit", limit.toString()); put("offset", offset.toString())
+        if (phase != null && list.loadsProgressively) putAll(phase.query)
+    }
+
+/** The path in production requests is captured under the original epoch before any await. */
+internal fun ApiClient.browsePath(expectedContext: Long): String = inContext(expectedContext) { "$profilePath/display-list" }
