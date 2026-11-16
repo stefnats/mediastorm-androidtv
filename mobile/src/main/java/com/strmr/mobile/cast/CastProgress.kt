@@ -2,6 +2,9 @@ package com.strmr.mobile.cast
 
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.reportProgress
+import com.strmr.tv.api.vodDenial
+import com.strmr.tv.api.VodDenialEvents
+import kotlinx.coroutines.CancellationException
 import com.strmr.tv.live.keepLiveSessionAlive
 import com.strmr.tv.live.stopLiveSession
 import com.strmr.tv.player.PlaybackCoordinator
@@ -62,8 +65,7 @@ internal fun CastController.reportProgress(ended:Boolean,closing:Boolean=false,e
     scope.launch {
         withContext(NonCancellable) {
             runCatching {
-                if(closing) {expected.context.requireCurrent();ApiClient.reportProgress(body,expectedContext=expected.context.epoch)}
-                else ownership.server(expected){context->ApiClient.reportProgress(body,expectedContext=context.epoch)}
+                ownership.progress(expected, closing) { context -> ApiClient.reportProgress(body, expectedContext=context.epoch) }
             }
         }
     }
@@ -72,7 +74,20 @@ internal fun CastController.reportProgress(ended:Boolean,closing:Boolean=false,e
 private fun CastController.keepAlive(expected:CastOwnership.Ticket) {
     val id=hlsSessionId ?: return
     val paused=session?.state?.phase==CastPlaybackState.Phase.PAUSED
-    scope.launch {ownership.server(expected){context->ApiClient.keepLiveSessionAlive(id,paused=paused,expectedContext=context.epoch)}}
+    val attempt=playback?.first?.title?.titleId?.let { VodDenialEvents.begin(it,expected.context.epoch) }
+    scope.launch {
+        try { ownership.server(expected) { context -> ApiClient.keepLiveSessionAlive(id, paused=paused,
+            expectedContext=context.epoch, throwOnAccessDenial=true) }
+        } catch(error:CancellationException) {throw error
+        } catch(error:Exception) {
+            if(ticket!==expected || !ownership.owns(expected)) return@launch
+            val denial=error.vodDenial ?: return@launch
+            if(ownership.deny(expected)) {
+                attempt?.let { VodDenialEvents.reject(it,denial) }
+                finish("server access denied",stopReceiver=true,ended=false,expected=expected)
+            }
+        }
+    }
 }
 
 /** Detach only this generation; an old cleanup never changes a replacement's fields or transport. */
@@ -87,7 +102,7 @@ internal suspend fun CastController.finish(reason:String,stopReceiver:Boolean,en
     ticket=null;transport=null;hlsSessionId=null;playback=null;session=null;remoteVisible=false
     withContext(NonCancellable) {
         if(stopReceiver && receiver!=null)runCatching {ownership.stopCaptured(own,receiver)}
-        id?.let {runCatching {ApiClient.stopLiveSession(it,own.context.epoch)}}
+        id?.let {runCatching {ownership.stopOwnedServer(own,it)}}
     }
     if(own.context.isCurrent())PlaybackCoordinator.sessionsEnded.value+=1
 }

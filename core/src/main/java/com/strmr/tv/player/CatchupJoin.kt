@@ -35,6 +35,8 @@ class CatchupJoin(private val controller: PlayerController, private val channel:
     private var archive: Archive? = null
     private var request: Job? = null
     private val archiveWindow = LiveCatchups.window(channel)
+    private val lifetime = PlayerHlsLifecycle(requireNotNull(controller.session.ownership), controller::canUsePlayerAux,
+        controller.request.title.titleId, { release(); controller.denyVod(it) })
 
     /** The bar: the programme at the playhead; null until the guide has it. */
     val timeline = MutableStateFlow<ProgrammeTimeline?>(null)
@@ -45,26 +47,29 @@ class CatchupJoin(private val controller: PlayerController, private val channel:
     private data class Archive(val program: EpgProgram, val startWallMs: Long, val durationMs: Long, val firstPositionMs: Long)
 
     private val schedule = controller.scope.launch {
-        while (isActive) {
-            runCatching { loadSchedule() }.onFailure { if (it is CancellationException) throw it; AppLog.w("Catchup", "schedule: ${it.message}") }
+        while (isActive && lifetime.current()) {
+            try { loadSchedule() } catch (error: CancellationException) {
+                if (!isActive || !lifetime.current()) throw error
+            } catch (_: Exception) { }
             delay(SCHEDULE_REFRESH_MS)
         }
     }
-
     private suspend fun loadSchedule() {
+        val ticket = lifetime.ticket()
         val back = (archiveWindow / 60_000).coerceAtMost(SCHEDULE_BACK_MINUTES).toInt()
-        val list = ApiClient.epgSchedule(listOf(channel.guideKey), -back, (back / 60) + 4)[channel.guideKey].orEmpty()
-        programs = list.filter { it.startMs > 0 && it.stopMs > it.startMs }.sortedBy { it.startMs }
+        val list = lifetime.read(ticket) { expected -> ApiClient.epgSchedule(listOf(channel.guideKey), -back, (back / 60) + 4, expected) }[channel.guideKey].orEmpty()
+        lifetime.use(ticket) { programs = list.filter { it.startMs > 0 && it.stopMs > it.startMs }.sortedBy { it.startMs } }
     }
 
     /** The playhead in wall-clock ms: the archive's point, or now less how far behind live the channel plays. */
     fun playheadWallMs(now: Long = System.currentTimeMillis()): Long =
-        archive?.let { it.startWallMs + player.currentPosition } ?: (now - liveBehindMs())
+        if (!lifetime.current()) now else archive?.let { it.startWallMs + player.currentPosition } ?: (now - liveBehindMs())
 
     private fun liveBehindMs(): Long = if (controller.timeshift.value) Timeshift.behindLiveMs(player) else 0
 
     /** Ticked by the controller's clock: the bar, and how far behind live the archive plays. */
     fun tick(now: Long = System.currentTimeMillis()) {
+        if (!lifetime.current()) return
         val wall = playheadWallMs(now)
         val program = CatchupRules.programAt(programs, wall)
         timeline.value = program?.let { CatchupRules.timeline(it, wall, now) }
@@ -86,11 +91,13 @@ class CatchupJoin(private val controller: PlayerController, private val channel:
 
     /** A seek to [offsetMs] into the bar's programme. */
     fun seek(offsetMs: Long) {
+        if (!lifetime.current()) return
         val program = timeline.value?.program ?: return
         seekWall(program.startMs + offsetMs)
     }
 
     fun seekWall(wallMs: Long) {
+        if (!lifetime.current()) return
         val now = System.currentTimeMillis()
         when (val seek = CatchupRules.decide(wallMs, now, loaded(now), programs, archiveWindow)) {
             CatchupRules.Seek.Live -> goLive()
@@ -102,6 +109,8 @@ class CatchupJoin(private val controller: PlayerController, private val channel:
 
     /** Back to the live edge: the channel tuned again from the archive, or the window's edge. */
     fun goLive() {
+        if (!lifetime.current()) return
+        lifetime.invalidate()
         request?.cancel()
         if (archive == null) {
             if (controller.timeshift.value) player.seekToDefaultPosition()
@@ -116,35 +125,39 @@ class CatchupJoin(private val controller: PlayerController, private val channel:
     }
 
     private fun openArchive(program: EpgProgram, offsetMs: Long) {
+        val ticket = lifetime.begin() ?: return
         request?.cancel()
         request = controller.scope.launch {
             AppLog.i("Catchup", "archive ${program.title} from ${offsetMs / 1000}s")
-            controller.switching.value = true
+            lifetime.use(ticket) { controller.switching.value = true }
             try {
-                val start = ApiClient.liveCatchup(channel, program, (offsetMs / 1000).toInt(),controller.dataContext)
+                val start = lifetime.read(ticket) { expected -> ApiClient.liveCatchup(channel, program, (offsetMs / 1000).toInt(), expected) }
+                lifetime.use(ticket) {
+                val url = ApiClient.catchupStreamUrl(start, channel, program, controller.dataContext)
                 controller.liveRetune?.park()
                 // The provider may round the start down (whole minutes): seek on to the point asked for.
                 val startWall = program.startMs + start.offsetSeconds * 1000L
                 val first = (program.startMs + offsetMs - startWall).coerceAtLeast(0)
                 archive = Archive(program, startWall, start.durationSeconds * 1000L, first)
                 inArchive.value = true
-                player.setMediaItem(MediaItem.fromUri(ApiClient.catchupStreamUrl(start, channel, program)), first)
+                player.setMediaItem(MediaItem.fromUri(url), first)
                 player.playWhenReady = true
                 player.prepare()
                 AppLog.i("Catchup", "archive from ${start.offsetSeconds}s for ${start.durationSeconds}s")
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                AppLog.e("Catchup", "archive failed: ${e.message}")
-                controller.notice.value = "Catch-up isn't available for that point"
+                if (lifetime.current(ticket)) lifetime.use(ticket) { controller.notice.value = "Catch-up isn't available for that point" }
             } finally {
-                controller.switching.value = false
+                if (lifetime.current(ticket)) lifetime.use(ticket) { controller.switching.value = false }
             }
         }
     }
 
     /** The archive ended: on into a fresh one from there, or live. True when it was the archive's. */
     fun ended(): Boolean {
+        if (!lifetime.current()) return false
         val a = archive ?: return false
         val now = System.currentTimeMillis()
         val wall = a.startWallMs + player.currentPosition
@@ -160,16 +173,18 @@ class CatchupJoin(private val controller: PlayerController, private val channel:
 
     /** A playback error while the archive plays: back to live rather than the error screen. */
     fun failed(message: String?): Boolean {
+        if (!lifetime.current()) return true
         if (archive == null) return false
-        AppLog.w("Catchup", "archive error: $message; back to live")
+        AppLog.w("Catchup", "archive source failed; back to live")
         controller.notice.value = "Catch-up stopped; back to live"
         goLive()
         return true
     }
 
     fun release() {
-        schedule.cancel()
-        request?.cancel()
+        lifetime.close(); schedule.cancel(); request?.cancel()
+        programs = emptyList(); archive = null; timeline.value = null; inArchive.value = false
+        controller.switching.value = false
     }
 
     private companion object {

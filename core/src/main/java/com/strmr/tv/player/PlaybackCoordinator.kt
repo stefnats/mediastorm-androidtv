@@ -206,7 +206,7 @@ object PlaybackCoordinator {
                 val archive = ApiClient.liveCatchup(channel, program,expectedContext=ownership.epoch)
                 ownership.requireCurrent()
                 AppLog.i("Catchup", "archive from ${archive.offsetSeconds}s for ${archive.durationSeconds}s")
-                pending = PlayerSession(request, ApiClient.catchupStreamUrl(archive, channel, program), null, reportsProgress = false,
+                pending = PlayerSession(request, ApiClient.catchupStreamUrl(archive, channel, program, ownership.epoch), null, reportsProgress = false,
                                         sourceLabel = listOf("Catch-up", channel.name).joinToString(" · "),ownership=ownership)
                 launchPlayer()
             } catch (e: CancellationException) {

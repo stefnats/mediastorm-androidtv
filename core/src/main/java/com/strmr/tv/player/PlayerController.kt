@@ -186,7 +186,8 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     internal fun denyVod(denial:com.strmr.tv.api.VodAccessDenial,attempt:com.strmr.tv.api.VodAttempt?=null) {
         if(released || dataContext!=ProfileDataContext.current || vodDenied.value!=null)return
         attempt?.let {com.strmr.tv.api.VodDenialEvents.reject(it,denial)}
-        vodDenied.value=denial;autoSwitch.cancel();upNext?.cancel();closeReleaseReports();progress.stop()
+        vodDenied.value=denial;autoSwitch.cancel();upNext?.cancel();closeReleaseReports();progress.discardFuture()
+        recordingHls?.release();catchup?.release();liveRetune?.release()
         thumbnails?.cancel();online.cancel();external.cancel();switchTo.value=null;advanceTo.value=null
         player.stop();error.value=denial.message
     }
@@ -325,11 +326,12 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         player.addListener(listener)
         player.addListener(stallLog)
         progress = ProgressReporter(player, session, scope, context = dataContext) { autoSwitch.trigger(it) }
-        recordingHls = session.growingRestart?.let { RecordingHls(player, scope, session.liveSessionId, it,dataContext) }
+        recordingHls = session.growingRestart?.let { RecordingHls(player, scope, session.liveSessionId, it, dataContext, ownership, ::canUsePlayerAux,
+            request.title.titleId, { reason -> denyVod(reason) }) }
         liveRetune = session.retuneLive?.let {
             LiveRetune(player, scope, session.liveSessionId, session.liveChannel, it, ::liveGaveUp, session.liveStream,tuned = { next ->
                 timeshift.value = next.timeshift
-            },expectedContext=dataContext)
+            },expectedContext=dataContext,owner=ownership,playerCurrent=::canUsePlayerAux,onDenied={ reason -> denyVod(reason) },denialTitleId=request.title.titleId)
         }
         catchup = session.liveChannel?.takeIf { session.isLive && LiveCatchups.window(it) > 0 }?.let { CatchupJoin(this, it) }
         // Debug builds log every player event under the EventLogger tag.

@@ -59,5 +59,7 @@ suspend fun ApiClient.liveCatchup(channel: LiveChannel, program: EpgProgram, off
  * The archive as a file through the server's stream proxy: providers serve it whole, with a
  * length and byte ranges (an Xtream timeshift is one TS file), so it seeks as VOD.
  */
-fun ApiClient.catchupStreamUrl(archive: LiveCatchupStart, channel: LiveChannel, program: EpgProgram): String =
+fun ApiClient.catchupStreamUrl(archive: LiveCatchupStart, channel: LiveChannel, program: EpgProgram,
+    expectedContext: Long = com.strmr.tv.library.ProfileDataContext.current): String = inContext(expectedContext) {
     streamUrl(archive.url, mapOf("mediaType" to "channel", "title" to program.title, "channelName" to channel.name))
+}

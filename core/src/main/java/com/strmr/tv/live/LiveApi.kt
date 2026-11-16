@@ -2,6 +2,11 @@ package com.strmr.tv.live
 
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.ApiError
+import com.strmr.tv.api.ApiJson
+import com.strmr.tv.api.rethrowVodDenial
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import com.strmr.tv.library.ProfileDataContext
 import java.io.IOException
 import okhttp3.HttpUrl
@@ -132,12 +137,13 @@ suspend fun ApiClient.epgNow(keys: List<String>): List<EpgNowPlaying> = send(
 )
 
 /** Programmes overlapping `[now + startOffset, + hours]` for each key (every key answers, null when it has none). */
-suspend fun ApiClient.epgSchedule(keys: List<String>, startOffsetMinutes: Int, hours: Int): Map<String, List<EpgProgram>> {
+suspend fun ApiClient.epgSchedule(keys: List<String>, startOffsetMinutes: Int, hours: Int, expectedContext: Long = ProfileDataContext.current): Map<String, List<EpgProgram>> {
+    val profile = inContext(expectedContext) { profileId }
     val raw = json.parseToJsonElement(
         sendRaw(
             "GET", "/api/live/epg/schedule/batch",
             mapOf("channels" to keys.joinToString(","), "hours" to hours.toString(), "startOffset" to startOffsetMinutes.toString(),
-                  "profileId" to profileId),
+                  "profileId" to profile), expectedContext = expectedContext,
         ),
     ) as? JsonObject ?: return emptyMap()
     return raw.mapValues { (_, v: JsonElement) ->
@@ -150,9 +156,11 @@ suspend fun ApiClient.epgSchedule(keys: List<String>, startOffsetMinutes: Int, h
 private data class StremioStreams(val streams: List<LiveStremioStream>? = null)
 
 /** The streams a Stremio channel's addon lists for it, for Choose Source. */
-suspend fun ApiClient.liveStremioStreams(channel: LiveChannel): List<LiveStremioStream> =
-    send<StremioStreams>("GET", "/api/live/stremio/streams", mapOf("url" to channel.url, "profileId" to profileId),
-                         timeoutMs = 60_000).streams.orEmpty()
+suspend fun ApiClient.liveStremioStreams(channel: LiveChannel, expectedContext: Long = ProfileDataContext.current): List<LiveStremioStream> {
+    val profile = inContext(expectedContext) { profileId }
+    return send<StremioStreams>("GET", "/api/live/stremio/streams", mapOf("url" to channel.url, "profileId" to profile),
+                         timeoutMs = 60_000, expectedContext = expectedContext).streams.orEmpty()
+}
 
 /** Clears the server's channel cache. */
 suspend fun ApiClient.clearLiveCache() {
@@ -215,22 +223,35 @@ private data class KeepAlive(val growing: Boolean = false)
 suspend fun ApiClient.keepLiveSessionAlive(
     sessionId: String, positionSeconds: Double? = null, paused: Boolean? = null, buffering: Boolean? = null,
     failOnCapacityRejection: Boolean = false,
-    expectedContext:Long=ProfileDataContext.current,
-): Boolean? = try {
-    val profile=inContext(expectedContext){profileId}
+    expectedContext: Long = ProfileDataContext.current,
+    throwOnAccessDenial: Boolean = false,
+): Boolean? = readHlsKeepalive(expectedContext, failOnCapacityRejection, throwOnAccessDenial) {
+    val profile = inContext(expectedContext) { profileId }
     val q = buildMap {
-        put("profileId",profile)
+        put("profileId", profile)
         positionSeconds?.let { put("time", "%.3f".format(java.util.Locale.US, it)) }
         paused?.let { put("paused", it.toString()) }
         buffering?.let { put("buffering", it.toString()) }
     }
-    val text = sendRaw("POST", "/api/video/hls/${segment(sessionId)}/keepalive", q, promptOnLock = false, timeoutMs = 10_000,expectedContext=expectedContext)
-    runCatching { json.decodeFromString<KeepAlive>(text).growing }.getOrNull()
-} catch (error: kotlinx.coroutines.CancellationException) {
-    throw error
-} catch (error: Exception) {
-    if (failOnCapacityRejection && liveCapacityRejection(error) != null) throw error
-    null
+    sendRaw("POST", "/api/video/hls/${segment(sessionId)}/keepalive", q, promptOnLock = false, timeoutMs = 10_000, expectedContext = expectedContext)
+}
+
+/** Strictness is client-local error handling; no new server field, grant or lifecycle request. */
+internal suspend fun readHlsKeepalive(
+    expected: Long, capacity: Boolean, strict: Boolean, fetch: suspend () -> String,
+): Boolean? {
+    currentCoroutineContext().ensureActive(); ProfileDataContext.requireCurrent(expected)
+    return try {
+        val text = fetch()
+        currentCoroutineContext().ensureActive(); ProfileDataContext.requireCurrent(expected)
+        runCatching { ApiJson.decodeFromString<KeepAlive>(text).growing }.getOrNull()
+    } catch (error: CancellationException) { throw error
+    } catch (error: Exception) {
+        currentCoroutineContext().ensureActive(); ProfileDataContext.requireCurrent(expected)
+        if (strict) error.rethrowVodDenial()
+        if (capacity && liveCapacityRejection(error) != null) throw error
+        null
+    }
 }
 
 suspend fun ApiClient.stopLiveSession(sessionId: String,expectedContext:Long=ProfileDataContext.current) {

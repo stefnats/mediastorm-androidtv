@@ -8,6 +8,11 @@ import com.strmr.tv.api.reportProgress
 import com.strmr.tv.api.vodDenial
 import com.strmr.tv.library.ProfileDataContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -15,6 +20,38 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/** Tracks cancelable report children even when the closing caller is non-cancelable. */
+internal class ProgressWriteGate(private val current: () -> Boolean) {
+    private var discarded = false
+    private val jobs = mutableSetOf<Job>()
+    val accepts: Boolean get() = synchronized(this) { !discarded && current() }
+
+    fun discard() {
+        val pending = synchronized(this) { discarded = true; jobs.toList() }
+        pending.forEach { it.cancel() }
+    }
+
+    fun use(action: () -> Unit): Boolean = synchronized(this) {
+        if (discarded || !current()) false else { action(); true }
+    }
+
+    suspend fun <T> write(action: suspend () -> T): T? = coroutineScope {
+        if (!accepts) return@coroutineScope null
+        val child = async(start = CoroutineStart.LAZY) {
+            currentCoroutineContext().ensureActive()
+            if (!accepts) return@async null
+            val result = action()
+            currentCoroutineContext().ensureActive()
+            if (accepts) result else null
+        }
+        synchronized(this@ProgressWriteGate) {
+            if (discarded || !current()) child.cancel() else jobs.add(child)
+        }
+        try { child.start(); child.await() }
+        finally { synchronized(this@ProgressWriteGate) { jobs.remove(child) } }
+    }
+}
 
 /**
  * A playback's progress reports to the server: every 10 s while playing, and on pause, end and
@@ -28,8 +65,8 @@ class ProgressReporter(
     private val onMigration: (reason: String) -> Unit,
 ) {
     private val request = session.request
-    private var discarded = false
-    val acceptsCompletion get() = !discarded && session.playbackAllowed() && context == ProfileDataContext.current
+    private val writes = ProgressWriteGate { session.playbackAllowed() && context == ProfileDataContext.current }
+    val acceptsCompletion get() = writes.accepts
     var lastStoredItemId: String? = null
         private set
     private var periodic: Job? = null
@@ -50,7 +87,7 @@ class ProgressReporter(
     }
 
     /** Do not save further progress for a source the viewer identified as the wrong content. */
-    fun discardFuture() { discarded = true; stop() }
+    fun discardFuture() { writes.discard(); stop() }
 
     fun stop() {
         periodic?.cancel()
@@ -76,19 +113,28 @@ class ProgressReporter(
         lastReport = scope.launch {
             withContext(NonCancellable) {
                 try {
-                    ProfileDataContext.requireCurrent(context)
-                    if(!session.playbackAllowed())return@withContext
-                    val reply = ApiClient.reportProgress(body, expectedContext = context)
-                    ProfileDataContext.requireCurrent(context)
-                    lastStoredItemId = reply.itemId?.takeIf { it.isNotBlank() } ?: lastStoredItemId
-                    log.saved(kind, position, duration, reply)
-                    if (reply.migrationRequested && !ended && !closing) {
-                        onMigration("server: ${reply.migrationReason ?: "migration requested"}")
+                    writes.write {
+                        ProfileDataContext.requireCurrent(context)
+                        val reply = ApiClient.reportProgress(body, expectedContext = context)
+                        currentCoroutineContext().ensureActive()
+                        ApiClient.inContext(context) {
+                            writes.use {
+                                lastStoredItemId = reply.itemId?.takeIf { it.isNotBlank() } ?: lastStoredItemId
+                                log.saved(kind, position, duration, reply)
+                                if (reply.migrationRequested && !ended && !closing) {
+                                    onMigration("server: ${reply.migrationReason ?: "migration requested"}")
+                                }
+                            }
+                        }
                     }
                 } catch (error: CancellationException) { throw error
                 } catch (e: Exception) {
-                    log.failed(kind, position, duration, e)
-                    if(e.vodDenial==null && session.playbackAllowed())session.progressSink?.undelivered(body)
+                    ApiClient.inContext(context) {
+                        writes.use {
+                            log.failed(kind, position, duration, e)
+                            if (e.vodDenial == null) session.progressSink?.undelivered(body)
+                        }
+                    }
                 }
             }
         }

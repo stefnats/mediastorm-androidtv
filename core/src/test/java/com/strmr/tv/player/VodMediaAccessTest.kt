@@ -124,16 +124,43 @@ class VodMediaAccessTest {
             assertNull(access.denial(IOException("403 is only text")))
         }
     }
-    @Test fun `coded profile selection denial at 400 is terminal while non VOD sessions remain legacy`() {
+    @Test fun `structured profile selection denial at 400 is terminal for VOD and catchup`() {
         Server().use {server->
             server.server.createContext("/api/video/stream") {exchange->val body="""{"code":"kids_vod_profile_required"}""";exchange.sendResponseHeaders(400,body.length.toLong());exchange.responseBody.use {it.write(body.toByteArray())}}
             server.start()
             for(enabled in listOf(true,false)) {
                 val access=VodMediaAccess(server.base,enabled,privateHeaders)
                 client(access).newCall(Request.Builder().url(server.base.resolve("api/video/stream")!!).build()).execute().use {response->
-                    assertEquals(if(enabled)VodAccessDenial.PROFILE_REQUIRED else null,access.denial(failure(400,response.headers.toMultimap())))
+                    assertEquals(VodAccessDenial.PROFILE_REQUIRED,access.denial(failure(400,response.headers.toMultimap())))
                 }
             }
         }
     }
+    @Test fun `generated own HLS asset auth denial is terminal even for live or recording sessions`() {
+        Server().use {server->
+            server.server.createContext("/api/video/hls/owned/segment0.ts") {exchange->exchange.sendResponseHeaders(403,-1)}
+            server.start();val access=VodMediaAccess(server.base,false,privateHeaders)
+            client(access).newCall(Request.Builder().url(server.base.resolve("api/video/hls/owned/segment0.ts")!!).build()).execute().use {response->
+                val error=failure(403,response.headers.toMultimap())
+                assertEquals(VodAccessDenial.ACCESS_DENIED,access.denial(error));assertEquals(C.TIME_UNSET,access.loadPolicy.getRetryDelayMsFor(info(error)))
+            }
+        }
+    }
+    @Test fun `uncoded forwarded provider403 on raw live stream keeps legacy retry behavior`() {
+        Server().use {server->
+            server.server.createContext("/api/video/stream") {exchange->val body="external stream error: 403";exchange.sendResponseHeaders(403,body.length.toLong());exchange.responseBody.write(body.toByteArray())}
+            server.start();val access=VodMediaAccess(server.base,false,privateHeaders)
+            client(access).newCall(Request.Builder().url(server.base.resolve("api/video/stream")!!).build()).execute().use {response->
+                val error=failure(403,response.headers.toMultimap());assertNull(access.denial(error));assertTrue(access.loadPolicy.getRetryDelayMsFor(info(error))>=0)
+            }
+        }
+    }
+    @Test fun `structured denial from external CDN cannot impersonate owned HLS authorization`() {
+        Server().use {external->
+            external.server.createContext("/api/video/hls/owned/segment0.ts") {exchange->val body="""{"code":"kids_vod_access_denied"}""";exchange.sendResponseHeaders(403,body.length.toLong());exchange.responseBody.write(body.toByteArray())}
+            external.start();val access=VodMediaAccess("http://127.0.0.1:1/".toHttpUrl(),false,privateHeaders)
+            client(access).newCall(Request.Builder().url(external.base.resolve("api/video/hls/owned/segment0.ts")!!).build()).execute().use {response->assertNull(access.denial(failure(403,response.headers.toMultimap())))}
+        }
+    }
+
 }

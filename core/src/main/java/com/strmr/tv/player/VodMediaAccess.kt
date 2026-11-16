@@ -46,15 +46,19 @@ internal class VodMediaAccess(private val backend:HttpUrl,private val enabled:Bo
     }
     val interceptor=Interceptor {chain->
         checkNetworkContext()
-        val attempt=denialTitleId?.takeIf {enabled}?.let {VodDenialEvents.begin(it,context)}
+        val attempt=denialTitleId?.let {VodDenialEvents.begin(it,context)}
         val response=chain.proceed(chain.request().newBuilder().removeHeader(marker).build())
         try {checkNetworkContext()}catch(error:java.io.IOException){response.close();throw error}
         // Remove every case variant, including forged upstream headers. This marker is never a request header.
         val clean=response.newBuilder()
         response.headers.names().filter {it.equals(marker,true)}.forEach(clean::removeHeader)
-        if(enabled && owns(response.request.url)) {
+        if(owns(response.request.url)) {
             val code=if(response.code in setOf(400,401,403))readCode(response) else null
-            vodAccessDenial(response.code,code)?.let {clean.header(marker,"$nonce:${it.name}:${attempt?.sequence ?: 0}")}
+            val generatedHls=HlsUriPolicy(backend,profileId.orEmpty()).asset(response.request.url)
+            // A live raw proxy can forward the provider's uncoded403. Explicit policy/PIN
+            // codes and generated local HLS assets are authoritative; external CDNs are not.
+            val reason=if(enabled || generatedHls)vodAccessDenial(response.code,code) else code?.let {vodAccessDenial(null,it)}
+            reason?.let {clean.header(marker,"$nonce:${it.name}:${attempt?.sequence ?: 0}")}
         }
         clean.build()
     }
@@ -64,7 +68,6 @@ internal class VodMediaAccess(private val backend:HttpUrl,private val enabled:Bo
 
     fun denial(error:Throwable):VodAccessDenial?=failure(error)?.reason
     fun failure(error:Throwable):ObservedVodDenial? {
-        if(!enabled)return null
         var current:Throwable?=error
         val seen=java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable,Boolean>())
         while(current!=null && seen.add(current)) {

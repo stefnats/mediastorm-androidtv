@@ -7,6 +7,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.ApiError
+import com.strmr.tv.api.VodAccessDenial
 import com.strmr.tv.app.AppLog
 import com.strmr.tv.live.LiveChannel
 import com.strmr.tv.live.LiveHlsPreference
@@ -58,6 +59,10 @@ class LiveRetune(
     /** Each fresh stream a retune or failover opens (it may keep a timeshift window, or not). */
     private val tuned: (LiveStream) -> Unit = {},
     private val expectedContext:Long=com.strmr.tv.library.ProfileDataContext.current,
+    owner: PlaybackSessionContext = PlaybackSessionContext.capture(expectedContext),
+    playerCurrent: () -> Boolean = { true },
+    private val onDenied: (VodAccessDenial) -> Unit = {},
+    denialTitleId: String? = null,
 ) {
     /** The channel playing; its `stremioStreamIndex` moves on under Stremio failover. */
     var channel: LiveChannel? = channel
@@ -71,28 +76,28 @@ class LiveRetune(
     private var failoverJob: Job? = null
     private var retuneJob: Job? = null
     private var released = false
+    private val lifetime = PlayerHlsLifecycle(owner, playerCurrent, denialTitleId, { release(); onDenied(it) }).also { it.remember(sessionId) }
     private val hls = LiveHlsFallback(direct = sessionId == null)
     private var hlsProof: Job? = null
 
     init {
         // Whether direct has played for this source before, which rules the fallback out.
+        val ticket = lifetime.ticket()
         if (hls.forcesHls.not() && sessionId == null && channel != null) scope.launch {
-            LiveHlsPreference.scope(channel, wait = true)?.let { hls.directWorked = LiveHlsPreference.directWorked(it) }
+            val preference = lifetime.read(ticket) { expected -> LiveHlsPreference.scope(channel, wait = true, expectedContext = expected) }
+            lifetime.use(ticket) { preference?.let { hls.directWorked = LiveHlsPreference.directWorked(it) } }
         }
     }
 
     private val keepalive = scope.launch {
-        while (isActive) {
+        while (isActive && lifetime.current()) {
             delay(KEEPALIVE_MS)
-            sessionId?.let {
-                try {
-                    ApiClient.keepLiveSessionAlive(it, failOnCapacityRejection = true,expectedContext=expectedContext)
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
-                    stopForCapacity(error)
-                }
-            }
+            val id = sessionId ?: continue
+            try {
+                lifetime.read { expected -> ApiClient.keepLiveSessionAlive(id, failOnCapacityRejection = true,
+                    expectedContext = expected, throwOnAccessDenial = true) }
+            } catch (error: CancellationException) { if (!isActive || !lifetime.current()) throw error
+            } catch (error: Exception) { if (lifetime.current()) stopForCapacity(error) }
         }
     }
 
@@ -105,7 +110,7 @@ class LiveRetune(
 
     /** The stream is playing. */
     fun playing() {
-        if (parked) return
+        if (!lifetime.current() || parked) return
         policy.playing(now())
         if (hls.playing()) rememberDirectWorked()
         reconnecting.value = false
@@ -113,14 +118,15 @@ class LiveRetune(
         if (hls.mode == LiveHlsFallback.Mode.FALLBACK && hlsProof?.isActive != true) {
             hlsProof = scope.launch {
                 delay(HLS_PROOF_MS)
-                if (player.isPlaying && hls.confirm()) rememberHls()
+                if (lifetime.current() && player.isPlaying && hls.confirm()) rememberHls()
             }
         }
     }
 
     /** Stops the channel's session for the archive; [unpark] tunes it again. */
     fun park() {
-        if (released || parked) return
+        if (!lifetime.current() || released || parked) return
+        lifetime.invalidate()
         parked = true
         hlsProof?.cancel()
         retuneJob?.cancel()
@@ -132,7 +138,7 @@ class LiveRetune(
 
     /** Back to live from the archive: the channel tuned afresh, with a full retune budget. */
     fun unpark() {
-        if (released || !parked) return
+        if (!lifetime.current() || released || !parked) return
         parked = false
         policy = LiveRetunePolicy()
         restart("back to live", 0)
@@ -141,7 +147,7 @@ class LiveRetune(
 
     /** The player is buffering: a stall while the fallback is on probation. */
     fun buffering() {
-        if (hlsProof?.isActive != true) return
+        if (!lifetime.current() || hlsProof?.isActive != true) return
         hls.stalled()
         AppLog.i("Live", "hls fallback stalled while on probation; not remembered for the source")
         hlsProof?.cancel()
@@ -149,7 +155,7 @@ class LiveRetune(
 
     /** The stream ended, which a live channel doesn't: its source dropped. */
     fun ended() {
-        if (released || parked) return
+        if (!lifetime.current() || released || parked) return
         if (!fallBackToHls("end of stream") && !sourceLost("end of stream")) failOverOrGiveUp("end of stream", NEVER_PLAYED)
     }
 
@@ -157,7 +163,7 @@ class LiveRetune(
      * A playback error; true when this took it over: any error of a direct stream that never
      * played (retried as HLS), else a source error (retuned).
      */
-    fun failed(e: PlaybackException): Boolean = released || !parked && (stopForCapacity(e) || fallBackToHls(e.errorCodeName) || LiveRetunePolicy.isSourceError(e.errorCode) && sourceLost(e.errorCodeName) ||
+    fun failed(e: PlaybackException): Boolean = !lifetime.current() || released || !parked && (stopForCapacity(e) || fallBackToHls(e.errorCodeName) || LiveRetunePolicy.isSourceError(e.errorCode) && sourceLost(e.errorCodeName) ||
             failOver(e.errorCodeName, e.message ?: e.errorCodeName))
 
     private fun stopForCapacity(error: Throwable): Boolean {
@@ -180,26 +186,28 @@ class LiveRetune(
         return true
     }
 
-    private fun rememberDirectWorked() = scope.launch {
-        val source = channel?.let { LiveHlsPreference.scope(it, wait = true) } ?: return@launch
-        LiveHlsPreference.rememberDirectWorked(source)
-        AppLog.i("Live", "direct played for source ${source.sourceId}; it won't fall back to hls")
-    }
-
-    private fun rememberHls() = scope.launch {
-        val channel = channel ?: return@launch
-        val source = LiveHlsPreference.scope(channel, wait = true)
-        if (source == null) {
-            AppLog.i("Live", "hls fallback playing, but the source can't be remembered")
-            return@launch
+    private fun rememberDirectWorked(): Job? {
+        val ticket = lifetime.ticket()
+        val target = channel ?: return null
+        if (!lifetime.current(ticket)) return null
+        return scope.launch {
+            val source = lifetime.read(ticket) { expected -> LiveHlsPreference.scope(target, wait = true, expectedContext = expected) } ?: return@launch
+            lifetime.use(ticket) { LiveHlsPreference.rememberDirectWorked(source) }
         }
-        LiveHlsPreference.remember(source)
-        AppLog.i("Live", "hls remembered for source ${source.sourceId}")
+    }
+    private fun rememberHls(): Job? {
+        val ticket = lifetime.ticket()
+        val target = channel ?: return null
+        if (!lifetime.current(ticket)) return null
+        return scope.launch {
+            val source = lifetime.read(ticket) { expected -> LiveHlsPreference.scope(target, wait = true, expectedContext = expected) } ?: return@launch
+            lifetime.use(ticket) { LiveHlsPreference.remember(source) }
+        }
     }
 
     /** Tunes again or gives up; false when the channel never played, so its failure stands. */
     private fun sourceLost(reason: String): Boolean {
-        if (released) return true
+        if (!lifetime.current() || released) return true
         if (retuneJob?.isActive == true) return true
         when (val decision = policy.sourceLost(now())) {
             is LiveRetunePolicy.Decision.Retune -> retune(decision, reason)
@@ -220,16 +228,19 @@ class LiveRetune(
 
     /** Stops the stream and its session, and tunes the channel again after [delayMs]. */
     private fun restart(label: String, delayMs: Long) {
-        if (released || parked) return
+        if (!lifetime.current() || released || parked) return
+        val ticket = lifetime.begin() ?: return
+        retuneJob?.cancel()
         reconnecting.value = true
         hlsProof?.cancel()
         player.stop()
         endSession()
         retuneJob = scope.launch {
             delay(delayMs)
-            policy.tuned(now())
+            lifetime.use(ticket) { policy.tuned(now()) }
             try {
-                val next = open() ?: return@launch
+                val next = open(ticket)
+                lifetime.use(ticket) {
                 hls.tuned(direct = next.sessionId == null)
                 if (channel?.hasStremioSources == true) {
                     stremio.tuned(next.stremioStreamIndex ?: channel?.stremioStreamIndex, next.stremioStreamIndexes)
@@ -240,13 +251,14 @@ class LiveRetune(
                 player.setMediaItem(Timeshift.mediaItem(next.url, next.timeshift))
                 player.playWhenReady = true
                 player.prepare()
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                if (stopForCapacity(e)) return@launch
-                AppLog.e("Live", "$label failed: ${e.message}")
+                if (!lifetime.current(ticket) || stopForCapacity(e)) return@launch
+                AppLog.e("Live", "$label failed")
                 // The server's own reason; a network failure's message is a socket's, not the viewer's.
-                if (!released) failOverOrGiveUp("$label failed", (e as? ApiError)?.message ?: RETUNE_FAILED)
+                if (lifetime.current(ticket) && !released) failOverOrGiveUp("$label failed", RETUNE_FAILED)
             }
         }
     }
@@ -255,12 +267,10 @@ class LiveRetune(
      * The new stream, its session taken over at once. One the server opens as the player
      * closes is stopped, not left holding the source.
      */
-    private suspend fun open(): LiveStream? = withContext(NonCancellable) {
-        val next = tune(hls.forcesHls, channel?.stremioStreamIndex)
-        if (released) {
-            next.sessionId?.let { ApiClient.stopLiveSession(it,expectedContext) }
-            null
-        } else next.also { sessionId = it.sessionId }
+    private suspend fun open(ticket: PlayerHlsLifecycle.Ticket): LiveStream {
+        val next = lifetime.prepare(ticket, { tune(hls.forcesHls, channel?.stremioStreamIndex) }, { it.sessionId })
+        lifetime.use(ticket) { sessionId = next.sessionId }
+        return next
     }
 
     private fun failOverOrGiveUp(reason: String, message: String) {
@@ -272,20 +282,23 @@ class LiveRetune(
      * once every one has been tried. False when the channel isn't a Stremio one.
      */
     private fun failOver(reason: String, message: String): Boolean {
+        if (!lifetime.current()) return true
+        val ticket = lifetime.ticket()
         val current = channel?.takeIf { it.hasStremioSources } ?: return false
-        if (released) return true
+        if (!lifetime.current() || released) return true
         if (failoverJob?.isActive == true) return true
         failoverJob = scope.launch {
             if (stremio.available == null) {
                 try {
-                    stremio.learn(ApiClient.liveStremioStreams(current).map { it.index })
+                    val streams = lifetime.read(ticket) { expected -> ApiClient.liveStremioStreams(current, expected) }
+                    lifetime.use(ticket) { stremio.learn(streams.map { it.index }) }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    AppLog.e("Live", "stremio failover: stream list failed (${e.message})")
+                    AppLog.e("Live", "stremio failover: stream list unavailable")
                 }
             }
-            if (released) return@launch
+            if (!lifetime.current(ticket) || released) return@launch
             val index = stremio.next()
             if (index == null) {
                 AppLog.w("Live", "stremio failover: no untried streams left ($reason)")
@@ -305,8 +318,9 @@ class LiveRetune(
     /** Stops the current HLS session (a direct stream has none). */
     private fun endSession() {
         val id = sessionId ?: return
+        val stop = lifetime.receipt(id)
         sessionId = null
-        MainScope().launch { ApiClient.stopLiveSession(id,expectedContext) }
+        MainScope().launch { lifetime.stop(stop) }
     }
 
     /**
@@ -317,6 +331,8 @@ class LiveRetune(
     fun handOver(): String? {
         val id = sessionId?.takeIf { retuneJob?.isActive != true }
         released = true
+        lifetime.detach(id)
+        lifetime.close()
         retuneJob?.cancel()
         failoverJob?.cancel()
         keepalive.cancel()
@@ -326,6 +342,7 @@ class LiveRetune(
 
     fun release() {
         released = true
+        lifetime.close()
         hlsProof?.cancel()
         retuneJob?.cancel()
         failoverJob?.cancel()

@@ -3,6 +3,10 @@ package com.strmr.tv.live
 import android.content.Context
 import android.os.SystemClock
 import com.strmr.tv.api.ApiClient
+import com.strmr.tv.library.ProfileDataContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import com.strmr.tv.app.App
 import com.strmr.tv.app.AppLog
 import kotlinx.coroutines.CompletableDeferred
@@ -35,20 +39,22 @@ object LiveHlsPreference {
     /** The base URL [serverId] was looked up on; another server is looked up afresh. */
     private var identityBase: HttpUrl? = null
     private var lookup: Deferred<String?>? = null
+    private var lookupContext: Long? = null
     private var retryAt = 0L
 
     /**
      * The channel's scope. With [wait] false it answers from the cached server identity only
      * (starting the lookup), so a tune is never held up by it.
      */
-    suspend fun scope(channel: LiveChannel, wait: Boolean): Scope? {
+    suspend fun scope(channel: LiveChannel, wait: Boolean, expectedContext: Long = ProfileDataContext.current): Scope? {
         val source = channel.sourceId?.trim()?.ifEmpty { null } ?: return null
-        val pending = synchronized(this) {
+        val (cached, pending) = ApiClient.inContext(expectedContext) { synchronized(this) {
             resetIfServerChanged()
-            serverId?.let { return Scope(it, source) }
-            startLookup()
-        }
+            serverId to if (serverId == null) startLookup(expectedContext) else null
+        } }
+        cached?.let { return Scope(it, source) }
         val id = if (wait) pending?.await() else null
+        ApiClient.inContext(expectedContext) { }
         return id?.let { Scope(it, source) }
     }
 
@@ -90,28 +96,53 @@ object LiveHlsPreference {
         identityBase = base
         serverId = null
         lookup = null
+        lookupContext = null
         retryAt = 0L
     }
 
     /** One lookup at a time; a failed one isn't retried for five minutes. */
-    private fun startLookup(): Deferred<String?>? {
-        lookup?.let { return it }
+    private fun startLookup(expected: Long): Deferred<String?>? {
+        lookup?.takeIf { lookupContext == expected }?.let { return it }
         if (SystemClock.elapsedRealtime() < retryAt) return null
         val base = identityBase
         val result = CompletableDeferred<String?>()
         lookup = result
+        lookupContext = expected
         MainScope().launch {
-            val id = runCatching {
-                ApiClient.send<Identity>("GET", "/api/remote-access/identity", promptOnLock = false, timeoutMs = 5_000).serverId
-            }.onFailure { AppLog.w("Live", "server identity unavailable: ${it.message}") }.getOrNull()?.ifEmpty { null }
-            synchronized(this@LiveHlsPreference) {
-                if (identityBase == base) {
-                    if (id != null) serverId = id else retryAt = SystemClock.elapsedRealtime() + 5 * 60_000
-                    lookup = null
-                }
+            try {
+                val id = readLiveIdentity(expected, {
+                    ApiClient.send<Identity>("GET", "/api/remote-access/identity", promptOnLock = false,
+                        timeoutMs = 5_000, expectedContext = expected).serverId?.ifEmpty { null }
+                }) { value -> synchronized(this@LiveHlsPreference) {
+                    if (identityBase == base && lookup === result) {
+                        if (value != null) serverId = value else retryAt = SystemClock.elapsedRealtime() + 5 * 60_000
+                        lookup = null; lookupContext = null
+                    }
+                } }
+                result.complete(id)
+            } catch (error: CancellationException) {
+                synchronized(this@LiveHlsPreference) { if (lookup === result) { lookup = null; lookupContext = null } }
+                result.complete(null)
+                throw error
+            } catch (_: Exception) {
+                try { ApiClient.inContext(expected) { synchronized(this@LiveHlsPreference) {
+                    if (identityBase == base && lookup === result) {
+                        retryAt = SystemClock.elapsedRealtime() + 5 * 60_000
+                        lookup = null; lookupContext = null
+                    }
+                } } } catch (_: CancellationException) { }
+                result.complete(null)
             }
-            result.complete(if (identityBase == base) id else null)
         }
         return result
     }
+}
+
+/** Original deferred producer, including publication; identity caching confers no content permission. */
+internal suspend fun readLiveIdentity(expected: Long, read: suspend () -> String?, publish: (String?) -> Unit): String? {
+    currentCoroutineContext().ensureActive(); ApiClient.inContext(expected) { }
+    val value = read()
+    currentCoroutineContext().ensureActive()
+    ApiClient.inContext(expected) { publish(value) }
+    return value
 }
