@@ -64,21 +64,21 @@ fun BrowseControls(
     var panel by remember { mutableStateOf<Panel?>(null) }
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         if (parts.size > 1) Control(parts.getOrElse(part) { "" }) { panel = Panel.PART }
-        if (list.sorts.isNotEmpty()) {
+        if (list.sorts.isNotEmpty() && (list != BrowseList.Hidden || originalLanguageFilterSupported)) {
             val arrow = if (options.sort == BrowseSort.DEFAULT) "" else if (options.ascending) " ↑" else " ↓"
             Control("Sort: ${options.sort.label}$arrow") { panel = Panel.SORT }
             if (options.sort == BrowseSort.RATING && list.filters) Control(options.ratingSource.label) { panel = Panel.RATING }
         }
-        if (list.filters) {
+        if (list.filters || list == BrowseList.Hidden && originalLanguageFilterSupported) {
             Control(options.kind?.noun ?: "Movies & Shows") { panel = Panel.KIND }
-            Control(options.watch.label) { panel = Panel.WATCH }
-            if (originalLanguageFilterSupported) Control(BrowseOriginalLanguageMenu.label(options)) { panel = Panel.LANGUAGE }
+            if (list.filters) Control(options.watch.label) { panel = Panel.WATCH }
             if (genres.isNotEmpty()) {
                 Control(when (options.genres.size) { 0 -> "Any Genre"; 1 -> options.genres.first(); else -> "${options.genres.size} Genres" }) {
                     panel = Panel.GENRES
                 }
             }
         }
+        if (originalLanguageFilterSupported) Control(BrowseOriginalLanguageMenu.label(options)) { panel = Panel.LANGUAGE }
         onRandom?.let { random ->
             OutlinedButton(onClick = random) {
                 if (picking) CircularProgressIndicator(Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)

@@ -47,7 +47,7 @@ import com.strmr.tv.ui.lists.ListGridModel
 
 /** Whether a list shows the filter chip row at all. */
 fun BrowseList.hasChips(): Boolean =
-    filters || (this as? BrowseList.Service)?.parts.orEmpty().size > 1
+    filters || this == BrowseList.Hidden || this is BrowseList.Library || (this as? BrowseList.Service)?.parts.orEmpty().size > 1
 
 /**
  * The list's filters as chips, each opening a menu: a streaming service's lists, the rating
@@ -59,6 +59,7 @@ fun BrowseFilterChips(model: ListGridModel, modifier: Modifier = Modifier) {
     val list = model.list
     val options = model.options
     val set: (BrowseOptions) -> Unit = { model.options = it }
+    if (!list.filters && list !is BrowseList.Service && !model.originalLanguageFilterSupported) return
     Row(
         modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -73,18 +74,20 @@ fun BrowseFilterChips(model: ListGridModel, modifier: Modifier = Modifier) {
                 set(options.copy(ratingSource = sources[it]))
             }
         }
-        if (list.filters) {
+        if (list.filters || list == BrowseList.Hidden && model.originalLanguageFilterSupported) {
             val kinds = listOf(null) + BrowseKind.entries
             MenuChip(options.kind?.noun ?: "Movies & Shows", options.kind != null, kinds.map { it?.noun ?: "Movies & Shows" }, kinds.indexOf(options.kind)) {
                 set(options.copy(kind = kinds[it]))
             }
-            val watch = WatchFilter.entries
-            MenuChip(options.watch.label, options.watch != WatchFilter.ALL, watch.map { it.label }, options.watch.ordinal) {
-                set(options.copy(watch = watch[it]))
+            if (list.filters) {
+                val watch = WatchFilter.entries
+                MenuChip(options.watch.label, options.watch != WatchFilter.ALL, watch.map { it.label }, options.watch.ordinal) {
+                    set(options.copy(watch = watch[it]))
+                }
             }
-            if (model.originalLanguageFilterSupported) OriginalLanguageChip(options, set)
             if (model.genres.isNotEmpty()) GenreChip(model.genres, options.genres) { set(options.copy(genres = it)) }
         }
+        if (model.originalLanguageFilterSupported) OriginalLanguageChip(options, set)
     }
 }
 

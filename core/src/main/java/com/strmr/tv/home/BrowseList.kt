@@ -99,7 +99,7 @@ sealed class BrowseList {
             is Custom -> mapOf("source" to "custom-list", "listId" to id)
             Watchlist -> mapOf("source" to "watchlist")
             ContinueWatching -> mapOf("source" to "continue-watching")
-            Hidden -> emptyMap()
+            Hidden -> mapOf("source" to "hidden")
             PermanentPrequeue -> mapOf("source" to "permanent-prequeue")
             is TopTen -> mapOf("source" to "top-ten") + (kind?.let { mapOf("mediaType" to it.mediaType) } ?: emptyMap())
             is Trending -> mapOf("source" to "trending", "mediaType" to kind.mediaType)

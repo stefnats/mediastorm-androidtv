@@ -85,6 +85,8 @@ data class HomeCard(
     val collageUrls: List<String> = emptyList(),
     val forceTitleOverlay: Boolean = false,
     val sourceAvailability: com.strmr.tv.api.SourceAvailability? = null,
+    /** Row context for the Unhide menu only; never playback or mutation authority. */
+    val hiddenManagementEntry: Boolean = false,
 ) {
     val target: DetailsTarget? get() = (link as? HomeLink.Details)?.target
 

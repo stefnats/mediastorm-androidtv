@@ -149,7 +149,7 @@ internal fun TitleMenuSheet(
             }
             add(SheetAction("Watch State…", Icons.Outlined.Checklist) { TitleMenu.watchStateFor = target })
         }
-        if (HiddenItemsStore.isHidden(target)) {
+        if (card.hiddenManagementEntry || HiddenItemsStore.isHidden(target)) {
             add(SheetAction("Unhide", Icons.Outlined.Visibility, action = TitleListAction(origin, scope) { TitleActions.unhide(target, it) }))
         } else {
             add(SheetAction("Hide from This Profile", Icons.Outlined.VisibilityOff, destructive = true, action = TitleListAction(origin, scope) { TitleActions.hide(target, it) }))

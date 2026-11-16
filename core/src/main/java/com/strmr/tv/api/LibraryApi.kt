@@ -5,6 +5,9 @@ import com.strmr.tv.home.BrowseEntry
 import com.strmr.tv.home.BrowseOptions
 import com.strmr.tv.home.BrowsePage
 import com.strmr.tv.home.BrowseSort
+import com.strmr.tv.home.ManagementPageFailure
+import com.strmr.tv.home.originalLanguageQuery
+import kotlinx.serialization.json.*
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
@@ -51,8 +54,85 @@ internal fun ApiClient.libraryGroupsQuery(
 suspend fun ApiClient.libraryPage(
     library: LibraryRef, options: BrowseOptions?, limit: Int, offset: Int,
     expectedContext: Long = ProfileDataContext.current,
-): BrowsePage = readLibraryPage(library, options, limit, offset, expectedContext) { id, count, start, sort, ascending, letter, expected ->
-    libraryGroups(id, count, start, sort, ascending, letter, expectedContext = expected)
+): BrowsePage {
+    currentCoroutineContext().ensureActive()
+    ProfileDataContext.requireCurrent(expectedContext)
+    val selected = options ?: BrowseOptions()
+    val remote = library.sourceType?.trim()?.lowercase() in setOf("plex", "jellyfin")
+    if (remote && selected.originalLanguageActive) throw ManagementPageFailure()
+    var support = false
+    val page = readLibraryPage(library, selected, limit, offset, expectedContext) { id, count, start, sort, ascending, letter, expected ->
+        val query = inContext(expected) { libraryCardsQuery(profileId, count, start, sort, ascending, letter, selected) }
+        val path = inContext(expected) { libraryGroupsPath(id) }
+        val raw = sendRaw("GET", path, query, expectedContext = expected)
+        decodeLibraryCardPage(raw, remote, selected.originalLanguageActive).also { support = it.supported }.page
+    }
+    if (selected.originalLanguageActive && !support) throw ManagementPageFailure()
+    return page.copy(originalLanguageFilterSupported = support)
+}
+
+internal fun libraryGroupsPath(id: String): String = "/api/library/libraries/${ApiClient.segment(id)}/groups"
+internal fun libraryCardsQuery(
+    profile: String, limit: Int, offset: Int, sort: String, ascending: Boolean, letter: String?, options: BrowseOptions,
+): Map<String, String> = buildMap {
+    put("userId", profile)
+    put("limit", limit.toString())
+    put("offset", offset.toString())
+    put("sort", sort)
+    put("dir", if (ascending) "asc" else "desc")
+    put("include", "cards")
+    letter?.let { put("alphabet", it) }
+    putAll(options.originalLanguageQuery())
+}
+internal data class LibraryCardPage(val page: LibraryGroupPage, val supported: Boolean, val rawGroups: JsonArray?)
+internal fun decodeLibraryCardPage(raw: String, remote: Boolean = false, requireSupport: Boolean = false): LibraryCardPage {
+    var strict = requireSupport
+    try {
+        val root = ApiJson.parseToJsonElement(raw) as? JsonObject ?: throw ManagementPageFailure()
+        val marker = root["originalLanguageFilterSupported"] as? JsonPrimitive
+        val supported = !remote && marker?.isString == false && marker.booleanOrNull == true
+        if (requireSupport && !supported) throw ManagementPageFailure()
+        strict = strict || supported
+        if (supported) {
+            root["alphabetBuckets"]?.takeUnless { it == JsonNull }?.let { buckets ->
+                if (buckets !is JsonArray || buckets.any { (it as? JsonPrimitive)?.isString != true }) throw ManagementPageFailure()
+            }
+            val total = (root["total"] as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull
+            val groups = root["groups"] as? JsonArray
+            if (total == null || total < 0 || groups == null || total < groups.size) throw ManagementPageFailure()
+            for (entry in groups) {
+                val row = entry as? JsonObject ?: throw ManagementPageFailure()
+                for (key in listOf("id", "title", "groupType", "libraryType")) {
+                    val value = row[key] as? JsonPrimitive
+                    if (value?.isString != true || key == "id" && value.content.isBlank()) throw ManagementPageFailure()
+                }
+                for (key in listOf("groupType", "libraryType", "overview", "imdbId", "matchStatus")) row[key]?.takeUnless { it == JsonNull }?.let {
+                    if ((it as? JsonPrimitive)?.isString != true) throw ManagementPageFailure()
+                }
+                val versions = (row["itemCount"] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull
+                if (versions == null || versions < 0) throw ManagementPageFailure()
+                for (key in listOf("year", "tmdbId", "tvdbId", "itemCount", "missingCount", "totalSizeBytes")) row[key]?.takeUnless { it == JsonNull }?.let {
+                    val value = (it as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull ?: throw ManagementPageFailure()
+                    if (key in listOf("itemCount", "missingCount", "totalSizeBytes") && value < 0) throw ManagementPageFailure()
+                }
+                for (key in listOf("confidenceMin", "confidenceMax")) row[key]?.takeUnless { it == JsonNull }?.let {
+                    val value = (it as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull ?: throw ManagementPageFailure()
+                    if (!value.isFinite()) throw ManagementPageFailure()
+                }
+                for (key in listOf("poster", "textPoster", "backdrop", "textBackdrop")) row[key]?.takeUnless { it == JsonNull }?.let {
+                    val image = it as? JsonObject ?: throw ManagementPageFailure()
+                    if ((image["url"] as? JsonPrimitive)?.isString != true) throw ManagementPageFailure()
+                }
+                for (key in listOf("items", "seasons")) row[key]?.takeUnless { it == JsonNull }?.let {
+                    if ((it as? JsonArray)?.isNotEmpty() != false) throw ManagementPageFailure()
+                }
+            }
+        }
+        return LibraryCardPage(ApiJson.decodeFromJsonElement<LibraryGroupPage>(root), supported, root["groups"] as? JsonArray)
+    } catch (error: Exception) {
+        if (strict) throw ManagementPageFailure()
+        throw error
+    }
 }
 
 internal suspend fun readLibraryPage(

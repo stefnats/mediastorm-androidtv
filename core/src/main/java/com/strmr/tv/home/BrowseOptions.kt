@@ -67,6 +67,14 @@ data class BrowseOptions(
     }
 
     fun query(list: BrowseList): Map<String, String> = buildMap {
+        if (list == BrowseList.Hidden) {
+            require(watch == WatchFilter.ALL && genres.isEmpty() && sort in list.sorts) { "Unsupported hidden management options" }
+            if (sort != BrowseSort.DEFAULT) { put("sortBy", sort.value); put("sortDirection", if (ascending) "asc" else "desc") }
+            kind?.let { put("filterMediaType", it.mediaType) }
+            letter?.let { put("alphabet", it) }
+            putAll(originalLanguageQuery())
+            return@buildMap
+        }
         if (sort != BrowseSort.DEFAULT && sort in list.sorts) {
             put("sortBy", sort.value)
             put("sortDirection", if (ascending) "asc" else "desc")
@@ -94,16 +102,27 @@ val BrowseList.sorts: List<BrowseSort>
         is BrowseList.Custom, BrowseList.Watchlist, BrowseList.PermanentPrequeue -> BrowseSort.entries
         is BrowseList.Genre, is BrowseList.Decade, is BrowseList.Remote, is BrowseList.Service, is BrowseList.Trending ->
             listOf(BrowseSort.DEFAULT, BrowseSort.NAME, BrowseSort.YEAR, BrowseSort.RATING)
+        BrowseList.Hidden -> listOf(BrowseSort.DEFAULT, BrowseSort.ADDED, BrowseSort.NAME, BrowseSort.YEAR)
         is BrowseList.Library -> listOf(BrowseSort.DEFAULT, BrowseSort.ADDED, BrowseSort.NAME, BrowseSort.YEAR)
         else -> emptyList()
     }
 
 /** The A–Z index under a Name sort: the profile's own lists and libraries. */
-val BrowseList.indexesLetters: Boolean get() = filters || this is BrowseList.Library
+val BrowseList.indexesLetters: Boolean get() = filters || this == BrowseList.Hidden || this is BrowseList.Library
 
 /** Movies / Shows, watch status, genre facets and the A–Z index: the profile's own lists. */
 val BrowseList.filters: Boolean
     get() = this is BrowseList.Custom || this == BrowseList.Watchlist || this == BrowseList.PermanentPrequeue
+
+/** Actual response capability still gates these controls; this is eligibility, never a claim of support. */
+val BrowseList.originalLanguageEligible: Boolean get() = filters || this == BrowseList.Hidden || this is BrowseList.Library
+
+/** Only catalogue language parameters, shared by stored pages and local library cards. */
+fun BrowseOptions.originalLanguageQuery(): Map<String, String> = buildMap {
+    val languages = requireNotNull(canonical()) { "Invalid original language filter" }.originalLanguages
+    if (languages.isNotEmpty()) put("originalLanguages", languages.sorted().joinToString(","))
+    if (includeUnknownOriginalLanguage) put("includeUnknownOriginalLanguage", "true")
+}
 
 /** A random pick only makes sense past a handful of titles. */
 val BrowseList.offersRandom: Boolean

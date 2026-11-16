@@ -25,11 +25,11 @@ class CatalogueLanguageOptionsTest {
         val both = BrowseOptions(originalLanguages = setOf("fra"), includeUnknownOriginalLanguage = true).query(BrowseList.Watchlist)
         assertEquals("fra", both["originalLanguages"]); assertEquals("true", both["includeUnknownOriginalLanguage"])
     }
-    @Test fun `original-language options are sent on exactly three stored list types`() {
+    @Test fun `original-language query supports stored and hidden management lists while library uses its own builder`() {
         val options = BrowseOptions(originalLanguages = setOf("spa"), includeUnknownOriginalLanguage = true)
-        val supported = listOf(BrowseList.Custom("synthetic", "Synthetic"), BrowseList.Watchlist, BrowseList.PermanentPrequeue)
+        val supported = listOf(BrowseList.Custom("synthetic", "Synthetic"), BrowseList.Watchlist, BrowseList.PermanentPrequeue, BrowseList.Hidden)
         supported.forEach { assertEquals("spa", options.query(it)["originalLanguages"]) }
-        val unsupported = listOf(BrowseList.ContinueWatching, BrowseList.Hidden, BrowseList.TopTen(), BrowseList.Genre(28,"Synthetic",BrowseKind.MOVIES), BrowseList.Remote("synthetic","Synthetic",mapOf("source" to "tmdb-list")), BrowseList.Library(LibraryRef("synthetic","Synthetic")))
+        val unsupported = listOf(BrowseList.ContinueWatching, BrowseList.TopTen(), BrowseList.Genre(28,"Synthetic",BrowseKind.MOVIES), BrowseList.Remote("synthetic","Synthetic",mapOf("source" to "tmdb-list")), BrowseList.Library(LibraryRef("synthetic","Synthetic")))
         unsupported.forEach { assertFalse(options.query(it).containsKey("originalLanguages")); assertFalse(options.query(it).containsKey("includeUnknownOriginalLanguage")) }
     }
     @Test fun `unregistered tags and unknown language tokens never become a partial filter`() {

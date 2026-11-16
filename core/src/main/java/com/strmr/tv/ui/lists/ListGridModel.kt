@@ -18,6 +18,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 
 /** Server-paged list state. Every page/random reply belongs to immutable options and an original profile epoch. */
 @Stable
@@ -26,9 +29,7 @@ class ListGridModel(
     query: Map<String, String>,
     private val scope: CoroutineScope,
     val dataContext: Long = ProfileDataContext.current,
-    private val readPage: suspend (BrowseList, Int, Int, Map<String, String>, BrowseOptions, Long) -> BrowsePage = { shown, limit, offset, extra, options, expected ->
-        ApiClient.browsePage(shown, limit, offset, extra, options = options, expectedContext = expected)
-    },
+    private val readPage: (suspend (BrowseList, Int, Int, Map<String, String>, BrowseOptions, Long) -> BrowsePage)? = null,
     private val randomOffset: (Int) -> Int = { (0 until it).random() },
 ) {
     private val query = query.toMap()
@@ -60,7 +61,8 @@ class ListGridModel(
     var genres by mutableStateOf<List<String>>(emptyList()); private set
     var letters by mutableStateOf<List<String>>(emptyList()); private set
     private var languageSupport by mutableStateOf(false)
-    val originalLanguageFilterSupported get() = isCurrent && shown.filters && languageSupport
+    private var hiddenLegacyMode: Boolean? = null
+    val originalLanguageFilterSupported get() = isCurrent && shown.originalLanguageEligible && languageSupport
     var loadError by mutableStateOf<String?>(null); private set
     var actionError by mutableStateOf<String?>(null)
     var loadingFor by mutableStateOf<Any?>(null); private set
@@ -68,6 +70,7 @@ class ListGridModel(
     private var added by mutableIntStateOf(0)
     private var blockedGeneration: Long? = null
     private var loading: Read? = null
+    private val pageReads = mutableSetOf<Deferred<BrowsePage>>()
     private var randomGeneration = 0L
 
     val shown: BrowseList get() = if (list is BrowseList.Service) list.copy(part = part) else list
@@ -80,7 +83,7 @@ class ListGridModel(
     val cards: List<HomeCard>
         get() {
             val ranked = shown is BrowseList.TopTen
-            return entries.mapIndexed { i, entry -> HomeCard.from(entry).let { if (ranked) it.ranked(i + 1) else it } }
+            return entries.mapIndexed { i, entry -> HomeCard.from(entry).let { if (ranked) it.ranked(i + 1) else if (list == BrowseList.Hidden) it.copy(hiddenManagementEntry = true) else it } }
                 .filter { list == BrowseList.Hidden || it.target?.let(HiddenItemsStore::isHidden) != true }
         }
 
@@ -95,29 +98,41 @@ class ListGridModel(
         }
     }
     private fun invalidateRows() {
+        pageReads.toList().forEach { it.cancel() }
         generation++; randomGeneration++; picking = false
         entries = emptyList(); fetched = 0; total = null; loadError = null; blockedGeneration = null
-        loading = null; loadingFor = null
+        loading = null; loadingFor = null; hiddenLegacyMode = null
     }
     private class Read(val key: Any, val generation: Long, val list: BrowseList, val options: BrowseOptions)
     private fun capture() = Read(reloadKey, generation, shown, options.copy(genres = options.genres.toSet(), originalLanguages = options.originalLanguages.toSet()))
     private fun current(read: Read) = isCurrent && read.generation == generation && read.key == reloadKey
-    private suspend fun read(read: Read, limit: Int, offset: Int, extra: Map<String, String> = query): BrowsePage {
+    private suspend fun read(read: Read, limit: Int, offset: Int, extra: Map<String, String> = query): BrowsePage = coroutineScope {
+        val pending = async { readPageOwned(read, limit, offset, extra) }
+        pageReads += pending
+        try { pending.await() } finally { pageReads -= pending }
+    }
+    private suspend fun readPageOwned(read: Read, limit: Int, offset: Int, extra: Map<String, String>): BrowsePage {
         currentCoroutineContext().ensureActive(); ProfileDataContext.requireCurrent(dataContext)
         if (!current(read)) throw CancellationException("List selection changed")
-        val page = readPage(read.list, limit, offset, extra, read.options, dataContext)
+        val page = readPage?.invoke(read.list, limit, offset, extra, read.options, dataContext)
+            ?: ApiClient.browsePage(read.list, limit, offset, extra, options = read.options, expectedContext = dataContext, hiddenLegacyMode = hiddenLegacyMode)
         currentCoroutineContext().ensureActive(); ProfileDataContext.requireCurrent(dataContext)
         if (!current(read)) throw CancellationException("List selection changed")
-        if (read.list.filters && read.options.originalLanguageActive && !page.originalLanguageFilterSupported) throw LanguageFilterUnavailable()
+        if (read.list.originalLanguageEligible && read.options.originalLanguageActive && !page.originalLanguageFilterSupported) throw LanguageFilterUnavailable()
+        if (read.list == BrowseList.Hidden) {
+            val mode = !page.originalLanguageFilterSupported
+            if (hiddenLegacyMode != null && hiddenLegacyMode != mode) throw ManagementPageFailure()
+            hiddenLegacyMode = mode
+        }
         return page
     }
     private class LanguageFilterUnavailable : Exception("This server cannot apply the original language filter. Clear the filter or reload this list.")
     private fun failed(read: Read, error: Exception) {
         if (!current(read)) return
-        if (error is LanguageFilterUnavailable) {
+        if (error is LanguageFilterUnavailable || error is ManagementPageFailure || read.list == BrowseList.Hidden) {
             // Preserve selected intent and its clear controls; never replace it with an unfiltered page.
             entries = emptyList(); fetched = 0; total = null; blockedGeneration = generation
-            loadError = error.message
+            loadError = error.vodDenial?.message ?: if (error is LanguageFilterUnavailable || error is ManagementPageFailure) error.message else "Unable to load this management view. Reload the list."
         } else if (entries.isEmpty()) loadError = error.vodDenial?.message ?: "Unable to load this list. Try again."
     }
 
@@ -143,7 +158,7 @@ class ListGridModel(
                 catch (error: Exception) { failed(requested, error) }
             }
             if (fetched == 0) { genres = page.genres; letters = page.letters }
-            languageSupport = requested.list.filters && page.originalLanguageFilterSupported
+            languageSupport = requested.list.originalLanguageEligible && page.originalLanguageFilterSupported
             fetched += page.entries.size
             val seen = entries.map { HomeCard.from(it).id }.toMutableSet()
             entries = entries + page.entries.filter { seen.add(HomeCard.from(it).id) }
@@ -176,7 +191,7 @@ class ListGridModel(
             } while (page.entries.isNotEmpty() && result.size < wanted && result.size < size)
             val seen = mutableSetOf<String>()
             entries = result.filter { seen.add(HomeCard.from(it).id) }; fetched = result.size; total = size
-            genres = first?.genres.orEmpty(); letters = first?.letters.orEmpty(); languageSupport = requested.list.filters && first?.originalLanguageFilterSupported == true
+            genres = first?.genres.orEmpty(); letters = first?.letters.orEmpty(); languageSupport = requested.list.originalLanguageEligible && first?.originalLanguageFilterSupported == true
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) { failed(requested, error) }
         finally { if (loading === requested) { loading = null; loadingFor = null } }

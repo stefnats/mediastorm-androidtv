@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.strmr.mobile.ui.library.rememberLibraryOpener
 import com.strmr.mobile.ui.shell.LocalNavigator
+import com.strmr.tv.home.BrowseList
 import com.strmr.tv.home.HomeLink
 import com.strmr.tv.home.offersRandom
 import com.strmr.tv.home.sorts
@@ -74,7 +75,7 @@ fun BrowseActions(model: ListGridModel) {
             else Icon(Icons.Filled.Casino, "Random")
         }
     }
-    if (list.sorts.isNotEmpty()) {
+    if (list.sorts.isNotEmpty() && (list != BrowseList.Hidden || model.originalLanguageFilterSupported)) {
         Box {
             IconButton(onClick = { sorting = true }) { Icon(Icons.AutoMirrored.Filled.Sort, "Sort") }
             DropdownMenu(expanded = sorting, onDismissRequest = { sorting = false }) {

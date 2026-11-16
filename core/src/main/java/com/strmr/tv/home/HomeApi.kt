@@ -6,6 +6,9 @@ import com.strmr.tv.api.vodOptionalRead
 import com.strmr.tv.library.ProfileDataContext
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -225,7 +228,7 @@ suspend fun ApiClient.customListItems(id: String, expectedContext: Long = Profil
  */
 suspend fun ApiClient.browsePage(
     list: BrowseList, limit: Int, offset: Int = 0, extra: Map<String, String> = emptyMap(), phase: ShelfPhase? = null,
-    options: BrowseOptions? = null, expectedContext: Long = ProfileDataContext.current,
+    options: BrowseOptions? = null, expectedContext: Long = ProfileDataContext.current, hiddenLegacyMode: Boolean? = null,
 ): BrowsePage {
     currentCoroutineContext().ensureActive()
     ProfileDataContext.requireCurrent(expectedContext)
@@ -240,17 +243,7 @@ suspend fun ApiClient.browsePage(
         ProfileDataContext.requireCurrent(expectedContext)
         return BrowsePage(all.drop(offset).take(limit).map { BrowseEntry.WatchingEntry(it) }, all.size)
     }
-    // Hidden titles come from the profile's hidden items, newest first.
-    if (list == BrowseList.Hidden) {
-        val snapshot = com.strmr.tv.library.HiddenItemsStore.pageItems(expectedContext)
-        val all = snapshot.reversed().map {
-            WatchlistItem(it.id, if (it.isMovie) "movie" else "series", it.name, year = it.year, posterUrl = it.posterUrl,
-                          backdropUrl = it.backdropUrl, externalIds = it.externalIds)
-        }
-        currentCoroutineContext().ensureActive()
-        ProfileDataContext.requireCurrent(expectedContext)
-        return BrowsePage(all.drop(offset).take(limit).map { BrowseEntry.ItemEntry(it) }, all.size)
-    }
+    if (list == BrowseList.Hidden) return hiddenManagementPage(limit, offset, extra, options ?: BrowseOptions(), expectedContext, hiddenLegacyMode)
     val query = inContext(expectedContext) { browseQuery(list, limit, offset, extra, options, phase) }
     // Series counts the server hasn't cached yet are fetched in the background once asked for.
     val path = inContext(expectedContext) {
@@ -298,3 +291,100 @@ internal fun browseQuery(list: BrowseList, limit: Int, offset: Int, extra: Map<S
 
 /** The path in production requests is captured under the original epoch before any await. */
 internal fun ApiClient.browsePath(expectedContext: Long): String = inContext(expectedContext) { "$profilePath/display-list" }
+
+
+/** A fixed contract failure blocks the management page; malformed rows never become a partial page. */
+class ManagementPageFailure : Exception("This server could not apply this management view. Clear the filters or reload the list.")
+
+internal fun hiddenManagementPath(profile: String): String = "/api/users/${ApiClient.segment(profile)}/display-list"
+
+internal fun hiddenManagementQuery(limit: Int, offset: Int, extra: Map<String, String>, options: BrowseOptions): Map<String, String> {
+    if (extra.keys.any { it != "titleFilter" }) throw ManagementPageFailure()
+    val selected = try { options.query(BrowseList.Hidden) } catch (_: IllegalArgumentException) { throw ManagementPageFailure() }
+    return mapOf("source" to "hidden", "limit" to limit.toString(), "offset" to offset.toString()) + extra + selected
+}
+
+private suspend fun ApiClient.hiddenManagementPage(
+    limit: Int, offset: Int, extra: Map<String, String>, options: BrowseOptions, expected: Long, legacy: Boolean?,
+): BrowsePage = readHiddenManagementPage(limit, offset, extra, options, expected, legacy,
+    readPage = { query, owner ->
+        val path = inContext(owner) { hiddenManagementPath(profileId) }
+        sendRaw("GET", path, query, expectedContext = owner)
+    },
+    readLegacy = { owner ->
+        val path = inContext(owner) { "$profilePath/hidden-items" }
+        sendRaw("GET", path, promptOnLock = false, expectedContext = owner)
+    },
+)
+
+/** Negotiation/fallback is private to the original model, never persisted or sent as a permission field. */
+internal suspend fun readHiddenManagementPage(
+    limit: Int, offset: Int, extra: Map<String, String>, options: BrowseOptions, expected: Long, legacy: Boolean?,
+    readPage: suspend (Map<String, String>, Long) -> String,
+    readLegacy: suspend (Long) -> String,
+): BrowsePage {
+    suspend fun checkOwner() {
+        currentCoroutineContext().ensureActive()
+        ProfileDataContext.requireCurrent(expected)
+    }
+    checkOwner()
+    val query = hiddenManagementQuery(limit, offset, extra, options)
+    val defaultRequest = query.keys == setOf("source", "limit", "offset")
+    suspend fun legacyPage(): BrowsePage {
+        if (!defaultRequest) throw ManagementPageFailure()
+        checkOwner()
+        val raw = readLegacy(expected)
+        checkOwner()
+        val rows = decodeHiddenRows(ApiJson.parseToJsonElement(raw)).reversed()
+        val page = BrowsePage(rows.drop(offset).let { if (limit > 0) it.take(limit) else it }.map { BrowseEntry.ItemEntry(it) }, rows.size)
+        checkOwner()
+        return page
+    }
+    if (legacy == true) return legacyPage()
+    val raw = try { readPage(query, expected) }
+    catch (error: Exception) {
+        checkOwner()
+        val unsupported = (error as? com.strmr.tv.api.ApiError.Http)?.response?.let {
+            it.status == 400 && it.code == null && it.body.trim() == "unsupported display list source"
+        } == true
+        if (legacy == null && defaultRequest && unsupported) return legacyPage()
+        throw error
+    }
+    checkOwner()
+    val page = decodeHiddenManagementPage(raw)
+    checkOwner()
+    return page
+}
+
+internal fun decodeHiddenManagementPage(raw: String): BrowsePage = try {
+    val root = ApiJson.parseToJsonElement(raw) as? JsonObject ?: throw ManagementPageFailure()
+    val source = root["source"] as? JsonPrimitive
+    val support = root["originalLanguageFilterSupported"] as? JsonPrimitive
+    if (source?.isString != true || source.content != "hidden" || support?.isString != false || support.booleanOrNull != true) throw ManagementPageFailure()
+    val total = (root["total"] as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull?.takeIf { it >= 0 } ?: throw ManagementPageFailure()
+    val items = decodeHiddenRows(root["items"])
+    if (total < items.size) throw ManagementPageFailure()
+    val alphabet = root["alphabetBuckets"]?.takeUnless { it == JsonNull }?.let { value ->
+        (value as? JsonArray ?: throw ManagementPageFailure()).map { (it as? JsonPrimitive)?.takeIf { it.isString }?.content ?: throw ManagementPageFailure() }
+    }.orEmpty()
+    BrowsePage(items.map { BrowseEntry.ItemEntry(it) }, total, letters = alphabet, originalLanguageFilterSupported = true)
+} catch (_: Exception) { throw ManagementPageFailure() }
+
+private fun decodeHiddenRows(value: JsonElement?): List<WatchlistItem> {
+    val rows = value as? JsonArray ?: throw ManagementPageFailure()
+    return rows.map { entry ->
+        val row = entry as? JsonObject ?: throw ManagementPageFailure()
+        fun required(key: String): String = (row[key] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: throw ManagementPageFailure()
+        fun optional(key: String): String? = row[key]?.takeUnless { it == JsonNull }?.let { (it as? JsonPrimitive)?.takeIf { it.isString }?.content ?: throw ManagementPageFailure() }
+        val id = required("id").takeIf { it.isNotBlank() } ?: throw ManagementPageFailure()
+        val kind = required("mediaType").takeIf { it == "movie" || it == "series" } ?: throw ManagementPageFailure()
+        val hiddenAt = required("hiddenAt")
+        if (!Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:[Zz]|[+-][0-9]{2}:[0-9]{2})").matches(hiddenAt)) throw ManagementPageFailure()
+        try { java.time.OffsetDateTime.parse(hiddenAt) } catch (_: Exception) { throw ManagementPageFailure() }
+        val year = row["year"]?.takeUnless { it == JsonNull }?.let { (it as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull ?: throw ManagementPageFailure() }
+        val ids = row["externalIds"]?.takeUnless { it == JsonNull }?.let { external ->
+            (external as? JsonObject ?: throw ManagementPageFailure()).mapValues { (_, value) -> (value as? JsonPrimitive)?.takeIf { it.isString }?.content ?: throw ManagementPageFailure() }
+        }
+        WatchlistItem(id, kind, optional("name").orEmpty(), year = year, posterUrl = optional("posterUrl"), backdropUrl = optional("backdropUrl"), externalIds = ids)
+    }
+}

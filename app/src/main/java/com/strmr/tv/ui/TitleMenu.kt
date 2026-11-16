@@ -74,7 +74,7 @@ fun TitleMenu(
         add(DialogChoice(if (inWatchlist) "Remove from Watchlist" else "Add to Watchlist") {
             scope.launch { runCatching { WatchlistStore.toggle(target) }.onFailure { onError(it.message ?: "Unknown error") } }
         })
-        if (HiddenItemsStore.isHidden(target)) {
+        if (card.hiddenManagementEntry || HiddenItemsStore.isHidden(target)) {
             add(DialogChoice("Unhide", TitleListAction(origin, scope) { TitleActions.unhide(target, it) }))
         } else {
             add(DialogChoice("Hide from this profile", TitleListAction(origin, scope) { TitleActions.hide(target, it) }))
