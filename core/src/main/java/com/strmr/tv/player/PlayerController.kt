@@ -179,7 +179,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
 
     private val backendMediaHeaders=ApiClient.inContext(dataContext) {ApiClient.mediaHeaders}
     private val mediaAccess=VodMediaAccess(ApiClient.inContext(dataContext) {ApiClient.baseUrl},
-        enabled=session.reportsProgress && !session.isLive && !session.localFile,backendHeaders=backendMediaHeaders,denialTitleId=request.title.titleId,context=dataContext,requireCurrent=ownership::requireCurrent)
+        enabled=session.reportsProgress && !session.isLive && !session.localFile,backendHeaders=backendMediaHeaders,denialTitleId=request.title.titleId,context=dataContext,requireCurrent=ownership::requireCurrent,profileId=profileId)
 
     internal fun canUsePlayerAux(): Boolean = !released && ownership.isCurrent() && vodDenied.value == null
 

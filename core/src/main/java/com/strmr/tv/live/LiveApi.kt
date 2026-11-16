@@ -3,6 +3,9 @@ package com.strmr.tv.live
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.ApiError
 import com.strmr.tv.library.ProfileDataContext
+import java.io.IOException
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -198,7 +201,7 @@ suspend fun ApiClient.startLive(
     val direct = start.isDirect == true
     val path = (if (direct) start.streamUrl else start.playlistUrl)?.ifEmpty { null }
         ?: throw ApiError.NotReady("The server did not return a stream for this channel")
-    return inContext(expectedContext) { LiveStream(mediaUrl(path), if (direct) null else start.sessionId, start.stremioStreamIndex, start.stremioStreamIndexes,
+    return inContext(expectedContext) { LiveStream(mediaUrl(path, expectedContext), if (direct) null else start.sessionId, start.stremioStreamIndex, start.stremioStreamIndexes,
                       timeshiftWindowSeconds = if (direct) 0 else start.timeshiftWindowSeconds ?: 0) }
 }
 
@@ -263,13 +266,61 @@ suspend fun ApiClient.liveUsage(sourceId: String?): LiveUsage = send(
     promptOnLock = false, timeoutMs = 10_000,
 )
 
-/** A server-relative media path (`/live/stream?…`, `/video/hls/…`) under `/api`, with token and unlock added. */
-internal fun ApiClient.mediaUrl(apiPath: String): String {
-    val path = apiPath.substringBefore('?')
-    val existing = apiPath.substringAfter('?', "").ifEmpty { null }
-    val extra = listOfNotNull(
-        token?.let { "token=${segment(it)}" },
-        unlocks.token(profileId)?.let { "profileUnlock=${segment(it)}" },
-    )
-    return url("/api$path", encodedQuery = (listOfNotNull(existing) + extra).joinToString("&")).toString()
+/** Exact backend HLS asset routing. A selector is correlation, never a content permission. */
+internal class HlsUriPolicy(private val base: HttpUrl, private val profile: String) {
+    private val prefix = base.encodedPath.trimEnd('/')
+    private val hls = "$prefix/api/video/hls/"
+    private fun origin(url: HttpUrl) = url.scheme == base.scheme && url.host == base.host && url.port == base.port
+    private fun api(url: HttpUrl) = origin(url) && url.encodedPath.startsWith("$prefix/api/")
+    internal fun asset(url: HttpUrl): Boolean {
+        if (!origin(url) || !url.encodedPath.startsWith(hls)) return false
+        val encoded = url.encodedPath.removePrefix(hls).split('/')
+        if (encoded.size != 2) return false
+        val parts = url.pathSegments.takeLast(2)
+        if (parts.any { it.isEmpty() || it.length > 512 || it in setOf(".", "..") || it.any { c -> c == '/' || c == '\\' || c.isISOControl() } }) return false
+        val file = parts.last()
+        return file in setOf("master.m3u8", "stream.m3u8", "init.mp4", "subtitles.vtt", "captions.srt") ||
+            Regex("segment(?:0|[1-9][0-9]*)\\.(?:ts|m4s|mp4)").matches(file) ||
+            Regex("subtitle-(?:0|[1-9][0-9]*)\\.m3u8").matches(file) || Regex("subtitles-(?:0|[1-9][0-9]*)\\.vtt").matches(file)
+    }
+    fun withProfile(url: HttpUrl): HttpUrl {
+        if (!asset(url)) return url
+        if (profile.isBlank()) throw IOException("HLS profile is unavailable")
+        val names = url.queryParameterNames.filter { it.equals("profileId", true) || it.equals("userId", true) }
+        if (names.any { name -> url.queryParameterValues(name).any { it != profile } }) throw IOException("HLS profile context changed")
+        return if (names.isEmpty()) url.newBuilder().addQueryParameter("profileId", profile).build() else url
+    }
+    private fun resolve(raw: String): HttpUrl {
+        if (raw.isBlank() || raw.any(Char::isISOControl)) throw IOException("Media URL is unavailable")
+        raw.toHttpUrlOrNull()?.let { return it }
+        val directory = base.newBuilder().encodedPath("$prefix/").query(null).fragment(null).build()
+        if (raw.startsWith("//")) return directory.resolve(raw) ?: throw IOException("Media URL is unavailable")
+        val head = raw.substringBefore('?').substringBefore('#')
+        if (head.isEmpty() || Regex("[A-Za-z][A-Za-z0-9+.-]*:.*").matches(head)) throw IOException("Media URL is unavailable")
+        val path = when {
+            prefix.isNotEmpty() && head.startsWith("$prefix/api/") -> head
+            head.startsWith("/api/") -> prefix + head
+            head.startsWith("api/") -> "$prefix/$head"
+            else -> "$prefix/api/" + head.trimStart('/')
+        }
+        return directory.resolve(path + raw.drop(head.length)) ?: throw IOException("Media URL is unavailable")
+    }
+    /** Existing encoded queries are retained; external URLs never trigger native credential reads. */
+    fun media(raw: String, credentials: () -> List<Pair<String, String>>): String {
+        val resolved = resolve(raw)
+        if (!api(resolved)) return resolved.toString()
+        val owned = withProfile(resolved)
+        return owned.newBuilder().apply {
+            credentials().forEach { (name, value) ->
+                if (owned.queryParameterNames.none { it.equals(name, true) }) addQueryParameter(name, value)
+            }
+        }.build().toString()
+    }
+}
+
+/** Resolve under the original identity, including credentials after an awaited HLS start. */
+internal fun ApiClient.mediaUrl(apiPath: String, expectedContext: Long = ProfileDataContext.current): String = inContext(expectedContext) {
+    HlsUriPolicy(baseUrl, profileId).media(apiPath) {
+        listOfNotNull(token?.let { "token" to it }, unlocks.token(profileId)?.let { "profileUnlock" to it })
+    }
 }

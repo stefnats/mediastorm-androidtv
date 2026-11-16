@@ -4,6 +4,7 @@ import androidx.media3.common.C
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
+import com.strmr.tv.live.HlsUriPolicy
 import com.strmr.tv.api.HttpFailure
 import com.strmr.tv.api.VodAttempt
 import com.strmr.tv.api.VodDenialEvents
@@ -16,10 +17,11 @@ import okhttp3.Interceptor
 import okhttp3.Response
 
 /** The final response, not an original DataSpec URL before redirects, establishes backend origin. */
-internal class VodMediaAccess(private val backend:HttpUrl,private val enabled:Boolean,private val backendHeaders:Map<String,String> = emptyMap(),private val denialTitleId:String?=null,private val context:Long=0,private val requireCurrent:()->Unit={}) {
+internal class VodMediaAccess(private val backend:HttpUrl,private val enabled:Boolean,private val backendHeaders:Map<String,String> = emptyMap(),private val denialTitleId:String?=null,private val context:Long=0,private val requireCurrent:()->Unit={},private val profileId:String?=null) {
     private val marker="X-Mediastorm-Local-Vod-Denial"
     private val nonce=UUID.randomUUID().toString()
-    private val prefix=backend.encodedPath.trimEnd('/')+"/api/video/"
+    private val apiPrefix=backend.encodedPath.trimEnd('/')+"/api/"
+    private val prefix=apiPrefix+"video/"
     private fun sameOrigin(url:HttpUrl)=url.scheme==backend.scheme && url.host==backend.host && url.port==backend.port
     private fun owns(url:HttpUrl)=sameOrigin(url) &&
         (url.encodedPath==prefix+"stream" || url.encodedPath.startsWith(prefix+"hls/"))
@@ -30,8 +32,10 @@ internal class VodMediaAccess(private val backend:HttpUrl,private val enabled:Bo
     /** OkHttp follow-up requests do not re-enter application interceptors. */
     val requestInterceptor=Interceptor {chain->
         checkNetworkContext()
-        val request=chain.request().newBuilder().removeHeader(marker)
-        if(!sameOrigin(chain.request().url)) {
+        val original = chain.request()
+        val url = profileId?.let { HlsUriPolicy(backend, it).withProfile(original.url) } ?: original.url
+        val request=original.newBuilder().url(url).removeHeader(marker)
+        if(!sameOrigin(original.url) || !original.url.encodedPath.startsWith(apiPrefix)) {
             for((name,value) in backendHeaders) {
                 val values=chain.request().headers.values(name)
                 val retained=values.filterNot {it==value}

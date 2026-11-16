@@ -28,7 +28,7 @@ suspend fun ApiClient.startCastHls(
     val playlist = reply.playlistUrl?.ifEmpty { null }
     val id = reply.sessionId?.ifEmpty { null }
     if (playlist == null || id == null) throw ApiError.NotReady("The server didn't start a stream for the TV.")
-    return inContext(expectedContext){CastHlsSession(id, mediaUrl(playlist.removePrefix("/api")), reply.duration?.takeIf { it > 0 })}
+    return inContext(expectedContext){CastHlsSession(id, mediaUrl(playlist, expectedContext), reply.duration?.takeIf { it > 0 })}
 }
 
 /**
@@ -52,7 +52,7 @@ fun ApiClient.castMediaUrl(pathOrUrl: String?,expectedContext:Long=com.strmr.tv.
     val value = pathOrUrl?.trim().orEmpty()
     if (value.isEmpty()) return@inContext null
     if (value.startsWith("http")) return@inContext value
-    mediaUrl(if (value.startsWith("/api/")) value.removePrefix("/api") else value)
+    mediaUrl(value, expectedContext)
 }
 
 /** Request construction never accepts a metadata-supplied profile in place of the captured owner. */

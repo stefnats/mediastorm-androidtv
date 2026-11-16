@@ -59,7 +59,7 @@ suspend fun ApiClient.deleteRecording(id: String, expectedContext:Long=ProfileDa
 fun ApiClient.recordingStreamUrl(recording: Recording, title: String, expectedContext:Long=ProfileDataContext.current, part:RecordingPart?=null): String = inContext(expectedContext) {
     if(part!=null)require(RecordingCaptureRules.playable(recording,part)) {"Recording part is unavailable"}
     val route=recordingStreamRoute(recording,title,profileId,profileName,part)
-    mediaUrl(route)
+    mediaUrl(route, expectedContext)
 }
 
 /** Pure request construction; the API wrapper supplies the captured profile under its epoch. */
@@ -96,7 +96,7 @@ suspend fun ApiClient.startRecordingHls(recording: Recording, title: String, exp
     ProfileDataContext.requireCurrent(expectedContext)
     val path = start.playlistUrl?.ifEmpty { null } ?: throw ApiError.NotReady("The server did not return a playlist for this recording")
     com.strmr.tv.app.AppLog.i("Recordings", "growing HLS session ${start.sessionId} (growing=${start.growing})")
-    return LiveStream(mediaUrl(path), start.sessionId)
+    return LiveStream(mediaUrl(path, expectedContext), start.sessionId)
 }
 
 // Scheduling (the Expo Live guide's programme and channel menus)
