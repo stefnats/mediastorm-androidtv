@@ -6,8 +6,10 @@ import com.strmr.tv.app.AppSession
 import com.strmr.tv.app.NetworkRoutes
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.player.PlaybackSessionContext
+import com.strmr.tv.remote.RemoteAccess
 import java.security.MessageDigest
 import okhttp3.HttpUrl
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -69,10 +71,29 @@ object MultiscreenPrefs {
         Unit
     }
 
-    private fun currentKey(owner: PlaybackSessionContext): String? = multiscreenNamespace(
-        NetworkRoutes.savedServerUrl, ApiClient.session?.accountId, owner.profileId,
-        paired = AppSession.isRemote.value || NetworkRoutes.isHomeDirect.value || ApiClient.remoteCredential != null,
+    private fun currentKey(owner: PlaybackSessionContext): String? = unpairedMultiscreenNamespace(
+        savedPair = { NetworkRoutes.isPaired },
+        unreadablePair = { RemoteAccess.pairingUnreadable },
+        identity = {
+            multiscreenNamespace(
+                NetworkRoutes.savedServerUrl, ApiClient.session?.accountId, owner.profileId,
+                paired = AppSession.isRemote.value || NetworkRoutes.isHomeDirect.value || ApiClient.remoteCredential != null,
+            )
+        },
     )
+}
+
+/** A disconnected saved pairing is still paired; unreadable local identity never permits persistence. */
+internal fun unpairedMultiscreenNamespace(
+    savedPair: () -> Boolean,
+    unreadablePair: () -> Boolean = { false },
+    identity: () -> String?,
+): String? = try {
+    if (savedPair() || unreadablePair()) null else identity()
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (_: Exception) {
+    null
 }
 
 /** No transient route, credential or unknown account may become a saved-layout identity. */

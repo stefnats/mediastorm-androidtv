@@ -53,4 +53,62 @@ class MultiscreenNamespaceTest {
         try { storage.save(owner, key, SavedMultiscreen(emptyList())); fail() } catch (_: kotlinx.coroutines.CancellationException) { }
         assertEquals(0, reads); assertEquals(0, writes)
     }
+    private fun checkUnavailable(savedPair: () -> Boolean, identity: () -> String?) {
+        val owner = com.strmr.tv.player.PlaybackSessionContext.capture()
+        var reads = 0; var writes = 0
+        val storage = MultiscreenLayoutStorage({ reads++; "private-existing-layout" }, { _, _ -> writes++ })
+        val namespace = unpairedMultiscreenNamespace(savedPair = savedPair, identity = identity)
+        assertNull(namespace); assertNull(storage.saved(owner, namespace))
+        storage.save(owner, namespace, SavedMultiscreen(emptyList()))
+        assertEquals(0, reads); assertEquals(0, writes)
+    }
+    @Test fun `saved pairing blocks disconnected bridge even with every active flag false`() {
+        var identityReads = 0
+        checkUnavailable(savedPair = { true }, identity = {
+            identityReads++
+            // All active transport flags are false: the durable pairing must decide first.
+            multiscreenNamespace("http://127.0.0.1:32123".toHttpUrl(), "account", "profile", false || false || false)
+        })
+        assertEquals(0, identityReads)
+    }
+    @Test fun `unreadable saved pairing blocks identity and all layout IO`() {
+        var identityReads = 0
+        checkUnavailable(savedPair = { throw java.io.IOException("Synthetic unavailable pairing") }, identity = { identityReads++; key() })
+        assertEquals(0, identityReads)
+    }
+    @Test fun `unreadable configured identity blocks all layout IO`() {
+        checkUnavailable(savedPair = { false }, identity = { throw IllegalStateException("Synthetic unavailable identity") })
+    }
+    @Test fun `verified unpaired typed server retains actual private storage behavior`() {
+        val owner = com.strmr.tv.player.PlaybackSessionContext.capture()
+        val namespace = unpairedMultiscreenNamespace(savedPair = { false }, identity = { key(profile = owner.profileId) })
+        assertNotNull(namespace)
+        val raw = mutableMapOf("last.${owner.profileId}" to "legacy-preserved")
+        var reads = 0; var writes = 0
+        val storage = MultiscreenLayoutStorage({ reads++; raw[it] }, { name, value -> writes++; raw[name] = value })
+        val selection = SavedMultiscreen(listOf(LiveChannel("a", "A", "https://synthetic.invalid/a"), LiveChannel("b", "B", "https://synthetic.invalid/b")))
+        storage.save(owner, namespace, selection); assertEquals(selection, storage.saved(owner, namespace))
+        assertEquals(1, reads); assertEquals(1, writes); assertEquals("legacy-preserved", raw["last.${owner.profileId}"])
+    }
+    @Test fun `pairing or identity cancellation is preserved rather than converted to unpaired`() {
+        for (duringPairing in listOf(true, false)) {
+            try {
+                unpairedMultiscreenNamespace(
+                    savedPair = { if (duringPairing) throw kotlinx.coroutines.CancellationException("Synthetic") else false },
+                    identity = { throw kotlinx.coroutines.CancellationException("Synthetic") },
+                )
+                fail("Cancellation hidden")
+            } catch (_: kotlinx.coroutines.CancellationException) { }
+        }
+    }
+
+    @Test fun `saved but unreadable pairing stays unavailable when reload reports no decoded pairing`() {
+        var identityReads = 0; var reads = 0; var writes = 0
+        val owner = com.strmr.tv.player.PlaybackSessionContext.capture()
+        val namespace = unpairedMultiscreenNamespace(savedPair = { false }, unreadablePair = { true }, identity = { identityReads++; key() })
+        val storage = MultiscreenLayoutStorage({ reads++; null }, { _, _ -> writes++ })
+        assertNull(namespace); assertNull(storage.saved(owner, namespace)); storage.save(owner, namespace, SavedMultiscreen(emptyList()))
+        assertEquals(0, identityReads); assertEquals(0, reads); assertEquals(0, writes)
+    }
+
 }
