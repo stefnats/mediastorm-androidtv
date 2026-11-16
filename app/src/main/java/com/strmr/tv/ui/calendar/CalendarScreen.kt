@@ -1,5 +1,8 @@
 package com.strmr.tv.ui.calendar
 
+import kotlinx.coroutines.Job
+import com.strmr.tv.library.ProfileDataContext
+import com.strmr.tv.library.TitleMenuSelection
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
@@ -76,7 +79,8 @@ fun CalendarScreen() {
     val activePoster = remember { FocusRequester() }
     val navigator = LocalNavigator.current
     val browsing = days.isNotEmpty()
-    var menuFor by remember { mutableStateOf<HomeCard?>(null) }
+    val menuContext = remember { ProfileDataContext.current }
+    var menuFor by remember { mutableStateOf<TitleMenuSelection?>(null) }
     var menuError by remember { mutableStateOf<String?>(null) }
 
     // Focus coming into the page (Down from the tabs, Back from details) lands on the selected
@@ -123,7 +127,9 @@ fun CalendarScreen() {
                         CalendarFeed(
                             days, listState, selection.itemKey, activePoster, railFocus,
                             onPreview = state::preview,
-                            onMenu = { menuFor = it },
+                            onMenu = { card -> if (menuContext == ProfileDataContext.current) {
+                                menuFor?.close(); menuFor = TitleMenuSelection(card, menuContext, requireNotNull(scope.coroutineContext[Job]))
+                            } },
                             onOpen = { item ->
                                 AppLog.i(LOG, "open ${item.titleId} (${CalendarModel.itemKey(item)})")
                                 navigator.openDetails(CalendarModel.target(item))
@@ -139,7 +145,9 @@ fun CalendarScreen() {
             }
         }
     }
-    menuFor?.let { card -> TitleMenu(card, scope, onError = { menuError = it }) { menuFor = null } }
+    menuFor?.let { selection -> TitleMenu(selection, scope, onError = {
+        if (menuFor === selection && selection.isCurrent) menuError = it
+    }) { if (menuFor === selection) { selection.close(); menuFor = null } } }
     menuError?.let { MessageDialog("Couldn't Update", it) { menuError = null } }
 }
 

@@ -1,5 +1,10 @@
 package com.strmr.mobile.ui.components
 
+import kotlinx.coroutines.CancellationException
+import androidx.compose.runtime.DisposableEffect
+import com.strmr.tv.library.commitTitleListClick
+import com.strmr.tv.library.TitleListAction
+import com.strmr.tv.library.TitleMenuSelection
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -79,19 +84,22 @@ data class SheetAction(val label: String, val icon: ImageVector, val destructive
  */
 @Composable
 internal fun TitleMenuSheet(
-    card: HomeCard,
-    continueWatching: Boolean,
+    selection: TitleMenuSelection,
     scope: CoroutineScope,
     openLibrary: (LibraryEntry) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val card = selection.card
+    val origin = selection.origin
+    val continueWatching = selection.continueWatching
+    DisposableEffect(selection) { onDispose { selection.close() } }
     val navigator = LocalNavigator.current
     val sourceHint = rememberSourceHint(com.strmr.tv.ui.rememberTitleSourceEvidence(card))
-    val target = card.target
+    val target = origin.target
     val rate = target?.let { com.strmr.tv.ui.rememberRatingAction(it) }
     var watched by remember { mutableStateOf<Boolean?>(null) }
     val episode = card.episode
-    LaunchedEffect(card.id) {
+    LaunchedEffect(selection) {
         if (target == null) return@LaunchedEffect
         // Continue Watching's next episode is unwatched by definition.
         watched = when {
@@ -99,7 +107,7 @@ internal fun TitleMenuSheet(
             episode != null && !continueWatching -> runCatching { ApiClient.isEpisodeWatched(episode, target) }.getOrNull()
             else -> null
         }
-        SetAsideStore.refresh()
+        SetAsideStore.refresh(origin.context)
     }
     fun act(action: suspend () -> Unit) = scope.launch { action() }
 
@@ -115,10 +123,10 @@ internal fun TitleMenuSheet(
         }
         if (continueWatching) {
             add(SheetAction("Hide from Continue Watching", Icons.Outlined.RemoveCircleOutline) { act { TitleActions.hideFromContinueWatching(target) } })
-            add(SheetAction("Set Aside", Icons.Outlined.PauseCircle) { act { TitleActions.setAside(target) } })
+            add(SheetAction("Set Aside", Icons.Outlined.PauseCircle, action = TitleListAction(origin, scope) { TitleActions.setAside(target, it) }))
         }
         if (SetAsideStore.contains(target)) {
-            add(SheetAction("Remove from Set Aside", Icons.Outlined.PauseCircle) { act { TitleActions.removeFromSetAside(target) } })
+            add(SheetAction("Remove from Set Aside", Icons.Outlined.PauseCircle, action = TitleListAction(origin, scope) { TitleActions.removeFromSetAside(target, it) }))
         }
         add(SheetAction("Go to Details", Icons.Outlined.Info) { navigator.openDetails(target) })
         val inWatchlist = WatchlistStore.contains(target)
@@ -126,7 +134,7 @@ internal fun TitleMenuSheet(
                         if (inWatchlist) Icons.Outlined.BookmarkRemove else Icons.Outlined.BookmarkAdd) {
             act { runCatching { WatchlistStore.toggle(target) }.onFailure { AppToast.show(it.message ?: "Couldn't update the watchlist") } }
         })
-        add(SheetAction("Add to List…", Icons.AutoMirrored.Outlined.PlaylistAdd) { CustomListsStore.picking = target })
+        add(SheetAction("Add to List…", Icons.AutoMirrored.Outlined.PlaylistAdd, action = TitleListAction(origin, scope) { CustomListsStore.openPicking(target, it) }))
         val isWatched = watched == true
         if (target.isMovie) {
             // A partly watched movie (Continue Watching) or an unknown state offers Mark as watched.
@@ -180,9 +188,17 @@ fun ActionSheet(onDismiss: () -> Unit, header: @Composable () -> Unit, actions: 
                         leadingIconColor = if (item.destructive) color else MaterialTheme.colorScheme.onSurfaceVariant,
                     ),
                     modifier = Modifier.clickable {
-                        scope.launch { state.hide() }.invokeOnCompletion {
-                            onDismiss()
-                            item.action()
+                        val bound = item.action as? TitleListAction
+                        val click = bound?.accept()
+                        if (bound != null && click == null) return@clickable
+                        scope.launch {
+                            try {
+                                commitTitleListClick(hide = { state.hide() }, abandon = { click?.abandon() }) {
+                                    if (bound != null) bound.commit(requireNotNull(click), onDismiss)
+                                    else { onDismiss(); item.action() }
+                                }
+                            } catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) { /* A failed hide leaves the menu available for retry. */ }
                         }
                     },
                 )

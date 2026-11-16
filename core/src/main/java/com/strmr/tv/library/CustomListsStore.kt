@@ -29,6 +29,13 @@ object CustomListsStore {
         get() = picked.takeIf { pickedOwner?.isCurrent() == true }
         set(value) { pickedOwner = value?.let { PlaybackSessionContext.capture() }; picked = value }
     fun pickingOwner(target: DetailsTarget): PlaybackSessionContext? = pickedOwner?.takeIf { picked === target && it.isCurrent() }
+    fun openPicking(target: DetailsTarget, operation: CustomListOperation) {
+        operation.requireTarget(target)
+        operation.publish {
+            pickedOwner = operation.owner
+            picked = target
+        }
+    }
     fun clearPicking(target: DetailsTarget, expected: Long) {
         ApiClient.inContext(expected) { if (picked === target && pickedOwner?.epoch == expected) { picked = null; pickedOwner = null } }
     }

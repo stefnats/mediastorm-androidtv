@@ -1,5 +1,9 @@
 package com.strmr.mobile.ui.details
 
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Job
+import androidx.compose.runtime.remember
+import com.strmr.tv.library.ProfileDataContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -53,9 +57,9 @@ import com.strmr.tv.ui.details.DetailsModel
  */
 fun LazyListScope.relatedRows(model: DetailsModel) {
     model.title?.collection?.let { collection ->
-        if (model.collectionMovies.isNotEmpty()) item(key = "collection") { PosterRow("Part of ${collection.name}", model.collectionMovies) }
+        if (model.collectionMovies.isNotEmpty()) item(key = "collection") { PosterRow("Part of ${collection.name}", model.collectionMovies, model.dataContext) }
     }
-    if (model.similar.isNotEmpty()) item(key = "similar") { PosterRow("More Like This", model.similar.take(20)) }
+    if (model.similar.isNotEmpty()) item(key = "similar") { PosterRow("More Like This", model.similar.take(20), model.dataContext) }
     val cast = model.cast
     if (cast.isNotEmpty()) item(key = "cast") { CastRow(cast) }
 }
@@ -75,7 +79,8 @@ private fun RelatedHeading(text: String) {
 }
 
 @Composable
-private fun PosterRow(heading: String, titles: List<Title>) {
+private fun PosterRow(heading: String, titles: List<Title>, menuContext: Long) {
+    val menuScope = rememberCoroutineScope()
     val navigator = LocalNavigator.current
     val opens = opensRelated()
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -86,7 +91,7 @@ private fun PosterRow(heading: String, titles: List<Title>) {
                 PosterCard(
                     card, 116.dp,
                     onClick = { if (opens) card.target?.let { navigator.openDetails(it) } },
-                    onLongClick = if (opens) { { TitleMenu.show(card) } } else null,
+                    onLongClick = if (opens) { { TitleMenu.show(card, menuContext, requireNotNull(menuScope.coroutineContext[Job])) } } else null,
                 )
             }
         }

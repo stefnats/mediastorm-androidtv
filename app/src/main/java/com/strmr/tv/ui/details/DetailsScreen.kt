@@ -1,5 +1,7 @@
 package com.strmr.tv.ui.details
 
+import kotlinx.coroutines.Job
+import com.strmr.tv.library.TitleListOrigin
 import com.strmr.tv.app.AppSession
 import com.strmr.tv.ui.reminders.ReminderTarget
 import com.strmr.tv.ui.reminders.ReminderDialog
@@ -246,15 +248,17 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
         model.primary?.let { p -> model.play(p.episode, p.start, prequeueTracks.pick(warm)) }
     }
     if (watchState) WatchStateDialog(model, onChanged = { com.strmr.tv.library.TitleActions.changed() }, onDismiss = { watchState = false })
+    val listOrigin = remember(model, actionGeneration, more) { TitleListOrigin(target, model.dataContext, requireNotNull(scope.coroutineContext[Job])) }
+    DisposableEffect(listOrigin) { onDispose { listOrigin.close() } }
     if (more) {
         val moved = movedActions(
-            model, trailer, prequeueTracks, warm, scope,
+            model, listOrigin, trailer, prequeueTracks, warm, scope,
             onStartOver = startOver, onVersions = openVersions, onChooseSource = chooseSource, onWatchState = { watchState = true },
         )
         val order = if (model.offersOrderings) {
             DialogChoice("Episode Order: ${model.currentOrdering?.name ?: "Default"}…") { episodeOrder = true }
         } else null
-        DetailsMoreMenu(target, scope, moved, order, onCustomize = { customizingButtons = true }, onHidden = { navigator.close() }, onDismiss = { more = false },
+        DetailsMoreMenu(target, listOrigin, scope, moved, order, onCustomize = { customizingButtons = true }, onHidden = { navigator.close() }, onDismiss = { more = false },
             sourcePreference = contentLocalScopes(target, model.currentSeason).takeIf { it.isNotEmpty() }?.let { targets ->
                 DialogChoice("Automatic source preference…") { localPreferenceScopes = targets }
             }, reminder = ReminderTarget(target).takeIf { remindersAllowed(reminderProfile) && reminderChoices(it).isNotEmpty() }?.let { value ->

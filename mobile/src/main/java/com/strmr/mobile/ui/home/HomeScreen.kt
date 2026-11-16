@@ -1,5 +1,7 @@
 package com.strmr.mobile.ui.home
 
+import kotlinx.coroutines.Job
+import com.strmr.tv.library.ProfileDataContext
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -118,6 +120,8 @@ private fun HomeContent(entry: HomeEntry, padding: PaddingValues) {
     val shownAt = remember { reselected }
     LaunchedEffect(reselected) { if (reselected != shownAt) list.animateScrollToItem(0) }
 
+    val menuContext = remember { ProfileDataContext.current }
+    val menuScope = rememberCoroutineScope()
     val onCard = rememberHomeCardOpener { store.settings }
     val slots = store.slots
     val carouselId = if (layout.topCarousel) CarouselPick.pick(slots, layout.carouselRow) else null
@@ -143,7 +147,7 @@ private fun HomeContent(entry: HomeEntry, padding: PaddingValues) {
         ) {
             if (slides.isNotEmpty()) {
                 item(key = "__carousel__") {
-                    HomeCarousel(slides, onCard = onCard, onMenu = { TitleMenu.show(it) })
+                    HomeCarousel(slides, onCard = onCard, onMenu = { TitleMenu.show(it, menuContext, requireNotNull(menuScope.coroutineContext[Job])) })
                 }
             }
             items(slots.filterNot { it.id == carouselId || it is HomeSlot.Failed }, key = { it.id }) { slot ->
@@ -153,7 +157,7 @@ private fun HomeContent(entry: HomeEntry, padding: PaddingValues) {
                         landscape = layout.style(slot.id) == ShelfStyle.LANDSCAPE,
                         showTitles = showTitles,
                         onCard = onCard,
-                        onMenu = { TitleMenu.show(it, continueWatching = slot.shelf.list == BrowseList.ContinueWatching) },
+                        onMenu = { TitleMenu.show(it, menuContext, requireNotNull(menuScope.coroutineContext[Job]), continueWatching = slot.shelf.list == BrowseList.ContinueWatching) },
                         onExplore = { navigator.openList(it.list, store.settings?.viewQuery) },
                     )
                     is HomeSlot.Loading -> PlaceholderRow(slot.title)

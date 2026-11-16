@@ -51,6 +51,8 @@ class CustomListOperation internal constructor(
 ) {
     private var retired = false
     private var created: String? = null
+    private var resolved: String? = null
+    private val resolvedItems = mutableSetOf<Pair<String, String>>()
     private val jobs = mutableSetOf<Job>()
     fun check() { owner.requireCurrent(); if (retired || !current(this)) throw CancellationException("List operation changed") }
     fun publish(action: () -> Unit): Boolean {
@@ -60,11 +62,23 @@ class CustomListOperation internal constructor(
     internal fun register(job: Job) { check(); jobs.add(job) }
     internal fun unregister(job: Job) { jobs.remove(job) }
     internal fun cancel() { retired = true; jobs.toList().forEach { it.cancel() } }
-    internal fun requireCreate() { check(); require(listId == null && created == null) { "List operation does not create a list" } }
+    internal fun requireCreate() { check(); require(listId == null && created == null && resolved == null) { "List operation does not create a list" } }
     internal fun created(id: String) { requireCreate(); require(id.isNotBlank()); created = id }
-    internal fun requireList(id: String) { check(); require(id == listId || id == created) { "List selection changed" } }
+    internal fun requireList(id: String) { check(); require(id == listId || id == created || id == resolved) { "List selection changed" } }
+    internal fun resolvedList(id: String) {
+        check()
+        require(id.isNotBlank() && listId == null)
+        if (created != null) require(created == id)
+        else if (resolved != null) require(resolved == id)
+        else resolved = id
+    }
+    internal fun resolvedItem(item: WatchlistItem) {
+        check()
+        require(resolved != null || created != null)
+        resolvedItems.add(item.mediaType to item.id)
+    }
     internal fun requireTarget(value: DetailsTarget) { check(); require(target === value) { "Title selection changed" } }
-    internal fun requireItem(value: WatchlistItem) { check(); require(itemKey == (value.mediaType to value.id)) { "List item changed" } }
+    internal fun requireItem(value: WatchlistItem) { check(); require(itemKey == (value.mediaType to value.id) || (value.mediaType to value.id) in resolvedItems) { "List item changed" } }
 }
 
 internal data class CustomListRequest(val method: String, val path: String, val body: JsonObject?, val expected: Long)
@@ -92,4 +106,129 @@ internal suspend fun <T> createListAndAdd(operation: CustomListOperation, create
     val list = checkedListStage(operation.owner, operation, create)
     checkedListStage(operation.owner, operation) { add(list) }
     return list
+}
+
+/** Captured when the actual title/menu selection is made, before deferred composition or animation. */
+class TitleMenuSelection(
+    val card: com.strmr.tv.home.HomeCard,
+    expectedContext: Long,
+    parent: Job,
+    val continueWatching: Boolean = false,
+) {
+    val origin = TitleListOrigin(card.target, expectedContext, parent)
+    val isCurrent get() = origin.isCurrent
+    fun close() = origin.close()
+}
+
+/** An unchosen menu intent closes with its surface. It is not content or server mutation authority. */
+class TitleListOrigin(val target: DetailsTarget?, val context: Long, internal val parent: Job) {
+    private val owner = try {
+        PlaybackSessionContext.capture(context)
+    } catch (_: CancellationException) {
+        null
+    }
+    private var open = true
+    private var chosen = false
+    private var pending: TitleListClick? = null
+    val isCurrent get() = open && parent.isActive && owner?.isCurrent() == true
+
+    fun accept(scope: CoroutineScope): TitleListClick? {
+        if (!isCurrent || chosen || target == null || scope.coroutineContext[Job]?.isActive == false) return null
+        chosen = true
+        return TitleListClick(this, scope, requireNotNull(owner), target).also { pending = it }
+    }
+
+    internal fun detach(click: TitleListClick): Boolean {
+        if (!isCurrent || pending !== click) return false
+        pending = null
+        return true
+    }
+
+    fun dismiss(action: () -> Unit): Boolean {
+        val current = owner ?: return false
+        if (!current.isCurrent()) return false
+        return current.use {
+            if (!open || !parent.isActive) false else {
+                close()
+                action()
+                true
+            }
+        }
+    }
+
+    internal fun abandon(click: TitleListClick) {
+        if (pending === click) {
+            pending = null
+            chosen = false
+        }
+    }
+
+    fun close() {
+        open = false
+        pending?.cancel()
+        pending = null
+    }
+}
+
+/** Accepted click: wait for a successful hide, then transfer only to the original parent's lifetime. */
+class TitleListClick internal constructor(
+    private val origin: TitleListOrigin,
+    private val scope: CoroutineScope,
+    private val owner: PlaybackSessionContext,
+    private val target: DetailsTarget,
+) {
+    private var cancelled = false
+    private var committed = false
+    internal fun cancel() { cancelled = true }
+    fun abandon() {
+        cancelled = true
+        origin.abandon(this)
+    }
+
+    fun commit(dismiss: () -> Unit, action: suspend (CustomListOperation) -> Unit): Job? {
+        if (cancelled || committed || !owner.isCurrent() || scope.coroutineContext[Job]?.isActive == false || !origin.detach(this)) return null
+        committed = true
+        val operations = CustomListOperations(owner.epoch, target) { origin.parent.isActive && scope.coroutineContext[Job]?.isActive != false }
+        val operation = operations.begin() ?: return null
+        if (!operation.publish(dismiss)) {
+            operations.close()
+            return null
+        }
+        if (scope.coroutineContext[Job]?.isActive == false || !owner.isCurrent()) {
+            operations.close()
+            return null
+        }
+        // A real producer child cancels at cancellation start, even if another child delays completion.
+        return scope.launch(origin.parent) {
+            try {
+                operations.run(operation, action)
+            } finally {
+                operations.close()
+            }
+        }
+    }
+}
+
+/** Actual sheet animation adapter: cancellation never becomes a completion callback that runs an action. */
+suspend fun commitTitleListClick(hide: suspend () -> Unit, abandon: () -> Unit = {}, commit: () -> Unit) {
+    try {
+        currentCoroutineContext().ensureActive()
+        hide()
+        currentCoroutineContext().ensureActive()
+        commit()
+    } catch (error: Exception) {
+        abandon()
+        throw error
+    }
+}
+
+/** Existing menu action containers retain this same bound function object when copied or sorted. */
+class TitleListAction(
+    private val origin: TitleListOrigin,
+    private val scope: CoroutineScope,
+    private val action: suspend (CustomListOperation) -> Unit,
+) : () -> Unit {
+    fun accept() = origin.accept(scope)
+    fun commit(click: TitleListClick, dismiss: () -> Unit) = click.commit(dismiss, action)
+    override fun invoke() { accept()?.let { commit(it, {}) } }
 }

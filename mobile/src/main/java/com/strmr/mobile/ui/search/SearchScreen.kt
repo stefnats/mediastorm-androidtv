@@ -1,5 +1,8 @@
 package com.strmr.mobile.ui.search
 
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Job
+import com.strmr.tv.library.ProfileDataContext
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -77,6 +80,8 @@ fun SearchScreen(asPage: Boolean) {
 
 @Composable
 private fun SearchContent(modifier: Modifier) {
+    val menuContext = remember { ProfileDataContext.current }
+    val menuScope = rememberCoroutineScope()
     var query by rememberSaveable { mutableStateOf("") }
     var scope by rememberSaveable { mutableStateOf(SearchScope.ALL) }
     val state = remember { SearchState() }
@@ -145,7 +150,7 @@ private fun SearchContent(modifier: Modifier) {
                         PersonCell(person) { navigator.push(Route.Person(person)) }
                     } else {
                         PosterCard(
-                            card, Dp.Unspecified, onClick = { open(card) }, onLongClick = { TitleMenu.show(card) },
+                            card, Dp.Unspecified, onClick = { open(card) }, onLongClick = { TitleMenu.show(card, menuContext, requireNotNull(menuScope.coroutineContext[Job])) },
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }

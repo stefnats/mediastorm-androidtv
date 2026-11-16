@@ -1,5 +1,8 @@
 package com.strmr.tv.ui.details
 
+import kotlinx.coroutines.Job
+import androidx.compose.runtime.DisposableEffect
+import com.strmr.tv.library.CustomListOperations
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -77,6 +80,11 @@ fun BoxScope.DetailsHeader(
     onFocusChanged: (Boolean) -> Unit,
 ) {
     val target = model.target
+    val listScope = rememberCoroutineScope()
+    val listOperations = remember(model, model.accessGeneration) {
+        CustomListOperations(model.dataContext, target) { listScope.coroutineContext[Job]?.isActive != false }
+    }
+    DisposableEffect(listOperations) { onDispose { listOperations.close() } }
     val primary = model.primary
     val playFocus = remember { FocusRequester() }
     // The primary action only exists once details have loaded.
@@ -136,7 +144,7 @@ fun BoxScope.DetailsHeader(
             }
             if (DetailsButtons.inRow(DetailsAction.WATCHLIST)) WatchlistButton(model)
             if (DetailsButtons.inRow(DetailsAction.LISTS)) {
-                IconButton(onClick = { CustomListsStore.picking = target }) {
+                IconButton(onClick = { listOperations.begin(key = "picker")?.let { CustomListsStore.openPicking(target, it) } }) {
                     Icon(AppIcons.PlaylistAdd, contentDescription = "Manage Lists")
                 }
             }

@@ -1,5 +1,8 @@
 package com.strmr.tv.ui.home
 
+import kotlinx.coroutines.Job
+import com.strmr.tv.library.ProfileDataContext
+import com.strmr.tv.library.TitleMenuSelection
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.animateDpAsState
@@ -111,7 +114,8 @@ private fun HomePage(store: HomeStore, memory: HomeFocusMemory, tabsFocused: () 
     var hero by memory::hero
     val firstCard = remember { FocusRequester() }
     var focusedOnce by memory::focusedOnce
-    var menuFor by remember { mutableStateOf<Pair<HomeShelf, HomeCard>?>(null) }
+    val menuContext = remember { ProfileDataContext.current }
+    var menuFor by remember { mutableStateOf<TitleMenuSelection?>(null) }
     var menuError by remember { mutableStateOf<String?>(null) }
     com.strmr.tv.ui.TasteSetupHomeOffer(visible = !navigator.isCovered && menuFor == null && menuError == null)
     /** Bumped after a title action reloads the rows: focus returns to the rows if the focused card left. */
@@ -157,7 +161,12 @@ private fun HomePage(store: HomeStore, memory: HomeFocusMemory, tabsFocused: () 
         if (!tabsFocused()) runCatching { if (hasSlides) carouselFocus.requestFocus() else firstCard.requestFocus() }
     }
     val onExplore: (ExploreCard) -> Unit = { navigator.openList(it.list, store.settings?.viewQuery) }
-    val onMenu: (HomeShelf, HomeCard) -> Unit = { shelf, card -> menuFor = shelf to card }
+    val onMenu: (HomeShelf, HomeCard) -> Unit = { shelf, card ->
+        if (menuContext == ProfileDataContext.current) {
+            menuFor?.close()
+            menuFor = TitleMenuSelection(card, menuContext, requireNotNull(scope.coroutineContext[Job]), shelf.list == BrowseList.ContinueWatching)
+        }
+    }
 
     val rows: @Composable (List<HomeSlot>, Modifier, (HeroContent) -> Unit, RowsHeader?) -> Unit = { slots, modifier, onHero, header ->
         if (!HomeStatus(store, modifier)) {
@@ -194,8 +203,10 @@ private fun HomePage(store: HomeStore, memory: HomeFocusMemory, tabsFocused: () 
         store.reloadWatchlistRow()
         refocus++
     }
-    menuFor?.let { (shelf, card) ->
-        TitleMenu(card, scope, continueWatching = shelf.list == BrowseList.ContinueWatching, onError = { menuError = it }) { menuFor = null }
+    menuFor?.let { selection ->
+        TitleMenu(selection, scope, onError = { if (menuFor === selection && selection.isCurrent) menuError = it }) {
+            if (menuFor === selection) { selection.close(); menuFor = null }
+        }
     }
     menuError?.let { MessageDialog("Couldn't Update", it) { menuError = null } }
 }

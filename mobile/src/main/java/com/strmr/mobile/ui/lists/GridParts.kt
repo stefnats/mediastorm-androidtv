@@ -1,5 +1,6 @@
 package com.strmr.mobile.ui.lists
 
+import kotlinx.coroutines.Job
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,11 +42,12 @@ fun LazyGridScope.fullWidth(key: Any, content: @Composable () -> Unit) {
 }
 
 /** A grid of title cards, each opening with [open] and showing the title menu on long press. */
-fun LazyGridScope.posterCards(cards: List<HomeCard>, open: (HomeCard) -> Unit) {
+fun LazyGridScope.posterCards(cards: List<HomeCard>, open: (HomeCard) -> Unit, expectedContext: Long, parent: Job) {
+    val menuContext = expectedContext
     items(cards.size, key = { cards[it].id }, contentType = { "poster" }) { i ->
         val card = cards[i]
         PosterCard(
-            card, Dp.Unspecified, onClick = { open(card) }, onLongClick = { TitleMenu.show(card) },
+            card, Dp.Unspecified, onClick = { open(card) }, onLongClick = { TitleMenu.show(card, menuContext, parent) },
             modifier = Modifier.fillMaxWidth(),
         )
     }

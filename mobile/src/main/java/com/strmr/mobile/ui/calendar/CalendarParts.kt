@@ -1,5 +1,9 @@
 package com.strmr.mobile.ui.calendar
 
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Job
+import androidx.compose.runtime.remember
+import com.strmr.tv.library.ProfileDataContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -91,8 +95,10 @@ fun DayStrip(days: List<CalendarDay>, selected: String?, onDay: (String) -> Unit
 /** One release: its poster, the time and source, the title, the episode and a summary. */
 @Composable
 fun CalendarRow(item: CalendarItem, onOpen: () -> Unit) {
+    val menuContext = remember { ProfileDataContext.current }
+    val menuScope = rememberCoroutineScope()
     Row(
-        Modifier.fillMaxWidth().cardClicks(onOpen) { TitleMenu.show(card(item)) }.padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().cardClicks(onOpen) { TitleMenu.show(card(item), menuContext, requireNotNull(menuScope.coroutineContext[Job])) }.padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(Modifier.size(64.dp, 96.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {

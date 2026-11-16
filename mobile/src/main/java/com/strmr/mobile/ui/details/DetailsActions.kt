@@ -1,5 +1,8 @@
 package com.strmr.mobile.ui.details
 
+import kotlinx.coroutines.Job
+import androidx.compose.runtime.DisposableEffect
+import com.strmr.tv.library.CustomListOperations
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -95,6 +98,11 @@ fun PrimaryActions(state: DetailsPageState) {
 fun SecondaryActions(state: DetailsPageState, trailer: TrailerController, extras: DetailsActionContext) {
     val model = state.model
     val target = model.target
+    val listScope = rememberCoroutineScope()
+    val listOperations = remember(model, model.accessGeneration) {
+        CustomListOperations(model.dataContext, target) { listScope.coroutineContext[Job]?.isActive != false }
+    }
+    DisposableEffect(listOperations) { onDispose { listOperations.close() } }
     val scope = rememberCoroutineScope()
     var watchlistBusy by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Top) {
@@ -117,7 +125,7 @@ fun SecondaryActions(state: DetailsPageState, trailer: TrailerController, extras
                 }
             }
         }
-        DetailsActionItem("Lists", Icons.AutoMirrored.Outlined.PlaylistAdd) { CustomListsStore.picking = target }
+        DetailsActionItem("Lists", Icons.AutoMirrored.Outlined.PlaylistAdd) { listOperations.begin(key = "picker")?.let { CustomListsStore.openPicking(target, it) } }
         if (target.isMovie) {
             val watched = model.movieWatched == true
             DetailsActionItem(if (watched) "Watched" else "Unwatched", if (watched) AppIcons.WatchedAll else AppIcons.WatchedNone) {

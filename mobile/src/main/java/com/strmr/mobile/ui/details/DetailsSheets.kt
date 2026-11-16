@@ -1,5 +1,9 @@
 package com.strmr.mobile.ui.details
 
+import kotlinx.coroutines.Job
+import androidx.compose.runtime.DisposableEffect
+import com.strmr.tv.library.TitleListAction
+import com.strmr.tv.library.TitleListOrigin
 import com.strmr.tv.app.AppSession
 import com.strmr.tv.ui.reminders.ReminderTarget
 import com.strmr.tv.ui.reminders.reminderChoices
@@ -63,10 +67,12 @@ fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: Corout
     val reminderProfile by AppSession.profile.collectAsState()
     val model = state.model
     val target = model.target
+    val listOrigin = remember(model, state) { TitleListOrigin(target, model.dataContext, requireNotNull(scope.coroutineContext[Job])) }
+    DisposableEffect(listOrigin) { onDispose { listOrigin.close() } }
     val rate = com.strmr.tv.ui.rememberRatingAction(target)
     var inContinueWatching by remember { mutableStateOf(false) }
-    LaunchedEffect(target.titleId) {
-        SetAsideStore.refresh()
+    LaunchedEffect(listOrigin) {
+        SetAsideStore.refresh(listOrigin.context)
         inContinueWatching = runCatching { ApiClient.continueWatching() }.getOrNull().orEmpty().any { it.isTitle(target) }
     }
     val actions = buildList {
@@ -81,16 +87,16 @@ fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: Corout
             add(SheetAction("Versions", Icons.Outlined.Storage) { state.versionsFor = EpisodeTarget(state.activeEpisode) })
         }
         DetailsExtras.providers.forEach { addAll(it.moreActions(extras)) }
-        add(SheetAction("Add to List…", Icons.AutoMirrored.Outlined.PlaylistAdd) { CustomListsStore.picking = target })
+        add(SheetAction("Add to List…", Icons.AutoMirrored.Outlined.PlaylistAdd, action = TitleListAction(listOrigin, scope) { CustomListsStore.openPicking(target, it) }))
         if (!target.isMovie && model.seasons.isNotEmpty()) add(SheetAction("Watch State…", Icons.Outlined.Checklist) { state.watchState = true })
         if (inContinueWatching) {
-            add(SheetAction("Set Aside", Icons.Outlined.PauseCircle) { scope.launch { TitleActions.setAside(target) } })
+            add(SheetAction("Set Aside", Icons.Outlined.PauseCircle, action = TitleListAction(listOrigin, scope) { TitleActions.setAside(target, it) }))
             add(SheetAction("Remove from Continue Watching", Icons.Outlined.RemoveCircleOutline) {
                 scope.launch { TitleActions.hideFromContinueWatching(target) }
             })
         }
         if (SetAsideStore.contains(target)) {
-            add(SheetAction("Remove from Set Aside", Icons.Outlined.PauseCircle) { scope.launch { TitleActions.removeFromSetAside(target) } })
+            add(SheetAction("Remove from Set Aside", Icons.Outlined.PauseCircle, action = TitleListAction(listOrigin, scope) { TitleActions.removeFromSetAside(target, it) }))
         }
         if (model.offersOrderings) {
             add(SheetAction("Episode Order: ${model.currentOrdering?.name ?: "Default"}…", Icons.Outlined.FormatListNumbered) { state.episodeOrder = true })
@@ -103,7 +109,7 @@ fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: Corout
             })
         }
     }
-    ActionSheet({ state.more = false }, header = { SheetHeader(target.name, model.metadataLine, target.posterUrl) }, actions = actions)
+    ActionSheet({ listOrigin.dismiss { state.more = false } }, header = { SheetHeader(target.name, model.metadataLine, target.posterUrl) }, actions = actions)
 }
 
 /**

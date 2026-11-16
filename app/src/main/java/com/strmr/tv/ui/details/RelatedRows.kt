@@ -1,5 +1,8 @@
 package com.strmr.tv.ui.details
 
+import kotlinx.coroutines.Job
+import com.strmr.tv.library.ProfileDataContext
+import com.strmr.tv.library.TitleMenuSelection
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -68,13 +71,16 @@ fun RelatedRows(model: DetailsModel, modifier: Modifier = Modifier) {
     val opens = profile?.isKidsProfile != true
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    var menuFor by remember { mutableStateOf<HomeCard?>(null) }
+    val menuContext = model.dataContext
+    var menuFor by remember { mutableStateOf<TitleMenuSelection?>(null) }
     var menuError by remember { mutableStateOf<String?>(null) }
 
     fun LazyListScope.posters(titles: List<Title>) = items(titles, key = { it.id }) { title ->
         val card = HomeCard.from(title)
         Box(Modifier.width(CARD_WIDTH)) {
-            PosterCard(card, onClick = { if (opens) card.target?.let(navigator::openDetails) }, onLongClick = { if (opens) menuFor = card })
+            PosterCard(card, onClick = { if (opens) card.target?.let(navigator::openDetails) }, onLongClick = { if (opens && menuContext == ProfileDataContext.current) {
+                menuFor?.close(); menuFor = TitleMenuSelection(card, menuContext, requireNotNull(scope.coroutineContext[Job]))
+            } })
         }
     }
 
@@ -90,7 +96,9 @@ fun RelatedRows(model: DetailsModel, modifier: Modifier = Modifier) {
             }
         }
     }
-    menuFor?.let { card -> TitleMenu(card, scope, onError = { menuError = it }) { menuFor = null } }
+    menuFor?.let { selection -> TitleMenu(selection, scope, onError = {
+        if (menuFor === selection && selection.isCurrent) menuError = it
+    }) { if (menuFor === selection) { selection.close(); menuFor = null } } }
     menuError?.let { MessageDialog("Couldn't Update", it) { menuError = null } }
 }
 

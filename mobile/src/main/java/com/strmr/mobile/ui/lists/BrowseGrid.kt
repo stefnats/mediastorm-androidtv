@@ -1,5 +1,7 @@
 package com.strmr.mobile.ui.lists
 
+import kotlinx.coroutines.Job
+import com.strmr.tv.library.ProfileDataContext
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -109,6 +111,7 @@ fun BrowseGridPage(list: BrowseList, query: Map<String, String>, showBack: Boole
 
 @Composable
 private fun BrowseGrid(model: ListGridModel, gridState: LazyGridState, retry: () -> Unit) {
+    val menuScope = rememberCoroutineScope()
     val list = model.list
     val cards = model.cards
     val total = model.total
@@ -135,7 +138,7 @@ private fun BrowseGrid(model: ListGridModel, gridState: LazyGridState, retry: ()
             }
         }
         items(cards.size, key = { cards[it].id }, contentType = { "poster" }) { i ->
-            GridCard(cards[i], removable = model.manageable, open = open, remove = model::remove)
+            GridCard(cards[i], removable = model.manageable, open = open, remove = model::remove, parent = requireNotNull(menuScope.coroutineContext[Job]))
         }
         when {
             cards.isNotEmpty() && model.loadingMore -> fullWidth("more") { GridSpinner(top = 8.dp) }
@@ -163,12 +166,13 @@ private fun BrowseGrid(model: ListGridModel, gridState: LazyGridState, retry: ()
  * Remove from List first.
  */
 @Composable
-private fun GridCard(card: HomeCard, removable: Boolean, open: (HomeCard) -> Unit, remove: (HomeCard) -> Unit) {
+private fun GridCard(card: HomeCard, removable: Boolean, open: (HomeCard) -> Unit, remove: (HomeCard) -> Unit, parent: Job) {
+    val menuContext = remember { ProfileDataContext.current }
     var menu by remember { mutableStateOf(false) }
     Box {
         PosterCard(
             card, Dp.Unspecified, onClick = { open(card) },
-            onLongClick = { if (removable) menu = true else TitleMenu.show(card) },
+            onLongClick = { if (removable) menu = true else TitleMenu.show(card, menuContext, parent) },
             modifier = Modifier.fillMaxWidth(),
         )
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -180,7 +184,7 @@ private fun GridCard(card: HomeCard, removable: Boolean, open: (HomeCard) -> Uni
             DropdownMenuItem(
                 text = { Text("More Actions…") },
                 leadingIcon = { Icon(Icons.Filled.MoreHoriz, null) },
-                onClick = { menu = false; TitleMenu.show(card) },
+                onClick = { menu = false; TitleMenu.show(card, menuContext, parent) },
             )
         }
     }

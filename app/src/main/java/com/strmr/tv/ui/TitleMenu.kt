@@ -1,5 +1,8 @@
 package com.strmr.tv.ui
 
+import androidx.compose.runtime.DisposableEffect
+import com.strmr.tv.library.TitleListAction
+import com.strmr.tv.library.TitleMenuSelection
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -29,28 +32,31 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun TitleMenu(
-    card: HomeCard,
+    selection: TitleMenuSelection,
     scope: CoroutineScope,
     extra: List<DialogChoice> = emptyList(),
-    continueWatching: Boolean = false,
     onError: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val target = card.target ?: return
+    val card = selection.card
+    val origin = selection.origin
+    val target = origin.target ?: return
+    val continueWatching = selection.continueWatching
+    DisposableEffect(selection) { onDispose { selection.close() } }
     val rate = rememberRatingAction(target)
     val sourceHint = rememberSourceHint(com.strmr.tv.ui.rememberTitleSourceEvidence(card))
     val navigator = LocalNavigator.current
     val inWatchlist = WatchlistStore.contains(target)
     var watched by remember { mutableStateOf<Boolean?>(null) }
     val episode = card.episode
-    LaunchedEffect(target.titleId) {
+    LaunchedEffect(selection) {
         // Continue Watching's next episode is unwatched by definition.
         watched = when {
             target.isMovie -> runCatching { ApiClient.isMovieWatched(target) }.getOrNull()
             episode != null && !continueWatching -> runCatching { ApiClient.isEpisodeWatched(episode, target) }.getOrNull()
             else -> null
         }
-        SetAsideStore.refresh()
+        SetAsideStore.refresh(origin.context)
     }
     fun act(action: suspend () -> Unit) = scope.launch { action() }
 
@@ -61,10 +67,10 @@ fun TitleMenu(
         }
         if (continueWatching) {
             add(DialogChoice("Hide from Continue Watching") { act { TitleActions.hideFromContinueWatching(target) } })
-            add(DialogChoice("Set Aside") { act { TitleActions.setAside(target) } })
+            add(DialogChoice("Set Aside", TitleListAction(origin, scope) { TitleActions.setAside(target, it) }))
         }
-        if (SetAsideStore.contains(target)) add(DialogChoice("Remove from Set Aside") { act { TitleActions.removeFromSetAside(target) } })
-        add(DialogChoice("Manage Lists…") { CustomListsStore.picking = target })
+        if (SetAsideStore.contains(target)) add(DialogChoice("Remove from Set Aside", TitleListAction(origin, scope) { TitleActions.removeFromSetAside(target, it) }))
+        add(DialogChoice("Manage Lists…", TitleListAction(origin, scope) { CustomListsStore.openPicking(target, it) }))
         add(DialogChoice(if (inWatchlist) "Remove from Watchlist" else "Add to Watchlist") {
             scope.launch { runCatching { WatchlistStore.toggle(target) }.onFailure { onError(it.message ?: "Unknown error") } }
         })
@@ -89,5 +95,11 @@ fun TitleMenu(
         addAll(extra)
         add(DialogChoice("Cancel") {})
     }
-    ChoiceDialog(title = card.title, message = sourceHint?.description(), choices = choices, onDismiss = onDismiss)
+    val bound = choices.map { choice -> DialogChoice(choice.label) {
+        val action = choice.action
+        if (action is TitleListAction) action.accept()?.let { action.commit(it, onDismiss) }
+        else if (origin.isCurrent) { onDismiss(); action() }
+    } }
+    ChoiceDialog(title = card.title, message = sourceHint?.description(), choices = bound,
+        dismissOnChoice = false, onDismiss = { if (origin.isCurrent) { selection.close(); onDismiss() } })
 }

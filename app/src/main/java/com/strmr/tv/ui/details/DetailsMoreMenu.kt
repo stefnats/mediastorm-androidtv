@@ -1,5 +1,7 @@
 package com.strmr.tv.ui.details
 
+import com.strmr.tv.library.TitleListAction
+import com.strmr.tv.library.TitleListOrigin
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +41,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun DetailsMoreMenu(
     target: DetailsTarget,
+    listOrigin: TitleListOrigin,
     scope: CoroutineScope,
     moved: List<DialogChoice>,
     /** Series with alternate orderings: "Episode Order: <current>", opening its picker. */
@@ -51,8 +54,8 @@ fun DetailsMoreMenu(
 ) {
     val rate = com.strmr.tv.ui.rememberRatingAction(target)
     var inContinueWatching by remember { mutableStateOf(false) }
-    LaunchedEffect(target.titleId) {
-        SetAsideStore.refresh()
+    LaunchedEffect(listOrigin) {
+        SetAsideStore.refresh(listOrigin.context)
         inContinueWatching = runCatching { ApiClient.continueWatching() }.getOrNull().orEmpty().any { it.isTitle(target) }
     }
     val choices = buildList {
@@ -61,10 +64,10 @@ fun DetailsMoreMenu(
         sourcePreference?.let(::add)
         reminder?.let(::add)
         if (inContinueWatching) {
-            add(DialogChoice("Set Aside") { scope.launch { TitleActions.setAside(target) } })
+            add(DialogChoice("Set Aside", TitleListAction(listOrigin, scope) { TitleActions.setAside(target, it) }))
             add(DialogChoice("Remove from Continue Watching") { scope.launch { TitleActions.hideFromContinueWatching(target) } })
         }
-        if (SetAsideStore.contains(target)) add(DialogChoice("Remove from Set Aside") { scope.launch { TitleActions.removeFromSetAside(target) } })
+        if (SetAsideStore.contains(target)) add(DialogChoice("Remove from Set Aside", TitleListAction(listOrigin, scope) { TitleActions.removeFromSetAside(target, it) }))
         if (HiddenItemsStore.isHidden(target)) {
             add(DialogChoice("Unhide") { scope.launch { TitleActions.unhide(target) } })
         } else {
@@ -76,11 +79,15 @@ fun DetailsMoreMenu(
     val first = remember { FocusRequester() }
     // The rows change once Continue Watching is read; focus the first one each time.
     LaunchedEffect(choices.map { it.label }) { withFrameNanos { }; runCatching { first.requestFocus() } }
-    SidePanelDialog("More Options", target.name, onDismiss) {
+    SidePanelDialog("More Options", target.name, { listOrigin.dismiss(onDismiss) }) {
         itemsIndexed(choices) { index, choice ->
             ListItem(
                 selected = false,
-                onClick = { onDismiss(); choice.action() },
+                onClick = {
+                    val action = choice.action
+                    if (action is TitleListAction) action.accept()?.let { action.commit(it) { listOrigin.dismiss(onDismiss) } }
+                    else if (listOrigin.dismiss(onDismiss)) action()
+                },
                 headlineContent = { Text(choice.label) },
                 modifier = if (index == 0) Modifier.focusRequester(first) else Modifier,
             )
@@ -95,6 +102,7 @@ fun DetailsMoreMenu(
 @Composable
 fun movedActions(
     model: DetailsModel,
+    listOrigin: TitleListOrigin,
     trailer: TrailerController,
     prequeueTracks: PrequeueTracks,
     warm: WarmPrequeue?,
@@ -125,7 +133,7 @@ fun movedActions(
                 scope.launch { runCatching { WatchlistStore.toggle(target, model.serverInWatchlist) } }
             })
         }
-        if (DetailsAction.LISTS in more) add(DialogChoice("Manage Lists…") { CustomListsStore.picking = target })
+        if (DetailsAction.LISTS in more) add(DialogChoice("Manage Lists…", TitleListAction(listOrigin, scope) { CustomListsStore.openPicking(target, it) }))
         if (DetailsAction.WATCHED in more) {
             if (target.isMovie) {
                 add(DialogChoice(if (model.movieWatched == true) "Mark as Unwatched" else "Mark as Watched") {

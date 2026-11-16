@@ -24,8 +24,16 @@ object TitleActions {
         private set
 
     /** Runs `action`, then the success toast; a failure shows `failure` and is logged. True on success. */
-    private suspend fun run(name: String, target: DetailsTarget, success: String, failure: String, action: suspend () -> Unit): Boolean =
-        try {
+    private suspend fun run(
+        name: String,
+        target: DetailsTarget,
+        success: String,
+        failure: String,
+        operation: CustomListOperation? = null,
+        action: suspend () -> Unit,
+    ): Boolean {
+        if (operation != null) return runOwned(operation, success, failure, action)
+        return try {
             action()
             changes++
             AppLog.i("TitleActions", "$name ${target.titleId} (${target.name})")
@@ -38,12 +46,34 @@ object TitleActions {
             AppToast.show(failure)
             false
         }
+    }
 
-    suspend fun setAside(target: DetailsTarget) =
-        run("set-aside", target, "Added to Set Aside", "Failed to add to Set Aside") { SetAsideStore.add(target) }
+    /** Actual owned-action publication adapter; legacy non-list actions keep their existing paths. */
+    internal suspend fun runOwned(
+        operation: CustomListOperation,
+        success: String,
+        failure: String,
+        action: suspend () -> Unit,
+    ): Boolean = try {
+        operation.check()
+        action()
+        operation.publish { changes++; AppToast.show(success) }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        operation.publish { AppToast.show(failure) }
+        false
+    }
 
-    suspend fun removeFromSetAside(target: DetailsTarget) =
-        run("remove-set-aside", target, "Removed from Set Aside", "Failed to remove from Set Aside") { SetAsideStore.remove(target) }
+    suspend fun setAside(target: DetailsTarget, operation: CustomListOperation) =
+        run("set-aside", target, "Added to Set Aside", "Failed to add to Set Aside", operation) {
+            SetAsideStore.add(target, operation)
+        }
+
+    suspend fun removeFromSetAside(target: DetailsTarget, operation: CustomListOperation) =
+        run("remove-set-aside", target, "Removed from Set Aside", "Failed to remove from Set Aside", operation) {
+            SetAsideStore.remove(target, operation)
+        }
 
     suspend fun hideFromContinueWatching(target: DetailsTarget) =
         run("hide-continue-watching", target, "Removed from Continue Watching", "Failed to remove from Continue Watching") {

@@ -1,5 +1,8 @@
 package com.strmr.mobile.ui.person
 
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Job
+import com.strmr.tv.library.ProfileDataContext
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -52,6 +55,8 @@ import com.strmr.tv.home.HomeCard
  */
 @Composable
 fun PersonScreen(person: PersonRef) {
+    val menuContext = remember { ProfileDataContext.current }
+    val menuScope = rememberCoroutineScope()
     var details by remember { mutableStateOf<PersonDetails?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(person.id) {
@@ -88,7 +93,7 @@ fun PersonScreen(person: PersonRef) {
                 }
             }
             items(titles, key = { it.id }) { card ->
-                PosterCard(card, width = Dp.Unspecified, onClick = { open(card) }, onLongClick = { TitleMenu.show(card) },
+                PosterCard(card, width = Dp.Unspecified, onClick = { open(card) }, onLongClick = { TitleMenu.show(card, menuContext, requireNotNull(menuScope.coroutineContext[Job])) },
                            modifier = Modifier.fillMaxWidth())
             }
         }

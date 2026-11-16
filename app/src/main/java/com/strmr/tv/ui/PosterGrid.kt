@@ -1,5 +1,8 @@
 package com.strmr.tv.ui
 
+import kotlinx.coroutines.Job
+import com.strmr.tv.library.ProfileDataContext
+import com.strmr.tv.library.TitleMenuSelection
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -73,7 +76,8 @@ fun PosterGrid(
 ) {
     val navigator = LocalNavigator.current
     val openLibrary = rememberLibraryOpener()
-    var menuFor by remember { mutableStateOf<HomeCard?>(null) }
+    val menuContext = remember { ProfileDataContext.current }
+    var menuFor by remember { mutableStateOf<TitleMenuSelection?>(null) }
     var menuError by remember { mutableStateOf<String?>(null) }
     // The grid's scope, not the menu's: the menu is gone before its action's request finishes.
     val scope = rememberCoroutineScope()
@@ -118,8 +122,11 @@ fun PosterGrid(
                 },
                 onLongClick = {
                     if (card.target != null) {
-                        menuFor = card
-                        menuCard = card.id to index
+                        if (menuContext == ProfileDataContext.current) {
+                            menuFor?.close()
+                            menuFor = TitleMenuSelection(card, menuContext, requireNotNull(scope.coroutineContext[Job]), continueWatching)
+                            menuCard = card.id to index
+                        }
                     }
                 },
                 modifier = (if (index == 0 && first != null) Modifier.focusRequester(first) else Modifier)
@@ -130,7 +137,9 @@ fun PosterGrid(
         }
         footer()
     }
-    menuFor?.let { card -> TitleMenu(card, scope, extraActions(card), continueWatching, onError = { menuError = it }) { menuFor = null } }
+    menuFor?.let { selection -> TitleMenu(selection, scope, extraActions(selection.card), onError = {
+        if (menuFor === selection && selection.isCurrent) menuError = it
+    }) { if (menuFor === selection) { selection.close(); menuFor = null } } }
     menuError?.let { MessageDialog("Couldn't Update", it) { menuError = null } }
 }
 
