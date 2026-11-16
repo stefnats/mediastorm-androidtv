@@ -37,6 +37,7 @@ import com.strmr.mobile.ui.shell.LocalNavigator
 import com.strmr.mobile.ui.shell.PageScaffold
 import com.strmr.tv.live.Recording
 import com.strmr.tv.live.RecordingRules
+import com.strmr.tv.player.RecordingPartCursorStore
 import com.strmr.tv.player.PlaybackCoordinator
 import com.strmr.tv.ui.recordings.RecordingsState
 import kotlinx.coroutines.delay
@@ -121,6 +122,9 @@ private fun Detail(r: Recording, state: RecordingsState, confirmations: Recordin
             Text("Captured parts",style=MaterialTheme.typography.titleMedium)
             if(capture.parts.isEmpty())Text("No captured parts yet.",color=MaterialTheme.colorScheme.onSurfaceVariant)
             Text("${capture.gaps.size} recorded capture gaps · ${capture.sourceChanges ?: 0} source changes",color=MaterialTheme.colorScheme.onSurfaceVariant)
+            if(RecordingCaptureRules.queueParts(r)!=null)Text("Completed parts play in order with a new player for each part. Gaps are not filled.",color=MaterialTheme.colorScheme.onSurfaceVariant)
+            RecordingPartCursorStore.positionLabel(r,state.context)?.let {Text(it,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+            capture.gaps.forEach {gap->Text(RecordingCaptureRules.gapLabel(gap),color=MaterialTheme.colorScheme.onSurfaceVariant)}
             capture.parts.forEach {part -> key(part.index) {
                 Text("Part ${part.index}",fontWeight=FontWeight.SemiBold)
                 Fact(RecordingCaptureRules.partDataLabel(part,r),RecordingCaptureRules.partDataSize(part,r))

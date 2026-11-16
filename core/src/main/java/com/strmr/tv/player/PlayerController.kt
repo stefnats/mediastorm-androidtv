@@ -45,7 +45,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 @OptIn(UnstableApi::class)
 class PlayerController(context: Context, val session: PlayerSession, private val onVideoFormat: (Format) -> Unit) {
     val request = session.request
-    private val ownership=requireNotNull(session.ownership) {"Playback context is unavailable"}.also {it.requireCurrent()}
+    val nextRecordingPart get() = session.recordingPart?.next
+    fun cancelRecordingParts() {session.recordingPart?.cancel()}
+    private val ownership=requireNotNull(session.ownership) {"Playback context is unavailable"}.also {it.requireCurrent();session.recordingPart?.claim()}
     val dataContext = ownership.epoch
     private var released=false
     val profileId = ownership.profileId
@@ -187,6 +189,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         if(released || dataContext!=ProfileDataContext.current || vodDenied.value!=null)return
         attempt?.let {com.strmr.tv.api.VodDenialEvents.reject(it,denial)}
         startup.end(StartupOutcome.FAILED)
+        cancelRecordingParts()
         vodDenied.value=denial;autoSwitch.cancel();upNext?.cancel();closeReleaseReports();progress.discardFuture()
         recordingHls?.release();catchup?.release();liveRetune?.release()
         thumbnails?.cancel();online.cancel();external.cancel();switchTo.value=null;advanceTo.value=null
@@ -220,6 +223,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
                     live.ended()
                     return
                 }
+                session.recordingPart?.let {part -> part.ended(player.currentPosition,player.playerError!=null || error.value!=null);ended.value=true;return }
                 val genuine = EpisodeAdvancePolicy.genuineEnd(player.currentPosition, player.duration, player.playerError != null)
                 if (genuine) report(ended = true)
                 if (upNext?.ended(player.currentPosition, player.duration, player.playerError != null) == true) return
@@ -270,7 +274,8 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         }
 
         override fun onPlayerError(e: PlaybackException) {
-            if(!session.canOpenPlayer()) {startup.end(StartupOutcome.OWNER_LOST);progress.discardFuture();player.stop();ended.value=true;return}
+            cancelRecordingParts()
+            if(!session.canOpenPlayer()) {cancelRecordingParts();startup.end(StartupOutcome.OWNER_LOST);progress.discardFuture();player.stop();ended.value=true;return}
             if(released)return
             mediaAccess.failure(e)?.let {denyVod(it.reason,it.attempt);return}
             // A passthrough track the output refused: PassthroughGuard now offers PCM, so prepare again once.
@@ -362,16 +367,17 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     /** Retire the entire old scope before queued helpers can read a replacement identity. */
     private val contextWatch=scope.launch {
         ProfileDataContext.changes.collect {
-            if(!session.canOpenPlayer()) {startup.end(StartupOutcome.OWNER_LOST);progress.discardFuture();player.stop();ended.value=true;scope.cancel()}
+            if(!session.canOpenPlayer()) {cancelRecordingParts();startup.end(StartupOutcome.OWNER_LOST);progress.discardFuture();player.stop();ended.value=true;scope.cancel()}
         }
     }
 
     /** Position for the chrome, skip segments and up next. */
     private val clock: Job = scope.launch {
         while (isActive) {
-            if(!session.playbackAllowed()) {startup.end(StartupOutcome.OWNER_LOST);progress.discardFuture();player.stop();ended.value=true;break}
+            if(!session.playbackAllowed() || session.recordingPart?.wasReplaced()==true) {cancelRecordingParts();startup.end(StartupOutcome.OWNER_LOST);progress.discardFuture();player.stop();ended.value=true;break}
             if (postPlay.value != null) { delay(250); continue }
             position.value = player.currentPosition
+            session.recordingPart?.tick(position.value)
             duration.value = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
             if (timeshift.value && catchup?.inArchive?.value != true) behindLive.value = Timeshift.behindLiveMs(player)
             catchup?.tick()
@@ -459,6 +465,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     fun release(): Job? {
         startup.end(StartupOutcome.RELEASED)
         released=true
+        val partPosition=player.currentPosition
         if (!ended.value && advanceTo.value == null && postPlay.value == null) report(paused = true, closing = true)
         closeReleaseReports()
         clock.cancel()
@@ -477,6 +484,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         player.removeListener(listener)
         player.removeListener(stallLog)
         player.release()
+        session.recordingPart?.release(partPosition)
         // Let the last report finish on its own.
         MainScope().launch { delay(5_000); scope.cancel() }
         return progress.lastReport

@@ -79,6 +79,8 @@ data class PlayerSession(
     val ownership:PlaybackSessionContext?=null,
     /** Local monotonic startup observation; never serialized or used to permit playback. */
     internal val startupTiming: PlaybackStartupAttempt? = null,
+    /** Original closed-part queue actor, never serialized as media or account authority. */
+    val recordingPart: RecordingPartPlayback? = null,
 )
 
 /** A resolved stream: its path, the server's track choice and what online subtitles match against. */

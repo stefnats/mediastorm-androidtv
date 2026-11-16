@@ -5,6 +5,7 @@ import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
+import androidx.activity.addCallback
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -24,11 +25,15 @@ import androidx.media3.common.util.UnstableApi
 import com.strmr.mobile.player.ui.PlayerScreen
 import com.strmr.mobile.player.ui.PostPlayScreen
 import com.strmr.mobile.ui.theme.MediaStormTheme
+import kotlinx.coroutines.CancellationException
+import com.strmr.tv.api.vodDenial
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.playbackSettings
 import com.strmr.tv.app.AppLog
 import com.strmr.tv.player.PlaybackCoordinator
+import com.strmr.tv.player.RecordingPartHandoff
 import com.strmr.tv.player.PlayerController
+import com.strmr.tv.player.recordingPartReady
 import com.strmr.tv.player.canOpenPlayer
 import com.strmr.tv.player.SubtitleStyleStore
 import kotlinx.coroutines.flow.combine
@@ -48,6 +53,7 @@ import kotlinx.coroutines.launch
 @OptIn(UnstableApi::class)
 class MobilePlayerActivity : ComponentActivity() {
     private var controller: PlayerController? = null
+    private var recordingNext:RecordingPartHandoff?=null
     private var pip: PictureInPicture? = null
     private val inPip = mutableStateOf(false)
     /** Another title was played over this one: it starts once this player has let go. */
@@ -62,7 +68,7 @@ class MobilePlayerActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         val session = PlaybackCoordinator.pending
-        if (session == null || !session.canOpenPlayer()) {
+        if (session == null || !session.canOpenPlayer() || !session.recordingPartReady()) {
             finish()
             return
         }
@@ -77,6 +83,7 @@ class MobilePlayerActivity : ComponentActivity() {
         PlaybackCoordinator.playerOpen = true
         val c = PlayerController(this, session) { }
         controller = c
+        onBackPressedDispatcher.addCallback(this) {c.cancelRecordingParts();finish()}
         PlayerMediaSession.start(this, c)
         val p = PictureInPicture(this, c).also { it.register() }
         pip = p
@@ -94,8 +101,16 @@ class MobilePlayerActivity : ComponentActivity() {
                 val ended by c.ended.collectAsState()
                 val next by c.advanceTo.collectAsState()
                 val switch by c.switchTo.collectAsState()
-                LaunchedEffect(ended) { if (ended) finish() }
-                LaunchedEffect(Unit) { runCatching { SubtitleStyleStore.adopt(ApiClient.playbackSettings().subtitleStyle) } }
+                val partNext = c.nextRecordingPart?.collectAsState()?.value
+                LaunchedEffect(ended,partNext) { if (ended) {recordingNext=partNext;finish()} }
+                LaunchedEffect(Unit) {
+                    try {
+                        val owner=requireNotNull(session.ownership)
+                        val style=ApiClient.playbackSettings(owner.epoch).subtitleStyle
+                        owner.use {SubtitleStyleStore.adopt(style)}
+                    } catch(cancelled:CancellationException) {throw cancelled}
+                    catch(error:Exception) {if(error.vodDenial!=null)c.cancelRecordingParts()}
+                }
                 // Up Next: close this episode (saved as finished) and start the next over its loading art.
                 LaunchedEffect(next) {
                     next?.takeIf {session.canOpenPlayer()}?.let {
@@ -115,7 +130,7 @@ class MobilePlayerActivity : ComponentActivity() {
                     controller = c,
                     inPip = inPip.value,
                     tablet = tablet,
-                    onExit = { finish() },
+                    onExit = { c.cancelRecordingParts();finish() },
                     onPictureInPicture = { p.enter(); Unit }.takeIf { p.supported },
                 )
             }
@@ -125,7 +140,7 @@ class MobilePlayerActivity : ComponentActivity() {
     /** A title played from elsewhere while this one is open (paused behind the app, say): hand over to it. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (PlaybackCoordinator.pending?.canOpenPlayer()==true && controller != null) {
+        if (PlaybackCoordinator.pending?.let {it.canOpenPlayer() && it.recordingPartReady()}==true && controller != null) {
             AppLog.i("Player", "new playback over the open player; restarting")
             relaunch = true
             finish()
@@ -186,6 +201,8 @@ class MobilePlayerActivity : ComponentActivity() {
             PlaybackCoordinator.playerOpen = false
             if (isFinishing) PlaybackCoordinator.playerClosed(saving)
         }
+        recordingNext?.let(PlaybackCoordinator::continueRecordingParts)
+        recordingNext=null
         if (relaunch) {
             relaunch = false
             startActivity(Intent(applicationContext, MobilePlayerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

@@ -41,6 +41,7 @@ class RecordingsState(
     private val access:RecordingsAccess=ApiRecordingsAccess,
     private val log:(Boolean,String)->Unit={warning,text->if(warning)AppLog.w("Recordings",text)else AppLog.i("Recordings",text)},
     private val notify:(String)->Unit={AppToast.show(it)},
+    private val playQueue:(Recording,Long)->Unit={r,expected->PlaybackCoordinator.playRecordingParts(r,expected)},
     private val playback:(Recording,RecordingPart?,Long)->Unit={r,part,expected->if(part==null)PlaybackCoordinator.playRecording(r,expected)else PlaybackCoordinator.playRecordingPart(r,part,expected)},
 ) {
     private var open=true
@@ -57,7 +58,10 @@ class RecordingsState(
         if(!RecordingCaptureRules.playable(r,action.part))return
         playback(r,action.part,context)
     }
-    fun play(r:Recording) {if(isCurrent && busyId==null && recordings.any {it==r} && RecordingRules.canPlay(r))playback(r,null,context)}
+    fun play(r:Recording) {
+        if(!isCurrent || busyId!=null || recordings.none {it==r} || !RecordingRules.canPlay(r))return
+        if(RecordingCaptureRules.queueParts(r)!=null)playQueue(r,context)else playback(r,null,context)
+    }
     var recordings by mutableStateOf<List<Recording>>(emptyList())
         private set
     /** The profile's recording rules, so a rule's airing offers to cancel the whole series. */

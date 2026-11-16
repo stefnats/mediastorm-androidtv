@@ -37,7 +37,7 @@ class RecordingActionsTest {
     @Test fun waitingAfterOneClosedPartOffersFirstPartRatherThanGrowingRecording() {
         val p=com.strmr.tv.live.RecordingPart(1,"2026-11-16T01:00:00Z","2026-11-16T01:02:00Z",1024,"source_ended","recording:r1/parts/1")
         val r=Recording("r1","running",outputPath="part1.ts",capture=com.strmr.tv.live.RecordingCapture(1,"waiting_capacity",true,0,listOf(p),emptyList()))
-        assertEquals("Play first part",RecordingActions.of(r,null).first().label)
+        assertEquals("Play / resume completed parts",RecordingActions.of(r,null).first().label)
         assertEquals("Stop Recording",RecordingActions.of(r,null)[1].label)
     }
     @Test fun activeEmptyPartHasNoPrematurePlayAction() {

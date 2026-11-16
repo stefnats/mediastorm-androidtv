@@ -15,7 +15,10 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.Composable
+import com.strmr.tv.library.ProfileDataContext
+import com.strmr.tv.player.RecordingPartCursorStore
 import androidx.compose.runtime.key
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -67,6 +70,7 @@ fun RecordingDetail(
     plan: RecordingPlanItem? = null,
     onPlayPart:(Recording,RecordingPart)->Unit={_,_->},
 ) {
+    val originalContext=remember {ProfileDataContext.current}
     Column(
         modifier.background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(16.dp)).verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -105,6 +109,9 @@ fun RecordingDetail(
             Text("Captured parts",style=MaterialTheme.typography.titleMedium)
             if(capture.parts.isEmpty())Text("No captured parts yet.",color=Muted)
             Text("${capture.gaps.size} recorded capture gaps · ${capture.sourceChanges ?: 0} source changes",color=Muted)
+            if(RecordingCaptureRules.queueParts(r)!=null)Text("Completed parts play in order with a new player for each part. Gaps are not filled.",color=Muted)
+            RecordingPartCursorStore.positionLabel(r,originalContext)?.let {Text(it,color=Muted)}
+            capture.gaps.forEach {gap->Text(RecordingCaptureRules.gapLabel(gap),color=Muted)}
             capture.parts.forEach {part -> key(part.index) {
                 Text("Part ${part.index} · ${RecordingCaptureRules.partDataLabel(part,r)}: ${RecordingCaptureRules.partDataSize(part,r)}",fontWeight=FontWeight.SemiBold)
                 Text("Capture started ${RecordingRules.dateTime(part.startedAt)}",color=Muted)

@@ -92,7 +92,18 @@ object RecordingCaptureRules {
     fun playable(r:Recording,part:RecordingPart):Boolean = known(r)?.parts?.contains(part)==true && closed(part) && (part.bytes ?: 0)>0 && ownedPart(r,part)
     /** The legacy/default file is the lowest nonempty owned part, including after an empty attempt. */
     fun firstClosed(r:Recording)=known(r)?.parts?.filter {(it.bytes ?: 0)>0 && ownedPart(r,it)}?.minByOrNull {it.index}?.takeIf {playable(r,it)}
+    /** A chosen closed snapshot never skips an unreadable positive-byte closed attempt. */
+    fun queueParts(r:Recording):List<RecordingPart>? {
+        val closedPositive=known(r)?.parts?.filter {it.endedAt!=null && (it.bytes ?: 0)>0} ?: return null
+        if(closedPositive.size !in 1..256 || closedPositive.map {it.index}.distinct().size!=closedPositive.size || closedPositive.any {!playable(r,it)})return null
+        return closedPositive.sortedBy {it.index}.toList()
+    }
+    fun gapLabel(gap:RecordingGap):String {
+        val reason=when(gap.reason) {"source_retry"->"Source retry";"capacity"->"Waiting for capacity";else->"Access changed"}
+        return "Capture gap (wall clock): ${RecordingRules.dateTime(gap.startedAt)} to ${gap.endedAt?.let(RecordingRules::dateTime) ?: "unconfirmed end"} · $reason"
+    }
     fun playLabel(r:Recording)=when {
+        queueParts(r)!=null->"Play / resume completed parts"
         firstClosed(r)?.index?.let {it>1}==true->"Play part ${firstClosed(r)!!.index}"
         known(r)?.parts?.size?.let {it>1}==true || firstClosed(r)!=null && (RecordingRules.canCancel(r) || incomplete(r) || known(r)?.phase=="waiting_capacity")->"Play first part"
         RecordingRules.isRecording(r)->"Play In Progress"

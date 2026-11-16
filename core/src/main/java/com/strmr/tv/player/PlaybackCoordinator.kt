@@ -131,6 +131,7 @@ object PlaybackCoordinator {
         val startedNanos = PlaybackStartupTiming.now()
         if (_resolving.value != null) return
         val ownership=PlaybackSessionContext.capture(expectedContext)
+        RecordingPartQueues.replace(null)
         val timing = PlaybackStartupTiming.begin(ownership, StartupInput.DIRECT_INPUT_SUPPLIED, startedNanos)
         pending = timing.attach(PlayerSession(PlaybackRequest(DetailsTarget("trailer", name, isMovie = true)), url, null, reportsProgress = false,ownership=ownership))
         launchPlayer()
@@ -181,11 +182,35 @@ object PlaybackCoordinator {
         }
         ApiClient.inContext(expectedContext) {
             val owner = PlaybackSessionContext.capture(expectedContext)
+            RecordingPartQueues.replace(null)
             val timing = PlaybackStartupTiming.begin(owner, StartupInput.DIRECT_INPUT_SUPPLIED, startedNanos)
             pending = timing.attach(PlayerSession(request, ApiClient.recordingStreamUrl(recording, title,expectedContext), null, reportsProgress = false,
                                     sourceLabel = StreamInfo.recording(recording.channelName),ownership=owner))
             launchPlayer()
         }
+    }
+
+    fun playRecordingParts(recording:Recording,expectedContext:Long) {
+        if(expectedContext!=ProfileDataContext.current || _resolving.value!=null)return
+        val snapshot=RecordingPartSnapshot.capture(recording) ?: return
+        val owner=PlaybackSessionContext.capture(expectedContext)
+        val queue=RecordingPartQueue(owner,snapshot)
+        val saved=RecordingPartCursorStore.read(owner,snapshot)
+        RecordingPartQueues.replace(queue)
+        queue.start(saved)?.let(::launchRecordingPart)
+    }
+    fun continueRecordingParts(handoff:RecordingPartHandoff) {
+        if(_resolving.value!=null)return
+        val next=handoff.take() ?: return
+        try {launchRecordingPart(next)} catch (_:CancellationException) {next.cancel()}
+    }
+    private fun launchRecordingPart(run:RecordingPartPlayback) = run.owner.use {
+        val snapshot=run.queue.snapshot
+        val title="${RecordingRules.title(snapshot.recording)} · Part ${run.part.index}"
+        val timing=PlaybackStartupTiming.begin(run.owner,StartupInput.DIRECT_INPUT_SUPPLIED)
+        pending=timing.attach(recordingPartSession(snapshot.recording,run.part,
+            ApiClient.recordingStreamUrl(snapshot.recording,title,run.owner.epoch,run.part),run.owner,run))
+        launchPlayer()
     }
 
     fun playRecordingPart(recording:Recording,part:RecordingPart,expectedContext:Long) =
@@ -196,6 +221,7 @@ object PlaybackCoordinator {
         ApiClient.inContext(expectedContext) {
             val title="${RecordingRules.title(recording)} · Part ${part.index}"
             val owner=PlaybackSessionContext.capture(expectedContext)
+            RecordingPartQueues.replace(null)
             val timing=PlaybackStartupTiming.begin(owner,StartupInput.DIRECT_INPUT_SUPPLIED,startedNanos)
             pending=timing.attach(recordingPartSession(recording,part,ApiClient.recordingStreamUrl(recording,title,expectedContext,part),owner))
             launchPlayer()
@@ -211,6 +237,7 @@ object PlaybackCoordinator {
         val startedNanos = PlaybackStartupTiming.now()
         if (_resolving.value != null) return
         val ownership=PlaybackSessionContext.capture()
+        RecordingPartQueues.replace(null)
         val timing=PlaybackStartupTiming.begin(ownership,startedNanos=startedNanos)
         startupAttempt=timing
         val request = PlaybackRequest(DetailsTarget("catchup:${channel.id}:${program.start}", program.title, isMovie = true))
@@ -245,6 +272,7 @@ object PlaybackCoordinator {
     fun playSession(session: PlayerSession) {
         val startedNanos = PlaybackStartupTiming.now()
         if (_resolving.value != null || !session.canOpenPlayer()) return
+        RecordingPartQueues.replace(null)
         pending = PlaybackStartupTiming.begin(requireNotNull(session.ownership),StartupInput.DIRECT_INPUT_SUPPLIED,startedNanos).attach(session)
         launchPlayer()
     }
@@ -281,6 +309,7 @@ object PlaybackCoordinator {
     ) {
         if (_resolving.value != null) return
         val ownership=PlaybackSessionContext.capture(expectedContext ?: ProfileDataContext.current)
+        RecordingPartQueues.replace(null)
         val timing=PlaybackStartupTiming.begin(ownership,input,startedNanos)
         startupAttempt=timing
         AdaptiveThroughput.playbackStarting()

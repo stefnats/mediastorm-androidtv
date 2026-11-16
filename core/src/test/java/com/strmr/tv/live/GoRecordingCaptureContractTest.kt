@@ -36,15 +36,15 @@ class GoRecordingCaptureContractTest(private val filename:String,private val kin
             when(r.id) {
                 "multipart"->{
                     assertEquals(1,r.capture!!.version);assertEquals(2,r.capture.parts.size);assertEquals(1,r.capture.sourceChanges)
-                    assertEquals(listOf(752L,1128L),r.capture.parts.map {it.bytes});assertEquals(1880L,RecordingCaptureRules.totalBytes(r));assertEquals("Incomplete recording",RecordingCaptureRules.status(r));assertEquals("Play first part",RecordingCaptureRules.playLabel(r));assertEquals(1,r.capture.gaps.size)
+                    assertEquals(listOf(752L,1128L),r.capture.parts.map {it.bytes});assertEquals(1880L,RecordingCaptureRules.totalBytes(r));assertEquals("Incomplete recording",RecordingCaptureRules.status(r));assertEquals("Play / resume completed parts",RecordingCaptureRules.playLabel(r));assertEquals(1,r.capture.gaps.size)
                     assertTrue(r.capture.parts.all {RecordingCaptureRules.playable(r,it)})
                 }
                 "waiting"->{
-                    assertEquals("waiting_capacity",r.capture!!.phase);assertEquals("Waiting for recording capacity",RecordingCaptureRules.status(r));assertEquals("Play first part",RecordingCaptureRules.playLabel(r));assertTrue(RecordingRules.canCancel(r));assertTrue(RecordingCaptureRules.playable(r,r.capture.parts.single()));assertNull(r.capture.gaps.single().endedAt)
+                    assertEquals("waiting_capacity",r.capture!!.phase);assertEquals("Waiting for recording capacity",RecordingCaptureRules.status(r));assertEquals("Play / resume completed parts",RecordingCaptureRules.playLabel(r));assertTrue(RecordingRules.canCancel(r));assertTrue(RecordingCaptureRules.playable(r,r.capture.parts.single()));assertNull(r.capture.gaps.single().endedAt)
                 }
                 "capturing"->{
                     val c=r.capture!!;assertEquals("capturing",c.phase);assertTrue(RecordingCaptureRules.playable(r,c.parts[0]));assertFalse(RecordingCaptureRules.playable(r,c.parts[1]));assertNull(c.parts[1].endedAt);assertEquals(188L,c.parts[1].bytes)
-                    assertEquals("Captured data so far",RecordingCaptureRules.partDataLabel(c.parts[1],r));assertTrue(RecordingCaptureRules.endLabel(c.parts[1],r).startsWith("Still capturing"));assertEquals("Play first part",RecordingCaptureRules.playLabel(r))
+                    assertEquals("Captured data so far",RecordingCaptureRules.partDataLabel(c.parts[1],r));assertTrue(RecordingCaptureRules.endLabel(c.parts[1],r).startsWith("Still capturing"));assertEquals("Play / resume completed parts",RecordingCaptureRules.playLabel(r))
                 }
                 "restored"->{
                     assertEquals("failed",r.status);assertEquals("interrupted",r.capture!!.phase);assertTrue(r.capture.parts.all {it.streamPath==null});assertFalse(RecordingRules.canPlay(r));assertTrue(r.capture.parts.none {RecordingCaptureRules.playable(r,it)})
@@ -53,7 +53,7 @@ class GoRecordingCaptureContractTest(private val filename:String,private val kin
                 "first-empty"->{
                     val parts=r.capture!!.parts
                     assertEquals(0L,parts[0].bytes);assertNull(parts[0].streamPath);assertEquals(752L,parts[1].bytes)
-                    assertEquals(2,RecordingCaptureRules.firstClosed(r)!!.index);assertTrue(RecordingRules.canPlay(r));assertEquals("Play part 2",RecordingCaptureRules.playLabel(r))
+                    assertEquals(2,RecordingCaptureRules.firstClosed(r)!!.index);assertTrue(RecordingRules.canPlay(r));assertEquals("Play / resume completed parts",RecordingCaptureRules.playLabel(r))
                 }
                 "pending"->{assertNull(r.capture);assertEquals("pending",r.status);assertFalse(RecordingRules.canPlay(r))}
                 "legacy"->{assertNull(r.capture);assertEquals("completed",r.status);assertTrue(RecordingRules.canPlay(r));assertEquals("Play Recording",RecordingCaptureRules.playLabel(r))}

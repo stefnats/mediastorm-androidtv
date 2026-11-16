@@ -4,6 +4,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.Display
 import android.view.WindowManager
+import androidx.activity.addCallback
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.annotation.OptIn
@@ -20,6 +21,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import kotlinx.coroutines.CancellationException
+import com.strmr.tv.api.vodDenial
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.playbackSettings
 import com.strmr.tv.live.LiveStream
@@ -35,6 +38,7 @@ import com.strmr.tv.ui.StrmrTheme
 @OptIn(UnstableApi::class)
 class PlayerActivity : ComponentActivity() {
     private var controller: PlayerController? = null
+    private var recordingNext:RecordingPartHandoff?=null
     private var frameRate: FrameRateMatcher? = null
     /** Add Screen: the channel the multiscreen opens with once this player has let go. */
     private var handover: MultiscreenHandover? = null
@@ -42,7 +46,7 @@ class PlayerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val session = PlaybackCoordinator.pending
-        if (session == null || !session.canOpenPlayer()) {
+        if (session == null || !session.canOpenPlayer() || !session.recordingPartReady()) {
             finish()
             return
         }
@@ -52,6 +56,7 @@ class PlayerActivity : ComponentActivity() {
         frameRate = matcher
         val c = PlayerController(this, session) { format -> matcher.match(format.frameRate) }
         controller = c
+        onBackPressedDispatcher.addCallback(this) {c.cancelRecordingParts();finish()}
         setContent {
             StrmrTheme {
                 val postPlay by c.postPlay.collectAsState()
@@ -59,8 +64,16 @@ class PlayerActivity : ComponentActivity() {
                 val ended by c.ended.collectAsState()
                 val next by c.advanceTo.collectAsState()
                 val switch by c.switchTo.collectAsState()
-                LaunchedEffect(ended) { if (ended) finish() }
-                LaunchedEffect(Unit) { SubtitleStyleStore.adopt(ApiClient.playbackSettings().subtitleStyle) }
+                val partNext = c.nextRecordingPart?.collectAsState()?.value
+                LaunchedEffect(ended,partNext) { if (ended) {recordingNext=partNext;finish()} }
+                LaunchedEffect(Unit) {
+                    try {
+                        val owner=requireNotNull(session.ownership)
+                        val style=ApiClient.playbackSettings(owner.epoch).subtitleStyle
+                        owner.use {SubtitleStyleStore.adopt(style)}
+                    } catch(cancelled:CancellationException) {throw cancelled}
+                    catch(error:Exception) {if(error.vodDenial!=null)c.cancelRecordingParts()}
+                }
                 // Up Next: close this episode (saved as finished) and start the next over its loading art.
                 LaunchedEffect(next) {
                     next?.takeIf {session.canOpenPlayer()}?.let {
@@ -100,7 +113,7 @@ class PlayerActivity : ComponentActivity() {
                     val aspect by c.videoAspect.collectAsState()
                     // The device's subtitle style (Settings, or the Subtitles menu's Style picks), live.
                     SubtitleOverlay(cues, SubtitleStyleStore.style, aspect, Modifier.fillMaxSize())
-                    PlayerChrome(c, onExit = { finish() }, onAddScreen = { addScreen(c) }.takeIf { session.liveChannel != null })
+                    PlayerChrome(c, onExit = { c.cancelRecordingParts();finish() }, onAddScreen = { addScreen(c) }.takeIf { session.liveChannel != null })
                     SubtitleStatusToast(c, Modifier.align(androidx.compose.ui.Alignment.TopEnd))
                 }
             }
@@ -130,7 +143,7 @@ class PlayerActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         // Home, sleep or another app: keep the position and go back to details.
-        if (!isFinishing) finish()
+        if (!isFinishing) {controller?.cancelRecordingParts();finish()}
     }
 
     override fun onDestroy() {
@@ -142,6 +155,8 @@ class PlayerActivity : ComponentActivity() {
         if (isFinishing) PlaybackCoordinator.playerClosed(saving)
         // After the release, so a direct stream's provider connection is closed first.
         handover?.takeIf { it.ownership.isCurrent() }?.let { MultiscreenLauncher.open(it, it.ownership.epoch) }
+        recordingNext?.let(PlaybackCoordinator::continueRecordingParts)
+        recordingNext=null
         handover = null
     }
 

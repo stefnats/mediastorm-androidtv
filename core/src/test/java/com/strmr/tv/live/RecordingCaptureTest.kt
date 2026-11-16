@@ -65,7 +65,7 @@ class RecordingCaptureTest {
     }
     @Test fun `one closed part waiting for capacity is not presented as growing continuous playback`() {
         val r=recording(phase="waiting_capacity",status="running")
-        assertEquals("Waiting for recording capacity",RecordingCaptureRules.status(r));assertEquals("Play first part",RecordingCaptureRules.playLabel(r));assertEquals(part(),RecordingCaptureRules.firstClosed(r));assertTrue(RecordingRules.canPlay(r))
+        assertEquals("Waiting for recording capacity",RecordingCaptureRules.status(r));assertEquals("Play / resume completed parts",RecordingCaptureRules.playLabel(r));assertEquals(part(),RecordingCaptureRules.firstClosed(r));assertTrue(RecordingRules.canPlay(r))
     }
     @Test fun `known active first-part legacy playback requires actual measured data`() {
         val active=recording(listOf(part(closed=false)),"capturing","running",false)
@@ -75,7 +75,7 @@ class RecordingCaptureTest {
     }
     @Test fun `multipart or recorded gaps cannot falsely claim completion even with contradictory status flag`() {
         val multi=recording(listOf(part(),part(2)),"finished","completed",false)
-        assertTrue(RecordingCaptureRules.incomplete(multi));assertFalse(RecordingFilter.COMPLETED.matches(multi));assertTrue(RecordingFilter.HISTORY.matches(multi));assertEquals("Incomplete recording",RecordingCaptureRules.status(multi));assertEquals("Play first part",RecordingCaptureRules.playLabel(multi))
+        assertTrue(RecordingCaptureRules.incomplete(multi));assertFalse(RecordingFilter.COMPLETED.matches(multi));assertTrue(RecordingFilter.HISTORY.matches(multi));assertEquals("Incomplete recording",RecordingCaptureRules.status(multi));assertEquals("Play / resume completed parts",RecordingCaptureRules.playLabel(multi))
         val gap=RecordingGap(at,end,"capacity");assertTrue(RecordingCaptureRules.incomplete(recording(incomplete=false).copy(capture=recording(incomplete=false).capture!!.copy(gaps=listOf(gap)))))
     }
     @Test fun `unknown sizes and arithmetic overflow stay unknown instead of inventing a captured total`() {
@@ -127,7 +127,7 @@ class RecordingCaptureTest {
 
     @Test fun `default action selects lowest nonempty closed owned part after empty first attempt`() {
         val empty=part(bytes=0).copy(streamPath=null);val saved=part(2,bytes=752);val r=recording(listOf(empty,saved))
-        assertEquals(saved,RecordingCaptureRules.firstClosed(r));assertTrue(RecordingRules.canPlay(r));assertEquals("Play part 2",RecordingCaptureRules.playLabel(r))
+        assertEquals(saved,RecordingCaptureRules.firstClosed(r));assertTrue(RecordingRules.canPlay(r));assertEquals("Play / resume completed parts",RecordingCaptureRules.playLabel(r))
         val active=part(closed=false);val withEarlierActive=recording(listOf(active,saved),"capturing","running")
         assertNull(RecordingCaptureRules.firstClosed(withEarlierActive));assertFalse(RecordingRules.canPlay(withEarlierActive))
     }
