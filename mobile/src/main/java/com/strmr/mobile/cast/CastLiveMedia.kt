@@ -5,6 +5,7 @@ import com.strmr.tv.app.AppLog
 import com.strmr.tv.live.LiveChannel
 import com.strmr.tv.live.LiveStream
 import com.strmr.tv.live.startLive
+import com.strmr.tv.player.PlaybackSessionContext
 import com.strmr.tv.live.stopLiveSession
 
 /*
@@ -20,8 +21,8 @@ import com.strmr.tv.live.stopLiveSession
  */
 
 /** `/api/live/hls/start` for a receiver; a direct stream has no session. */
-internal suspend fun openLive(channel: LiveChannel, program: String?, forceHls: Boolean): LiveStream =
-    ApiClient.startLive(channel, program, forceHls = forceHls, target = "cast")
+internal suspend fun openLive(channel: LiveChannel, program: String?, forceHls: Boolean,context:PlaybackSessionContext): LiveStream =
+    ApiClient.startLive(channel, program, forceHls = forceHls, target = "cast",expectedContext=context.epoch)
 
 internal fun liveMedia(url: String, contentType: String, channel: LiveChannel, program: String?, logo: String?, protocolInfo: String? = null) =
     CastMedia(
@@ -49,9 +50,11 @@ private val transportStreamInfos: List<String>
     } + DlnaProtocol.protocolInfo("video/mpeg", profile = "AVC_TS_HD_24_AC3_ISO", operation = "00", converted = false)
 
 internal suspend fun dlnaLiveMedia(
-    transport: DlnaTransport, channel: LiveChannel, program: String?, logo: String?,
+    transport: DlnaTransport, channel: LiveChannel, program: String?, logo: String?,context:PlaybackSessionContext,
 ): Pair<CastMedia, String?> {
+    context.requireCurrent()
     val sinks = transport.sinkProtocols()
+    context.requireCurrent()
     val hlsInfo = DlnaProtocol.protocolInfo(DlnaProtocol.HLS_MIME, operation = "00", converted = true)
     val takesHls = DlnaProtocol.accepts(sinks, hlsInfo)
     val tsInfo = if (isPlaylist(channel)) null else transportStreamInfos.firstOrNull { DlnaProtocol.accepts(sinks, it) }
@@ -59,7 +62,7 @@ internal suspend fun dlnaLiveMedia(
 
     if (tsInfo != null) {
         // 1. The channel as the source is set to open it: direct is the provider's mux untouched.
-        val opened = openLive(channel, program, forceHls = false)
+        val opened = openLive(channel, program, forceHls = false,context=context)
         if (opened.sessionId == null) {
             AppLog.i(CastController.TAG, "DLNA live: direct MPEG-TS (${DlnaProtocol.mime(tsInfo)})")
             return media(opened.url, tsInfo) to null
@@ -68,10 +71,10 @@ internal suspend fun dlnaLiveMedia(
             AppLog.i(CastController.TAG, "DLNA live: HLS session")
             return media(opened.url, hlsInfo) to opened.sessionId
         }
-        ApiClient.stopLiveSession(opened.sessionId!!)
+        ApiClient.stopLiveSession(opened.sessionId!!,context.epoch)
     } else if (takesHls) {
         // 2. A cast HLS session.
-        val opened = openLive(channel, program, forceHls = true)
+        val opened = openLive(channel, program, forceHls = true,context=context)
         AppLog.i(CastController.TAG, "DLNA live: HLS session")
         return media(opened.url, hlsInfo) to opened.sessionId
     }

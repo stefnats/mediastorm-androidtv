@@ -13,6 +13,8 @@ import com.strmr.mobile.ui.components.SheetAction
 import com.strmr.mobile.ui.details.DetailsActionContext
 import com.strmr.mobile.ui.details.DetailsExtraActions
 import com.strmr.tv.api.Episode
+import com.strmr.tv.player.PlaybackSessionContext
+import com.strmr.mobile.cast.castContextEligible
 
 /**
  * Cast on the details page (the iPhone page's Cast to Device…): a Cast button in the top bar, a
@@ -24,7 +26,7 @@ object DetailsCastActions : DetailsExtraActions {
     @Composable
     override fun RowScope.TopBar(context: DetailsActionContext) {
         val casting = CastController.session != null
-        IconButton(onClick = { castPrimary(context) }) {
+        IconButton(onClick = { castPrimary(context) },enabled=context.playbackCurrent && runCatching {castContextEligible(PlaybackSessionContext.capture(context.model.dataContext))}.getOrDefault(false)) {
             Icon(if (casting) Icons.Filled.CastConnected else Icons.Filled.Cast, contentDescription = "Cast")
         }
     }
@@ -35,13 +37,19 @@ object DetailsCastActions : DetailsExtraActions {
     override fun episodeActions(context: DetailsActionContext, episode: Episode): List<SheetAction> =
         listOf(
             SheetAction("Cast to Device…", Icons.Filled.Cast) {
-                CastUi.openPicker { device ->
-                    CastController.arm(device) { context.model.play(episode, context.model.resumePoint(episode)) }
+                if(context.playbackCurrent) {
+                    val original=PlaybackSessionContext.capture(context.model.dataContext)
+                    if(castContextEligible(original))CastUi.openPicker { device ->
+                        if(context.playbackCurrent && castContextEligible(original))CastController.arm(device,original) {context.model.play(episode,context.model.resumePoint(episode))}
+                    }
                 }
             },
         )
 
     private fun castPrimary(context: DetailsActionContext) {
-        CastUi.openPicker { device -> CastController.arm(device) { context.playPrimary() } }
+        if(!context.playbackCurrent)return
+        val original=PlaybackSessionContext.capture(context.model.dataContext)
+        if(!castContextEligible(original))return
+        CastUi.openPicker { device ->if(context.playbackCurrent && castContextEligible(original))CastController.arm(device,original) { context.playPrimary() } }
     }
 }

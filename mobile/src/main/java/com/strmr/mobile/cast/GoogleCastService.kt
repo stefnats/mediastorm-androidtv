@@ -144,7 +144,10 @@ object GoogleCastService {
     }
 
     /** Ends the session and stops the receiver app. */
-    fun disconnect() {
-        context?.sessionManager?.endCurrentSession(true)
+    fun disconnect(expected:CastSession?=null,expectedReceiver:String?=null) {
+        val manager=context?.sessionManager ?: return
+        if(expected!=null && manager.currentCastSession!==expected)return
+        if(expectedReceiver!=null && manager.currentCastSession?.castDevice?.deviceId!=expectedReceiver)return
+        manager.endCurrentSession(true)
     }
 }

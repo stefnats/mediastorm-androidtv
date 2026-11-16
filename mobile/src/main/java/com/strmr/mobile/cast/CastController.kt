@@ -5,6 +5,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.strmr.tv.app.AppLog
 import com.strmr.tv.player.PlaybackRequest
+import com.strmr.tv.player.PlaybackSessionContext
+import com.strmr.tv.library.ProfileDataContext
+import com.strmr.tv.live.stopLiveSession
+import com.strmr.tv.app.AppSession
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.StateFlow
@@ -21,6 +26,8 @@ data class ActiveCast(
     val phase: Phase = Phase.Connecting,
     val state: CastPlaybackState = CastPlaybackState(),
     val canSeek: Boolean = true,
+    /** Local callback generation, never a server authorization or serialized grant. */
+    val generation:Long=0,
 ) {
     sealed interface Phase {
         data object Connecting : Phase
@@ -49,8 +56,10 @@ object CastController {
         private set
     var isSearching by mutableStateOf(false)
         private set
-    var session by mutableStateOf<ActiveCast?>(null)
-        internal set
+    private var storedSession by mutableStateOf<ActiveCast?>(null)
+    var session:ActiveCast?
+        get()=storedSession?.takeIf {ticket?.let(ownership::owns)==true}
+        internal set(value) {storedSession=value}
     /** The remote sheet is up (opened by a start, the now-playing bar or the picker). */
     var remoteVisible by mutableStateOf(false)
 
@@ -62,13 +71,25 @@ object CastController {
     internal var hlsSessionId: String? = null
     internal var pollJob: Job? = null
     internal var startJob: Job? = null
+    internal var startTicket:CastOwnership.Ticket?=null
+    internal val ownership=CastOwnership(::castContextEligible) {id,context->com.strmr.tv.api.ApiClient.stopLiveSession(id,context.epoch)}
+    internal var ticket:CastOwnership.Ticket?=null
+    internal fun currentTicket()=ticket?.takeIf {ownership.owns(it)}
     private var searchJob: Job? = null
 
     init {
+        scope.launch {
+            combine(ProfileDataContext.changes,AppSession.phase,AppSession.profile,AppSession.pinChallenge){_,_,_,_->Unit}.collect {
+                disarmStale()
+                val current=ticket
+                if(current!=null && !ownership.owns(current))retireCast(current)
+            }
+        }
         GoogleCastService.onSessionEnded = { ended ->
             val current = transport
             if (current is GoogleCastTransport && current.session === ended && session?.phase == ActiveCast.Phase.Active) {
-                scope.launch { finish("receiver ended the session", stopReceiver = false) }
+                val expected=currentTicket()
+                if(expected!=null)scope.launch {finish("receiver ended the session",stopReceiver=false,expected=expected)}
             }
         }
     }
@@ -114,43 +135,60 @@ object CastController {
 
     // Controls
 
-    fun togglePlayPause() {
+    fun togglePlayPause(expectedGeneration:Long?=session?.generation) {
+        if(!ownership.accepts(expectedGeneration))return
+        val ticket=currentTicket() ?: return
         val transport = transport ?: return
         val current = session ?: return
         val playing = current.state.isPlaying
         session = current.copy(state = current.state.copy(phase = if (playing) CastPlaybackState.Phase.PAUSED else CastPlaybackState.Phase.PLAYING))
         scope.launch {
-            runCatching { if (playing) transport.pause() else transport.play() }
+            runCatching {ownership.command(ticket,transport) {if (playing) transport.pause() else transport.play()}}
                 .onFailure { AppLog.w(TAG, "toggle failed: ${it.message}") }
-            reportProgress(ended = false)
+            reportProgress(ended = false,expected=ticket)
         }
     }
 
-    fun seek(seconds: Double) {
+    fun seek(seconds: Double,expectedGeneration:Long?=session?.generation) {
+        if(!ownership.accepts(expectedGeneration))return
+        val ticket=currentTicket() ?: return
         val transport = transport ?: return
         val current = session ?: return
         if (!current.canSeek || current.isLive) return
         val duration = current.state.duration
         val target = if (duration > 0) seconds.coerceIn(0.0, (duration - 1).coerceAtLeast(0.0)) else seconds.coerceAtLeast(0.0)
         session = current.copy(state = current.state.copy(position = target))
-        scope.launch { runCatching { transport.seek(target) }.onFailure { AppLog.w(TAG, "seek failed: ${it.message}") } }
+        scope.launch { runCatching {ownership.command(ticket,transport){transport.seek(target)}}.onFailure { AppLog.w(TAG, "seek failed: ${it.message}") } }
     }
 
-    fun skip(deltaSeconds: Double) = seek((session?.state?.position ?: 0.0) + deltaSeconds)
+    fun skip(deltaSeconds: Double,expectedGeneration:Long?=session?.generation) = seek((session?.state?.position ?: 0.0) + deltaSeconds,expectedGeneration)
 
-    fun setVolume(volume: Float) {
+    fun setVolume(volume: Float,expectedGeneration:Long?=session?.generation) {
+        if(!ownership.accepts(expectedGeneration))return
+        val ticket=currentTicket() ?: return
         val transport = transport ?: return
         session?.let { session = it.copy(state = it.state.copy(volume = volume)) }
-        scope.launch { runCatching { transport.setVolume(volume) } }
+        scope.launch { runCatching {ownership.command(ticket,transport){transport.setVolume(volume)}} }
     }
 
     /** Stop Casting: the receiver stops, progress is saved, the server's session is let go. */
-    fun stop() {
-        scope.launch { finish("stopped from the phone", stopReceiver = true) }
+    fun stop(expectedGeneration:Long?=session?.generation) {
+        if(!ownership.accepts(expectedGeneration))return
+        val captured=ticket ?: return
+        scope.launch { finish("stopped from the phone", stopReceiver = true,expected=captured) }
     }
 
     /** Clears a failed attempt off the remote. */
-    fun dismissFailure() {
+    fun dismissFailure(expectedGeneration:Long?=session?.generation) {
+        if(!ownership.accepts(expectedGeneration))return
         if (session?.phase is ActiveCast.Phase.Failed) session = null
     }
+}
+
+/** Adult provenance is current raw profile metadata, not an account role or content grant. */
+internal fun castContextEligible(context:PlaybackSessionContext):Boolean {
+    if(!context.isCurrent())return false
+    val profile=AppSession.profile.value ?: return false
+    return AppSession.phase.value==AppSession.Phase.Ready && AppSession.pinChallenge.value==null &&
+        profile.id==context.profileId && profile.offlineAdultVerified
 }

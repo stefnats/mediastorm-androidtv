@@ -6,6 +6,7 @@ import com.strmr.tv.api.castStreamUrl
 import com.strmr.tv.api.startCastHls
 import com.strmr.tv.app.AppLog
 import com.strmr.tv.player.PlaybackRequest
+import com.strmr.tv.player.PlaybackSessionContext
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -46,10 +47,11 @@ internal fun castStartPosition(request: PlaybackRequest, position: Double, durat
 }
 
 internal suspend fun chromecastMedia(
-    request: PlaybackRequest, path: String, position: Double, audio: Int?, subtitle: Int?, subtitleLanguage: String?, poster: String?,
+    request: PlaybackRequest, path: String, position: Double, audio: Int?, subtitle: Int?, subtitleLanguage: String?, poster: String?,context:PlaybackSessionContext,
 ): Pair<CastMedia, String?> {
+    context.requireCurrent()
     requireReachableServer()
-    val hls = ApiClient.startCastHls(path, request.streamMetadata(path), cast = true, audioTrack = audio, subtitleTrack = subtitle)
+    val hls = ApiClient.startCastHls(path, request.streamMetadata(path), cast = true, audioTrack = audio, subtitleTrack = subtitle,expectedContext=context.epoch)
     val media = CastMedia(
         url = hls.playlistUrl, contentType = DlnaProtocol.HLS_MIME, title = request.title.name, subtitle = castSubtitle(request),
         posterUrl = poster, duration = hls.durationSeconds,
@@ -60,10 +62,12 @@ internal suspend fun chromecastMedia(
 }
 
 internal suspend fun dlnaMedia(
-    transport: DlnaTransport, request: PlaybackRequest, path: String, position: Double, audio: Int?, subtitle: Int?, poster: String?,
+    transport: DlnaTransport, request: PlaybackRequest, path: String, position: Double, audio: Int?, subtitle: Int?, poster: String?,context:PlaybackSessionContext,
 ): Pair<CastMedia, String?> {
+    context.requireCurrent()
     requireReachableServer()
     val sinks = transport.sinkProtocols()
+    context.requireCurrent()
     val metadata = request.streamMetadata(path)
     fun media(url: String, info: String, duration: Double?, seekable: Boolean = true) = CastMedia(
         url = url, contentType = DlnaProtocol.mime(info), title = request.displayTitle, subtitle = request.displaySubtitle,
@@ -72,16 +76,16 @@ internal suspend fun dlnaMedia(
     )
 
     // 1. The original container.
-    val direct = ApiClient.castStreamUrl(path, metadata)
+    val direct = ApiClient.castStreamUrl(path, metadata,expectedContext=context.epoch)
     DlnaProtocol.mimesForPath(path).map { DlnaProtocol.protocolInfo(it, converted = false) }
         .firstOrNull { DlnaProtocol.accepts(sinks, it) }?.let { info ->
             AppLog.i(CastController.TAG, "DLNA: direct stream (${DlnaProtocol.mime(info)})")
-            return media(direct, info, streamDuration(direct)) to null
+            return media(direct, info, streamDuration(direct,context)) to null
         }
     // 2. A transcoded HLS session.
     val hlsInfo = DlnaProtocol.protocolInfo(DlnaProtocol.HLS_MIME, converted = true)
     if (DlnaProtocol.accepts(sinks, hlsInfo)) {
-        val hls = ApiClient.startCastHls(path, metadata, cast = false, audioTrack = audio, subtitleTrack = subtitle)
+        val hls = ApiClient.startCastHls(path, metadata, cast = false, audioTrack = audio, subtitleTrack = subtitle,expectedContext=context.epoch)
         AppLog.i(CastController.TAG, "DLNA: transcoded HLS")
         return media(hls.playlistUrl, hlsInfo, hls.durationSeconds) to hls.sessionId
     }
@@ -90,18 +94,20 @@ internal suspend fun dlnaMedia(
     val tsInfo = DlnaProtocol.protocolInfo("video/mpeg", profile = "AVC_TS_HD_24_AC3_ISO", operation = "00", converted = true)
     if (!DlnaProtocol.accepts(sinks, tsInfo)) throw CastException("${transport.device.name} doesn't accept any format the server can send.")
     AppLog.i(CastController.TAG, "DLNA: progressive MPEG-TS")
-    val ts = ApiClient.castStreamUrl(path, metadata, mapOf("dlnaProfile" to "avc-ts"))
-    return media(ts, tsInfo, streamDuration(direct), seekable = false) to null
+    val ts = ApiClient.castStreamUrl(path, metadata, mapOf("dlnaProfile" to "avc-ts"),context.epoch)
+    return media(ts, tsInfo, streamDuration(direct,context), seekable = false) to null
 }
 
 /**
  * The length the server states on the stream (`Content-Duration`), for renderers that report
  * none: without it a finished episode can't be told from a stop.
  */
-private suspend fun streamDuration(url: String): Double? = withContext(Dispatchers.IO) {
+private suspend fun streamDuration(url: String,context:PlaybackSessionContext): Double? = withContext(Dispatchers.IO) {
+    context.requireCurrent()
     runCatching {
-        val client = ApiClient.http.newBuilder().callTimeout(15, TimeUnit.SECONDS).build()
+        val client = ApiClient.http.newBuilder().callTimeout(15, TimeUnit.SECONDS).addNetworkInterceptor {chain->context.requireCurrent();chain.proceed(chain.request())}.build()
         client.newCall(Request.Builder().url(url).head().build()).execute().use { response ->
+            context.requireCurrent()
             (response.header("Content-Duration") ?: response.header("X-Content-Duration"))?.toDoubleOrNull()?.takeIf { it > 0 }
         }
     }.getOrNull()

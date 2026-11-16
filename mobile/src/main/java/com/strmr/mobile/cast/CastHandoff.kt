@@ -7,6 +7,8 @@ import com.strmr.tv.player.PlaybackCoordinator
 import com.strmr.tv.player.PlaybackRequest
 import com.strmr.tv.player.PlayerController
 import com.strmr.tv.player.PlayerSession
+import com.strmr.tv.player.PlaybackSessionContext
+import com.strmr.tv.player.canOpenPlayer
 import com.strmr.tv.player.ResolvedStream
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -22,7 +24,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 
 /** The device armed by the details page, when, and the watch that disarms it. */
-private class Handoff(val device: CastDevice, val armedAt: Long, val watch: Job)
+private class Handoff(val device: CastDevice, val armedAt: Long, val watch: Job,val context:PlaybackSessionContext,val generation:Any)
 
 private var handoff: Handoff? = null
 
@@ -38,15 +40,19 @@ fun CastController.install() {
  * Details page: the picker chose [device]; [play] then starts the usual resolve, whose stream
  * [claim] takes. Disarmed if that resolve ends without a stream (cancelled, failed).
  */
-fun CastController.arm(device: CastDevice, play: () -> Unit) {
+fun CastController.arm(device: CastDevice, context:PlaybackSessionContext=PlaybackSessionContext.capture(),play: () -> Unit) {
+    if(!ownership.allowed(context))return
     disarm()
+    val generation=Any()
     // Undispatched, so it sees the resolve that [play] starts.
     val watch = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-        PlaybackCoordinator.resolving.drop(1).collect { if (it == null) disarm() }
+        PlaybackCoordinator.resolving.drop(1).collect { if (it == null && handoff?.generation===generation) disarm() }
     }
-    handoff = Handoff(device, System.currentTimeMillis(), watch)
+    handoff = Handoff(device, System.currentTimeMillis(), watch,context,generation)
     play()
 }
+
+internal fun disarmStale() {handoff?.let {if(!castContextEligible(it.context))disarm()}}
 
 private fun disarm() {
     handoff?.watch?.cancel()
@@ -57,10 +63,10 @@ private fun disarm() {
 private fun CastController.claim(request: PlaybackRequest, resolved: ResolvedStream): Boolean {
     val armed = handoff ?: return false
     disarm()
-    if (System.currentTimeMillis() - armed.armedAt > ARMED_MS) return false
+    if (System.currentTimeMillis() - armed.armedAt > ARMED_MS || !ownership.allowed(armed.context)) return false
     val subtitle = castSubtitleTrack(resolved.tracks)
     start(armed.device, request, resolved.path, request.startPosition ?: 0.0, audio = resolved.tracks?.audio?.streamIndex,
-          subtitle = subtitle?.streamIndex, subtitleLanguage = subtitle?.let { it.languageCode ?: it.language })
+          subtitle = subtitle?.streamIndex, subtitleLanguage = subtitle?.let { it.languageCode ?: it.language },context=armed.context)
     return true
 }
 
@@ -74,7 +80,7 @@ internal fun castSubtitleTrack(tracks: TrackSelection?): SelectedTrack? {
 }
 
 /** Whether the player's session can go to a TV: a title stream, or a live channel. */
-fun PlayerSession.castable(): Boolean = (streamPath != null && reportsProgress) || (isLive && liveChannel != null)
+fun PlayerSession.castable(): Boolean = !localFile && canOpenPlayer() && ownership?.let(::castContextEligible)==true && ((streamPath != null && reportsProgress) || (isLive && liveChannel != null))
 
 /**
  * The player's Cast button chose [device]: pauses here, saves the position, closes the player
@@ -83,6 +89,8 @@ fun PlayerSession.castable(): Boolean = (streamPath != null && reportsProgress) 
  */
 fun CastController.handOff(controller: PlayerController, device: CastDevice, close: () -> Unit) {
     val session = controller.session
+    val context=session.ownership ?: return
+    if(!session.castable() || controller.vodDenied.value!=null || !ownership.allowed(context))return
     val position = controller.player.currentPosition / 1000.0
     val channel = session.liveChannel
     AppLog.i(CastController.TAG, "handing off to ${device.name} at ${position.toInt()}s")
@@ -91,14 +99,15 @@ fun CastController.handOff(controller: PlayerController, device: CastDevice, clo
     close()
     scope.launch {
         withTimeoutOrNull(5_000) { while (PlaybackCoordinator.playerOpen) delay(100) }
+        if(!session.castable() || !ownership.allowed(context) || controller.vodDenied.value!=null)return@launch
         if (session.isLive && channel != null) {
             val program = session.request.title.name.takeIf { it != channel.name }
-            startLive(device, channel, program)
+            startLive(device, channel, program,context)
         } else {
             val path = session.streamPath ?: return@launch
             val subtitle = castSubtitleTrack(session.tracks)
             start(device, session.request, path, position, audio = session.tracks?.audio?.streamIndex,
-                  subtitle = subtitle?.streamIndex, subtitleLanguage = subtitle?.let { it.languageCode ?: it.language })
+                  subtitle = subtitle?.streamIndex, subtitleLanguage = subtitle?.let { it.languageCode ?: it.language },context=context)
         }
     }
 }

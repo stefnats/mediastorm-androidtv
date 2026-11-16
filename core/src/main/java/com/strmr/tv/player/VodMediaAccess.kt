@@ -16,7 +16,7 @@ import okhttp3.Interceptor
 import okhttp3.Response
 
 /** The final response, not an original DataSpec URL before redirects, establishes backend origin. */
-internal class VodMediaAccess(private val backend:HttpUrl,private val enabled:Boolean,private val backendHeaders:Map<String,String> = emptyMap(),private val denialTitleId:String?=null,private val context:Long=0) {
+internal class VodMediaAccess(private val backend:HttpUrl,private val enabled:Boolean,private val backendHeaders:Map<String,String> = emptyMap(),private val denialTitleId:String?=null,private val context:Long=0,private val requireCurrent:()->Unit={}) {
     private val marker="X-Mediastorm-Local-Vod-Denial"
     private val nonce=UUID.randomUUID().toString()
     private val prefix=backend.encodedPath.trimEnd('/')+"/api/video/"
@@ -24,8 +24,12 @@ internal class VodMediaAccess(private val backend:HttpUrl,private val enabled:Bo
     private fun owns(url:HttpUrl)=sameOrigin(url) &&
         (url.encodedPath==prefix+"stream" || url.encodedPath.startsWith(prefix+"hls/"))
 
+    private fun current()=runCatching {requireCurrent();true}.getOrDefault(false)
+    private fun checkNetworkContext() {if(!current())throw java.io.IOException("Playback context changed")}
+
     /** OkHttp follow-up requests do not re-enter application interceptors. */
     val requestInterceptor=Interceptor {chain->
+        checkNetworkContext()
         val request=chain.request().newBuilder().removeHeader(marker)
         if(!sameOrigin(chain.request().url)) {
             for((name,value) in backendHeaders) {
@@ -37,8 +41,10 @@ internal class VodMediaAccess(private val backend:HttpUrl,private val enabled:Bo
         chain.proceed(request.build())
     }
     val interceptor=Interceptor {chain->
+        checkNetworkContext()
         val attempt=denialTitleId?.takeIf {enabled}?.let {VodDenialEvents.begin(it,context)}
         val response=chain.proceed(chain.request().newBuilder().removeHeader(marker).build())
+        try {checkNetworkContext()}catch(error:java.io.IOException){response.close();throw error}
         // Remove every case variant, including forged upstream headers. This marker is never a request header.
         val clean=response.newBuilder()
         response.headers.names().filter {it.equals(marker,true)}.forEach(clean::removeHeader)
@@ -72,8 +78,8 @@ internal class VodMediaAccess(private val backend:HttpUrl,private val enabled:Bo
     }
     val loadPolicy=object:DefaultLoadErrorHandlingPolicy() {
         override fun getRetryDelayMsFor(info:LoadErrorHandlingPolicy.LoadErrorInfo):Long =
-            if(denial(info.exception)!=null)C.TIME_UNSET else super.getRetryDelayMsFor(info)
+            if(!current() || denial(info.exception)!=null)C.TIME_UNSET else super.getRetryDelayMsFor(info)
         override fun getFallbackSelectionFor(options:LoadErrorHandlingPolicy.FallbackOptions,info:LoadErrorHandlingPolicy.LoadErrorInfo):LoadErrorHandlingPolicy.FallbackSelection? =
-            if(denial(info.exception)!=null)null else super.getFallbackSelectionFor(options,info)
+            if(!current() || denial(info.exception)!=null)null else super.getFallbackSelectionFor(options,info)
     }
 }

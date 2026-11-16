@@ -75,6 +75,8 @@ data class PlayerSession(
     val explicitAudioLanguage: String? = null,
     /** Ephemeral owner check for a local file; never serialized as an offline grant. */
     val localFileAccess:(()->Boolean)?=null,
+    /** The original preparation, never the profile selected when the activity finally starts. */
+    val ownership:PlaybackSessionContext?=null,
 )
 
 /** A resolved stream: its path, the server's track choice and what online subtitles match against. */
@@ -95,4 +97,4 @@ data class ResolvedStream(
 )
 
 /** Local-file callers must supply a live owner check at every player entry. */
-fun PlayerSession.playbackAllowed():Boolean = !localFile || runCatching {localFileAccess?.invoke()==true}.getOrDefault(false)
+fun PlayerSession.playbackAllowed():Boolean = ownership?.isCurrent()!=false && (!localFile || runCatching {localFileAccess?.invoke()==true}.getOrDefault(false))

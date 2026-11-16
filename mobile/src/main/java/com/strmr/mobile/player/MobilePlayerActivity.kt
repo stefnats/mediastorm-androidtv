@@ -29,7 +29,7 @@ import com.strmr.tv.api.playbackSettings
 import com.strmr.tv.app.AppLog
 import com.strmr.tv.player.PlaybackCoordinator
 import com.strmr.tv.player.PlayerController
-import com.strmr.tv.player.playbackAllowed
+import com.strmr.tv.player.canOpenPlayer
 import com.strmr.tv.player.SubtitleStyleStore
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -62,7 +62,7 @@ class MobilePlayerActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         val session = PlaybackCoordinator.pending
-        if (session == null || !session.playbackAllowed()) {
+        if (session == null || !session.canOpenPlayer()) {
             finish()
             return
         }
@@ -98,16 +98,16 @@ class MobilePlayerActivity : ComponentActivity() {
                 LaunchedEffect(Unit) { runCatching { SubtitleStyleStore.adopt(ApiClient.playbackSettings().subtitleStyle) } }
                 // Up Next: close this episode (saved as finished) and start the next over its loading art.
                 LaunchedEffect(next) {
-                    next?.let {
+                    next?.takeIf {session.canOpenPlayer()}?.let {
                         finish()
-                        PlaybackCoordinator.play(it)
+                        PlaybackCoordinator.play(it,expectedContext=requireNotNull(session.ownership).epoch)
                     }
                 }
                 // Switch Source: close this stream (saved at its position) and resume on the other.
                 LaunchedEffect(switch) {
-                    switch?.let {
+                    switch?.takeIf {session.canOpenPlayer()}?.let {
                         finish()
-                        PlaybackCoordinator.play(it.request, it.source, carried = it.carried, resolved = it.resolved, prepared = it.prepared)
+                        PlaybackCoordinator.play(it.request, it.source, carried = it.carried, resolved = it.resolved, prepared = it.prepared,expectedContext=requireNotNull(session.ownership).epoch)
                     }
                 }
                 if (postPlay != null && !inPip.value) PostPlayScreen(c) { finish() }
@@ -125,7 +125,7 @@ class MobilePlayerActivity : ComponentActivity() {
     /** A title played from elsewhere while this one is open (paused behind the app, say): hand over to it. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (PlaybackCoordinator.pending?.playbackAllowed()==true && controller != null) {
+        if (PlaybackCoordinator.pending?.canOpenPlayer()==true && controller != null) {
             AppLog.i("Player", "new playback over the open player; restarting")
             relaunch = true
             finish()

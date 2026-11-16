@@ -45,13 +45,14 @@ object LiveCatchups {
 }
 
 /** The provider's archive URL for [program] on [channel], from [offset] seconds in. */
-suspend fun ApiClient.liveCatchup(channel: LiveChannel, program: EpgProgram, offset: Int = 0): LiveCatchupStart {
+suspend fun ApiClient.liveCatchup(channel: LiveChannel, program: EpgProgram, offset: Int = 0,expectedContext:Long=com.strmr.tv.library.ProfileDataContext.current): LiveCatchupStart {
+    val profile=inContext(expectedContext){profileId}
     val query = mutableMapOf(
-        "channelId" to channel.id, "profileId" to profileId,
+        "channelId" to channel.id, "profileId" to profile,
         "start" to program.start, "stop" to program.stop, "offset" to offset.coerceAtLeast(0).toString(),
     )
     channel.sourceId?.let { query["sourceId"] = it }
-    return send("GET", "/api/live/catchup", query, timeoutMs = 30_000)
+    return send("GET", "/api/live/catchup", query, timeoutMs = 30_000,expectedContext=expectedContext)
 }
 
 /**

@@ -52,18 +52,18 @@ fun CastRemoteControls(cast: ActiveCast) {
     } else {
         Timeline(cast)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-            IconButton(onClick = { CastController.skip(-10.0) }, enabled = cast.canSeek, modifier = Modifier.size(56.dp)) {
+            IconButton(onClick = { CastController.skip(-10.0,cast.generation) }, enabled = cast.canSeek, modifier = Modifier.size(56.dp)) {
                 Icon(Icons.Filled.Replay10, "Back 10 seconds", Modifier.size(32.dp))
             }
             PlayPause(cast)
-            IconButton(onClick = { CastController.skip(10.0) }, enabled = cast.canSeek, modifier = Modifier.size(56.dp)) {
+            IconButton(onClick = { CastController.skip(10.0,cast.generation) }, enabled = cast.canSeek, modifier = Modifier.size(56.dp)) {
                 Icon(Icons.Filled.Forward10, "Forward 10 seconds", Modifier.size(32.dp))
             }
         }
     }
     Volume(cast)
     OutlinedButton(
-        onClick = { CastController.stop() },
+        onClick = { CastController.stop(cast.generation) },
         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
     ) {
@@ -75,7 +75,7 @@ fun CastRemoteControls(cast: ActiveCast) {
 @Composable
 private fun PlayPause(cast: ActiveCast) {
     val playing = cast.state.isPlaying
-    FilledIconButton(onClick = { CastController.togglePlayPause() }, modifier = Modifier.size(72.dp)) {
+    FilledIconButton(onClick = { CastController.togglePlayPause(cast.generation) }, modifier = Modifier.size(72.dp)) {
         Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "Pause" else "Play", Modifier.size(40.dp))
     }
 }
@@ -84,7 +84,7 @@ private fun PlayPause(cast: ActiveCast) {
 @Composable
 private fun Timeline(cast: ActiveCast) {
     val duration = cast.state.duration.coerceAtLeast(0.0)
-    var scrubbing by remember { mutableStateOf<Float?>(null) }
+    var scrubbing by remember(cast.generation) { mutableStateOf<Float?>(null) }
     var settling by remember { mutableStateOf(0) }
     LaunchedEffect(settling) {
         if (settling > 0) {
@@ -98,7 +98,7 @@ private fun Timeline(cast: ActiveCast) {
             value = position.toFloat(),
             onValueChange = { scrubbing = it },
             onValueChangeFinished = {
-                scrubbing?.let { CastController.seek(it.toDouble()) }
+                scrubbing?.let { CastController.seek(it.toDouble(),cast.generation) }
                 settling += 1
             },
             valueRange = 0f..duration.toFloat().coerceAtLeast(1f),
@@ -121,7 +121,7 @@ private fun Timeline(cast: ActiveCast) {
 @Composable
 private fun Volume(cast: ActiveCast) {
     val current = cast.state.volume ?: return
-    var dragging by remember { mutableStateOf<Float?>(null) }
+    var dragging by remember(cast.generation) { mutableStateOf<Float?>(null) }
     var settling by remember { mutableStateOf(0) }
     LaunchedEffect(settling) {
         if (settling > 0) {
@@ -135,7 +135,7 @@ private fun Volume(cast: ActiveCast) {
             value = dragging ?: current,
             onValueChange = { dragging = it },
             onValueChangeFinished = {
-                dragging?.let { CastController.setVolume(it) }
+                dragging?.let { CastController.setVolume(it,cast.generation) }
                 settling += 1
             },
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp),

@@ -95,7 +95,7 @@ fun CastDevicePicker(onPick: (CastDevice) -> Unit, onShowRemote: () -> Unit, onD
                     ListItem(
                         headlineContent = { Text("Stop Casting", color = MaterialTheme.colorScheme.error) },
                         leadingContent = { Icon(Icons.Filled.Stop, null, tint = MaterialTheme.colorScheme.error) },
-                        modifier = Modifier.clickable { CastController.stop() },
+                        modifier = Modifier.clickable { CastController.stop(active.generation) },
                         colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     )
                 }

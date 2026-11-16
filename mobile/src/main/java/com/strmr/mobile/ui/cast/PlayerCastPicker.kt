@@ -7,6 +7,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.strmr.mobile.cast.CastController
 import com.strmr.mobile.cast.handOff
+import com.strmr.mobile.cast.castable
 import com.strmr.tv.player.PlayerController
 
 /**
@@ -24,7 +25,7 @@ fun PlayerCastPicker(controller: PlayerController, onExit: () -> Unit, onDismiss
         CastDevicePicker(
             onPick = { device ->
                 onDismiss()
-                CastController.handOff(controller, device, close = onExit)
+                if(controller.session.castable() && controller.vodDenied.value==null)CastController.handOff(controller, device, close = onExit)
             },
             onShowRemote = { remote = true },
             onDismiss = onDismiss,

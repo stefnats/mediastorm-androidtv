@@ -10,6 +10,7 @@ import com.strmr.tv.app.AppLog
 import com.strmr.tv.player.PlaybackCoordinator
 import com.strmr.tv.player.PlaybackRequest
 import com.strmr.tv.player.PlayerSession
+import com.strmr.tv.player.PlaybackSessionContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -60,6 +61,7 @@ object DownloadPlayback {
                 sourceLabel = "Downloaded",
                 localFile = true,
                 progressSink = OfflineProgress.sink(item,context),
+                ownership=PlaybackSessionContext.capture(context.epoch),
                 localFileAccess={runCatching {OfflineAccess.require(context,item);true}.getOrDefault(false)},
             ),
         )

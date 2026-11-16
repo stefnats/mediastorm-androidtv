@@ -42,7 +42,7 @@ class PlayerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val session = PlaybackCoordinator.pending
-        if (session == null) {
+        if (session == null || !session.canOpenPlayer()) {
             finish()
             return
         }
@@ -63,16 +63,16 @@ class PlayerActivity : ComponentActivity() {
                 LaunchedEffect(Unit) { SubtitleStyleStore.adopt(ApiClient.playbackSettings().subtitleStyle) }
                 // Up Next: close this episode (saved as finished) and start the next over its loading art.
                 LaunchedEffect(next) {
-                    next?.let {
+                    next?.takeIf {session.canOpenPlayer()}?.let {
                         finish()
-                        PlaybackCoordinator.play(it)
+                        PlaybackCoordinator.play(it,expectedContext=requireNotNull(session.ownership).epoch)
                     }
                 }
                 // Switch Source: close this stream (saved at its position) and resume on the other.
                 LaunchedEffect(switch) {
-                    switch?.let {
+                    switch?.takeIf {session.canOpenPlayer()}?.let {
                         finish()
-                        PlaybackCoordinator.play(it.request, it.source, carried = it.carried, resolved = it.resolved, prepared = it.prepared)
+                        PlaybackCoordinator.play(it.request, it.source, carried = it.carried, resolved = it.resolved, prepared = it.prepared,expectedContext=requireNotNull(session.ownership).epoch)
                     }
                 }
                 if (postPlay != null) PostPlayScreen(c) { finish() }

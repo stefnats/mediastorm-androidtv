@@ -17,7 +17,9 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 
 /** A connected Chromecast, driven through the session's [RemoteMediaClient]. Main thread only. */
 class GoogleCastTransport(override val device: CastDevice, val session: CastSession) : CastTransport {
+    private val receiverId=session.castDevice?.deviceId
     override val canSeek = true
+    internal var ownershipCurrent:()->Boolean={false}
     private var subtitleLanguage: String? = null
     private var appliedSubtitle = false
 
@@ -110,14 +112,16 @@ class GoogleCastTransport(override val device: CastDevice, val session: CastSess
     }
 
     override suspend fun stop() {
+        if(session.castDevice?.deviceId!=receiverId)return
         runCatching {
             session.remoteMediaClient?.unregisterCallback(statusCallback)
             session.remoteMediaClient?.stop()
         }
-        GoogleCastService.disconnect()
+        GoogleCastService.disconnect(session,receiverId)
     }
 
     private fun applySubtitle() {
+        if(!ownershipCurrent() || session.castDevice?.deviceId!=receiverId)return
         val language = subtitleLanguage ?: return
         if (appliedSubtitle) return
         val client = session.remoteMediaClient ?: return

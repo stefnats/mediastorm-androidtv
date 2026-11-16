@@ -121,7 +121,7 @@ class CatchupJoin(private val controller: PlayerController, private val channel:
             AppLog.i("Catchup", "archive ${program.title} from ${offsetMs / 1000}s")
             controller.switching.value = true
             try {
-                val start = ApiClient.liveCatchup(channel, program, (offsetMs / 1000).toInt())
+                val start = ApiClient.liveCatchup(channel, program, (offsetMs / 1000).toInt(),controller.dataContext)
                 controller.liveRetune?.park()
                 // The provider may round the start down (whole minutes): seek on to the point asked for.
                 val startWall = program.startMs + start.offsetSeconds * 1000L

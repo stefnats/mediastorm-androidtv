@@ -30,6 +30,7 @@ import kotlinx.coroutines.launch
  * Trailer button pauses / resumes the backdrop trailer, else plays it full screen.
  */
 class TrailerController(private val context: Context, private val scope: CoroutineScope) {
+    private val dataContext=com.strmr.tv.library.ProfileDataContext.current
     /** The page has a trailer; the Trailer button shows. */
     var available by mutableStateOf(false)
         private set
@@ -59,6 +60,7 @@ class TrailerController(private val context: Context, private val scope: Corouti
 
     /** The page's trailer from details; a reload with the same one keeps what is under way. */
     fun prepare(next: Trailer?) {
+        if(dataContext!=com.strmr.tv.library.ProfileDataContext.current)return
         if (next == trailer) return
         trailer = next
         available = next != null
@@ -66,8 +68,9 @@ class TrailerController(private val context: Context, private val scope: Corouti
         prepareJob?.cancel()
         next ?: return
         prepareJob = scope.launch {
-            val url = ApiClient.trailerUrl(next)
-            val autoplay = TrailerSettings.autoPlay(server = ApiClient.playbackSettings().autoPlayTrailers)
+            val url = ApiClient.trailerUrl(next,dataContext)
+            val autoplay = TrailerSettings.autoPlay(server = ApiClient.playbackSettings(dataContext).autoPlayTrailers)
+            com.strmr.tv.library.ProfileDataContext.requireCurrent(dataContext)
             readyUrl = url
             if (!autoplay || url == null) return@launch
             val wait = START_DELAY_MS - (System.currentTimeMillis() - loadedAt)
@@ -77,6 +80,7 @@ class TrailerController(private val context: Context, private val scope: Corouti
     }
 
     private fun startBackdrop() {
+        if(dataContext!=com.strmr.tv.library.ProfileDataContext.current)return
         val url = readyUrl ?: return
         if (dismissed || player != null || PlaybackCoordinator.resolving.value != null) return
         val p = ExoPlayer.Builder(context).build()
@@ -138,6 +142,7 @@ class TrailerController(private val context: Context, private val scope: Corouti
 
     /** The Trailer button. */
     fun buttonPressed(titleName: String) {
+        if(dataContext!=com.strmr.tv.library.ProfileDataContext.current)return
         if (player != null) {
             togglePause()
             return
@@ -147,12 +152,14 @@ class TrailerController(private val context: Context, private val scope: Corouti
         dismiss("full screen")
         preparingFullScreen = true
         errorMessage = null
+        val expected=dataContext
         scope.launch {
             // Fetched again: the server deletes an unplayed download about a minute after it is
             // ready, and returns the same file while it is still there.
-            val url = ApiClient.trailerUrl(t)
+            val url = ApiClient.trailerUrl(t,expected)
+            com.strmr.tv.library.ProfileDataContext.requireCurrent(expected)
             preparingFullScreen = false
-            if (url != null) PlaybackCoordinator.playTrailer(url, "$titleName · Trailer") else errorMessage = "Unable to play trailer"
+            if (url != null) PlaybackCoordinator.playTrailer(url, "$titleName · Trailer",expected) else errorMessage = "Unable to play trailer"
         }
     }
 

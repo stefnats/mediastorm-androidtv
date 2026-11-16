@@ -51,7 +51,7 @@ import com.strmr.mobile.cast.CastPlaybackState
 fun CastRemoteSheet(onDismiss: () -> Unit) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val cast = CastController.session
-    ModalBottomSheet(onDismissRequest = { CastController.dismissFailure(); onDismiss() }, sheetState = sheet) {
+    ModalBottomSheet(onDismissRequest = { if(CastController.session?.generation==cast?.generation) {CastController.dismissFailure(cast?.generation); onDismiss()} }, sheetState = sheet) {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -64,7 +64,7 @@ fun CastRemoteSheet(onDismiss: () -> Unit) {
             } else {
                 Content(cast)
             }
-            TextButton(onClick = { CastController.dismissFailure(); onDismiss() }) { Text("Done") }
+            TextButton(onClick = { if(CastController.session?.generation==cast?.generation) {CastController.dismissFailure(cast?.generation); onDismiss()} }) { Text("Done") }
         }
     }
 }

@@ -32,6 +32,7 @@ class RecordingHls(
     private val scope: CoroutineScope,
     private var sessionId: String?,
     private val restart: suspend () -> LiveStream,
+    private val expectedContext:Long=com.strmr.tv.library.ProfileDataContext.current,
 ) {
     private var restarting = false
 
@@ -56,7 +57,7 @@ class RecordingHls(
         val id = sessionId ?: return null
         return ApiClient.keepLiveSessionAlive(
             id, positionSeconds = player.currentPosition / 1000.0, paused = !player.playWhenReady,
-            buffering = player.playbackState == Player.STATE_BUFFERING,
+            buffering = player.playbackState == Player.STATE_BUFFERING,expectedContext=expectedContext,
         )
     }
 
@@ -74,7 +75,7 @@ class RecordingHls(
                 val at = player.currentPosition
                 AppLog.w("Recordings", "growing HLS: playlist ended early at ${at / 1000.0}s, still recording; new session")
                 val next = restart()
-                sessionId?.let { old -> MainScope().launch { ApiClient.stopLiveSession(old) } }
+                sessionId?.let { old -> MainScope().launch { ApiClient.stopLiveSession(old,expectedContext) } }
                 sessionId = next.sessionId
                 player.setMediaItem(mediaItem(next.url), at)
                 player.playWhenReady = true
@@ -92,7 +93,7 @@ class RecordingHls(
 
     fun release() {
         keepalive.cancel()
-        sessionId?.let { id -> MainScope().launch { ApiClient.stopLiveSession(id) } }
+        sessionId?.let { id -> MainScope().launch { ApiClient.stopLiveSession(id,expectedContext) } }
     }
 
     private companion object {

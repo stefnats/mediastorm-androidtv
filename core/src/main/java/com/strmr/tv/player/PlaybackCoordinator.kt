@@ -81,8 +81,9 @@ object PlaybackCoordinator {
     val warm: StateFlow<WarmPrequeue?> get() = prequeue.warm
 
     /** Automatic catalog playback shares its selection with Up Next and prefetch. */
-    fun play(request: PlaybackRequest, picks: PrequeuePick? = null, chooseLegacyLibrary: (() -> Unit)? = null) {
-        val expected = ProfileDataContext.current
+    fun play(request: PlaybackRequest, picks: PrequeuePick? = null,expectedContext:Long=ProfileDataContext.current, chooseLegacyLibrary: (() -> Unit)? = null) {
+        val expected = expectedContext
+        if(expected!=ProfileDataContext.current)return
         begin(request, "Searching…", expectedContext = expected,
             resolveWithSettings = { settings -> catalog.resolve(request, settings, picks, expected, chooseLegacyLibrary) })
     }
@@ -96,9 +97,10 @@ object PlaybackCoordinator {
     fun play(
         request: PlaybackRequest, source: SourceResult, manual: ManualSourceTracks? = null, carried: CarriedTracks? = null,
         resolved: Pair<String, TrackSelection?>? = null,
-        prepared: com.strmr.tv.api.PrequeueStatus? = null,
+        prepared: com.strmr.tv.api.PrequeueStatus? = null,expectedContext:Long=ProfileDataContext.current,
     ) {
-        val expected=ProfileDataContext.current
+        val expected=expectedContext
+        if(expected!=ProfileDataContext.current)return
         // A stream picked over a library copy (Switch Source) is no longer that copy.
         begin(request.copy(libraryVersion = null), "Preparing…", carried = carried, expectedContext=expected, resolve = {
             if (prepared != null) {
@@ -121,9 +123,10 @@ object PlaybackCoordinator {
     }
 
     /** A trailer full screen, in the same player, without progress. */
-    fun playTrailer(url: String, name: String) {
+    fun playTrailer(url: String, name: String,expectedContext:Long=ProfileDataContext.current) {
         if (_resolving.value != null) return
-        pending = PlayerSession(PlaybackRequest(DetailsTarget("trailer", name, isMovie = true)), url, null, reportsProgress = false)
+        val ownership=PlaybackSessionContext.capture(expectedContext)
+        pending = PlayerSession(PlaybackRequest(DetailsTarget("trailer", name, isMovie = true)), url, null, reportsProgress = false,ownership=ownership)
         launchPlayer()
     }
 
@@ -170,7 +173,7 @@ object PlaybackCoordinator {
         }
         ApiClient.inContext(expectedContext) {
             pending = PlayerSession(request, ApiClient.recordingStreamUrl(recording, title,expectedContext), null, reportsProgress = false,
-                                    sourceLabel = StreamInfo.recording(recording.channelName))
+                                    sourceLabel = StreamInfo.recording(recording.channelName),ownership=PlaybackSessionContext.capture(expectedContext))
             launchPlayer()
         }
     }
@@ -179,7 +182,7 @@ object PlaybackCoordinator {
         if(expectedContext!=ProfileDataContext.current || _resolving.value!=null || !RecordingCaptureRules.playable(recording,part))return
         ApiClient.inContext(expectedContext) {
             val title="${RecordingRules.title(recording)} · Part ${part.index}"
-            pending=recordingPartSession(recording,part,ApiClient.recordingStreamUrl(recording,title,expectedContext,part))
+            pending=recordingPartSession(recording,part,ApiClient.recordingStreamUrl(recording,title,expectedContext,part),PlaybackSessionContext.capture(expectedContext))
             launchPlayer()
         }
     }
@@ -191,6 +194,7 @@ object PlaybackCoordinator {
      */
     fun playCatchup(channel: LiveChannel, program: EpgProgram) {
         if (_resolving.value != null) return
+        val ownership=PlaybackSessionContext.capture()
         val request = PlaybackRequest(DetailsTarget("catchup:${channel.id}:${program.start}", program.title, isMovie = true))
         AppLog.i("Catchup", "play ${channel.id} ${program.start} ${program.title}")
         _resolving.value = request
@@ -198,10 +202,12 @@ object PlaybackCoordinator {
         detail.value = null
         resolveJob = scope.launch {
             try {
-                val archive = ApiClient.liveCatchup(channel, program)
+                ownership.requireCurrent()
+                val archive = ApiClient.liveCatchup(channel, program,expectedContext=ownership.epoch)
+                ownership.requireCurrent()
                 AppLog.i("Catchup", "archive from ${archive.offsetSeconds}s for ${archive.durationSeconds}s")
                 pending = PlayerSession(request, ApiClient.catchupStreamUrl(archive, channel, program), null, reportsProgress = false,
-                                        sourceLabel = listOf("Catch-up", channel.name).joinToString(" · "))
+                                        sourceLabel = listOf("Catch-up", channel.name).joinToString(" · "),ownership=ownership)
                 launchPlayer()
             } catch (e: CancellationException) {
                 throw e
@@ -217,7 +223,7 @@ object PlaybackCoordinator {
      * unless another playback is resolving.
      */
     fun playSession(session: PlayerSession) {
-        if (_resolving.value != null || !session.playbackAllowed()) return
+        if (_resolving.value != null || !session.canOpenPlayer()) return
         pending = session
         launchPlayer()
     }
@@ -248,6 +254,7 @@ object PlaybackCoordinator {
         resolve: suspend () -> ResolvedStream = { error("no resolver") },
     ) {
         if (_resolving.value != null) return
+        val ownership=PlaybackSessionContext.capture(expectedContext ?: ProfileDataContext.current)
         AdaptiveThroughput.playbackStarting()
         _resolving.value = request
         stage.value = firstStage
@@ -261,7 +268,7 @@ object PlaybackCoordinator {
                     PlayerSession(request, stream.url, null, reportsProgress = false, liveSessionId = stream.sessionId,
                                   liveStream = stream,
                                   isLive = !growing, growingRestart = if (growing) suspend { live(false, null) } else null,
-                                  retuneLive = live.takeIf { !growing }, liveChannel = liveChannel, sourceLabel = liveLabel)
+                                  retuneLive = live.takeIf { !growing }, liveChannel = liveChannel, sourceLabel = liveLabel,ownership=ownership)
                 } else {
                     val settings = try {ApiClient.playbackSettings(expectedContext ?: ProfileDataContext.current)} catch(error:Exception) {error.rethrowVodDenial();null}
                     val r = if (resolveWithSettings != null) resolveWithSettings(settings) else resolve()
@@ -283,9 +290,10 @@ object PlaybackCoordinator {
                                   playback = settings, manualTracks = r.manualTracks, carried = carried, prequeueId = r.prequeueId, explicitAudioLanguage = r.explicitAudioLanguage,
                                   pickTracksOnDevice = r.pickTracksOnDevice,
                                   sourceLabel = StreamInfo.source(r.path, r.source, selectedRequest.libraryVersion?.origin),
-                                  sourceDolbyVision = r.source?.dolbyVisionProfile, sourceHdr10 = r.source?.hdr10 == true)
+                                  sourceDolbyVision = r.source?.dolbyVisionProfile, sourceHdr10 = r.source?.hdr10 == true,ownership=ownership)
                 }
                 fun publish() {
+                    ownership.requireCurrent()
                     pending = prepared
                     stage.value = "Starting…"
                     detail.value = null

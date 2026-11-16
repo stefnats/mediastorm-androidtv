@@ -45,9 +45,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 @OptIn(UnstableApi::class)
 class PlayerController(context: Context, val session: PlayerSession, private val onVideoFormat: (Format) -> Unit) {
     val request = session.request
-    val dataContext = ProfileDataContext.current
+    private val ownership=requireNotNull(session.ownership) {"Playback context is unavailable"}.also {it.requireCurrent()}
+    val dataContext = ownership.epoch
     private var released=false
-    val profileId = ApiClient.profileId
+    val profileId = ownership.profileId
     val player: ExoPlayer
     val isPlaying = MutableStateFlow(false)
     val buffering = MutableStateFlow(true)
@@ -178,7 +179,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
 
     private val backendMediaHeaders=ApiClient.inContext(dataContext) {ApiClient.mediaHeaders}
     private val mediaAccess=VodMediaAccess(ApiClient.inContext(dataContext) {ApiClient.baseUrl},
-        enabled=session.reportsProgress && !session.isLive && !session.localFile,backendHeaders=backendMediaHeaders,denialTitleId=request.title.titleId,context=dataContext)
+        enabled=session.reportsProgress && !session.isLive && !session.localFile,backendHeaders=backendMediaHeaders,denialTitleId=request.title.titleId,context=dataContext,requireCurrent=ownership::requireCurrent)
 
     internal fun denyVod(denial:com.strmr.tv.api.VodAccessDenial,attempt:com.strmr.tv.api.VodAttempt?=null) {
         if(released || dataContext!=ProfileDataContext.current || vodDenied.value!=null)return
@@ -262,6 +263,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         }
 
         override fun onPlayerError(e: PlaybackException) {
+            if(!session.canOpenPlayer()) {progress.discardFuture();player.stop();ended.value=true;return}
             if(released)return
             mediaAccess.failure(e)?.let {denyVod(it.reason,it.attempt);return}
             // A passthrough track the output refused: PassthroughGuard now offers PCM, so prepare again once.
@@ -297,7 +299,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     }
 
     init {
-        require(session.playbackAllowed()) {"This local file requires its original verified context."}
+        require(session.canOpenPlayer()) {"This local file requires its original verified context."}
         // Passthrough only where the output takes it (not Bluetooth); PCM otherwise.
         val renderers = PassthroughGuard.renderersFactory(context)
             // Platform decoders first; the FFmpeg extension (TrueHD, DTS…) when none can.
@@ -321,11 +323,11 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         player.addListener(listener)
         player.addListener(stallLog)
         progress = ProgressReporter(player, session, scope, context = dataContext) { autoSwitch.trigger(it) }
-        recordingHls = session.growingRestart?.let { RecordingHls(player, scope, session.liveSessionId, it) }
+        recordingHls = session.growingRestart?.let { RecordingHls(player, scope, session.liveSessionId, it,dataContext) }
         liveRetune = session.retuneLive?.let {
-            LiveRetune(player, scope, session.liveSessionId, session.liveChannel, it, ::liveGaveUp, session.liveStream) { next ->
+            LiveRetune(player, scope, session.liveSessionId, session.liveChannel, it, ::liveGaveUp, session.liveStream,tuned = { next ->
                 timeshift.value = next.timeshift
-            }
+            },expectedContext=dataContext)
         }
         catchup = session.liveChannel?.takeIf { session.isLive && LiveCatchups.window(it) > 0 }?.let { CatchupJoin(this, it) }
         // Debug builds log every player event under the EventLogger tag.
@@ -345,6 +347,13 @@ class PlayerController(context: Context, val session: PlayerSession, private val
             val video = tracks.value.ofType(C.TRACK_TYPE_VIDEO).firstOrNull { it.selected }?.format
             PlaybackThumbnails.Context(duration.value, player.currentPosition, buffering.value,
                                        hdr = video?.isHdr == true, dolbyVision = video?.isDolbyVision == true)
+        }
+    }
+
+    /** Retire the entire old scope before queued helpers can read a replacement identity. */
+    private val contextWatch=scope.launch {
+        ProfileDataContext.changes.collect {
+            if(!session.canOpenPlayer()) {progress.discardFuture();player.stop();ended.value=true;scope.cancel()}
         }
     }
 
@@ -443,6 +452,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         if (!ended.value && advanceTo.value == null && postPlay.value == null) report(paused = true, closing = true)
         closeReleaseReports()
         clock.cancel()
+        contextWatch.cancel()
         online.cancel()
         external.cancel()
         thumbnails?.cancel()

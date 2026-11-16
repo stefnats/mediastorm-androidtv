@@ -212,13 +212,16 @@ private data class KeepAlive(val growing: Boolean = false)
 suspend fun ApiClient.keepLiveSessionAlive(
     sessionId: String, positionSeconds: Double? = null, paused: Boolean? = null, buffering: Boolean? = null,
     failOnCapacityRejection: Boolean = false,
+    expectedContext:Long=ProfileDataContext.current,
 ): Boolean? = try {
+    val profile=inContext(expectedContext){profileId}
     val q = buildMap {
+        put("profileId",profile)
         positionSeconds?.let { put("time", "%.3f".format(java.util.Locale.US, it)) }
         paused?.let { put("paused", it.toString()) }
         buffering?.let { put("buffering", it.toString()) }
     }
-    val text = sendRaw("POST", "/api/video/hls/${segment(sessionId)}/keepalive", q, promptOnLock = false, timeoutMs = 10_000)
+    val text = sendRaw("POST", "/api/video/hls/${segment(sessionId)}/keepalive", q, promptOnLock = false, timeoutMs = 10_000,expectedContext=expectedContext)
     runCatching { json.decodeFromString<KeepAlive>(text).growing }.getOrNull()
 } catch (error: kotlinx.coroutines.CancellationException) {
     throw error
@@ -227,13 +230,14 @@ suspend fun ApiClient.keepLiveSessionAlive(
     null
 }
 
-suspend fun ApiClient.stopLiveSession(sessionId: String) {
-    runCatching { stopLiveSessionStrict(sessionId) }
+suspend fun ApiClient.stopLiveSession(sessionId: String,expectedContext:Long=ProfileDataContext.current) {
+    try {stopLiveSessionStrict(sessionId,expectedContext)}catch(error:kotlinx.coroutines.CancellationException){throw error}catch(_:Exception){}
 }
 
 /** Like [stopLiveSession], but throws when the server didn't confirm, so the caller can retry. */
-suspend fun ApiClient.stopLiveSessionStrict(sessionId: String) {
-    sendRaw("POST", "/api/video/hls/${segment(sessionId)}/stop", promptOnLock = false, timeoutMs = 10_000)
+suspend fun ApiClient.stopLiveSessionStrict(sessionId: String,expectedContext:Long=ProfileDataContext.current) {
+    val profile=inContext(expectedContext){profileId}
+    sendRaw("POST", "/api/video/hls/${segment(sessionId)}/stop",mapOf("profileId" to profile),promptOnLock = false, timeoutMs = 10_000,expectedContext=expectedContext)
 }
 
 /** `GET /api/live/usage`: the provider's open streams against its connection limit. */

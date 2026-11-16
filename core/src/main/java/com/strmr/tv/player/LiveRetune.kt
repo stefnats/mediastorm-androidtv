@@ -57,6 +57,7 @@ class LiveRetune(
     first: LiveStream? = null,
     /** Each fresh stream a retune or failover opens (it may keep a timeshift window, or not). */
     private val tuned: (LiveStream) -> Unit = {},
+    private val expectedContext:Long=com.strmr.tv.library.ProfileDataContext.current,
 ) {
     /** The channel playing; its `stremioStreamIndex` moves on under Stremio failover. */
     var channel: LiveChannel? = channel
@@ -85,7 +86,7 @@ class LiveRetune(
             delay(KEEPALIVE_MS)
             sessionId?.let {
                 try {
-                    ApiClient.keepLiveSessionAlive(it, failOnCapacityRejection = true)
+                    ApiClient.keepLiveSessionAlive(it, failOnCapacityRejection = true,expectedContext=expectedContext)
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
@@ -257,7 +258,7 @@ class LiveRetune(
     private suspend fun open(): LiveStream? = withContext(NonCancellable) {
         val next = tune(hls.forcesHls, channel?.stremioStreamIndex)
         if (released) {
-            next.sessionId?.let { ApiClient.stopLiveSession(it) }
+            next.sessionId?.let { ApiClient.stopLiveSession(it,expectedContext) }
             null
         } else next.also { sessionId = it.sessionId }
     }
@@ -305,7 +306,7 @@ class LiveRetune(
     private fun endSession() {
         val id = sessionId ?: return
         sessionId = null
-        MainScope().launch { ApiClient.stopLiveSession(id) }
+        MainScope().launch { ApiClient.stopLiveSession(id,expectedContext) }
     }
 
     /**

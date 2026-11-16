@@ -94,7 +94,7 @@ fun CastNowPlayingBar() {
                 }
                 if (cast.phase == ActiveCast.Phase.Active) {
                     val playing = cast.state.isPlaying
-                    IconButton(onClick = { CastController.togglePlayPause() }) {
+                    IconButton(onClick = { CastController.togglePlayPause(cast.generation) }) {
                         Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "Pause" else "Play")
                     }
                 }
