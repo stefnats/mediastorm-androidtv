@@ -74,7 +74,7 @@ fun LiveProgramSheet(store: LiveStore, target: LiveSheetTarget, now: Long, onDis
             if (program == null || program.stopMs > now) {
                 section("Record", LiveActions.record(program, recordTarget, existing, rule, now), run)
             }
-            section("Channel", LiveActions.channel(channel, channel.id in store.favorites, channel.id in store.hidden), run)
+            section("Channel", LiveActions.channel(channel, channel.id in store.favorites, channel.id in store.hidden,store.stationAction(channel),store.stationFavoritesSupported), run)
             val later = upcoming(store, channel, program, now)
             if (later.isNotEmpty()) {
                 item { SectionTitle("Later on ${channel.name}") }
@@ -99,7 +99,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.section(title: String
             headlineContent = { Text(a.label) },
             leadingContent = { Icon(icon(a), contentDescription = null) },
             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            modifier = Modifier.clickable { run(a) },
+            modifier = Modifier.clickable(enabled=a.enabled) { run(a) },
         )
     }
 }
@@ -119,7 +119,7 @@ private fun icon(a: LiveAction): ImageVector = when (a) {
     is LiveAction.CancelSeries -> Icons.Filled.Block
     is LiveAction.RecordBlock -> Icons.Filled.Timer
     is LiveAction.ChooseSource -> Icons.Filled.Layers
-    is LiveAction.Favorite -> Icons.Filled.Star
+    is LiveAction.Favorite, is LiveAction.StationFavorite -> Icons.Filled.Star
     is LiveAction.Hide -> Icons.Filled.Visibility
 }
 
@@ -180,6 +180,7 @@ fun LiveStore.perform(action: LiveAction, channel: LiveChannel) {
         is LiveAction.RecordBlock -> rec.recordTwoHours(channel)
         is LiveAction.ChooseSource -> chooseSource(channel)
         is LiveAction.Favorite -> toggleFavorite(channel)
+        is LiveAction.StationFavorite -> setStationFavorite(action.station)
         is LiveAction.Hide -> toggleHidden(channel)
     }
 }

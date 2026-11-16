@@ -117,7 +117,10 @@ fun ChannelMenu(store: LiveStore, channel: LiveChannel, program: EpgProgram? = n
         ) + recordChoices + listOfNotNull(
             DialogChoice("Record 2 Hour Block") { rec.recordTwoHours(channel) },
             if (channel.hasStremioSources) DialogChoice("Choose Source") { store.chooseSource(channel) } else null,
-            DialogChoice(if (channel.id in store.favorites) "Remove from Favorites" else "Add to Favorites") { store.toggleFavorite(channel) },
+            store.stationAction(channel)?.takeUnless { it.pending }?.let { action -> DialogChoice(action.label) { store.setStationFavorite(action) } },
+            DialogChoice(if (store.stationFavoritesSupported) {
+                if(channel.id in store.favorites) "Remove stream from Favorites" else "Add stream to Favorites"
+            } else if(channel.id in store.favorites) "Remove from Favorites" else "Add to Favorites") { store.toggleFavorite(channel) },
             DialogChoice(if (channel.id in store.hidden) "Show Channel" else "Hide Channel") { store.toggleHidden(channel) },
             DialogChoice("Cancel") {},
         ),

@@ -56,4 +56,20 @@ class LiveActionsTest {
         assertEquals(listOf("Add to Favorites", "Hide Channel"), LiveActions.channel(channel, false, false).map { it.label })
         assertEquals(listOf("Remove from Favorites", "Show Channel"), LiveActions.channel(channel, true, true).map { it.label })
     }
+
+    @Test fun stationAndStreamFavoritesRemainSeparateInFlatChannelMenu() {
+        val station=com.strmr.tv.live.StationFavoriteAction("station:"+"a".repeat(24),true,false)
+        val actions=LiveActions.channel(channel,false,false,station,true)
+        assertEquals(listOf("Remove station from Favorites","Add stream to Favorites","Hide Channel"),actions.map {it.label})
+        assertTrue((actions.first() as LiveAction.StationFavorite).station.favorite)
+        assertTrue(actions.first().enabled)
+    }
+    @Test fun pendingStationActionIsDisabledWithoutDisablingStreamFavorite() {
+        val station=com.strmr.tv.live.StationFavoriteAction("station:"+"a".repeat(24),false,true)
+        val actions=LiveActions.channel(channel,true,false,station,true)
+        org.junit.Assert.assertFalse(actions.first().enabled)
+        assertEquals("Saving station favorite…",actions.first().label)
+        assertEquals("Remove stream from Favorites",actions[1].label)
+        assertTrue(actions[1].enabled)
+    }
 }

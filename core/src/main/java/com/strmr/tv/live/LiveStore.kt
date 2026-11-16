@@ -11,6 +11,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /** What the Live tab lists: every channel, the favorites, or one or more categories. */
 sealed interface LiveFilter {
@@ -38,26 +40,33 @@ sealed interface LiveFilter {
  * profile's settings (`liveTV`), shared with the Expo app; the category selection is kept on
  * this device, per profile, and restored on return. Guide data is [LiveGuideData]. Main thread only.
  */
-class LiveStore(private val scope: CoroutineScope, val dataContext: Long = ProfileDataContext.current) {
-    data class Query(val filter: LiveFilter, val sourceId: String?, val search: String, val groupByStation: Boolean = true, val favoriteIds: Set<String> = emptySet())
+class LiveStore(
+    private val scope: CoroutineScope, val dataContext: Long = ProfileDataContext.current,
+    private val preferences: LiveViewPreferences = LivePrefs,
+    private val catalog: LiveCatalogAccess = ApiLiveCatalogAccess,
+    private val stationFavorites: StationFavorites = ProfileStationFavorites.get(dataContext),
+    private val profileId: String = ApiClient.profileId,
+) {
+    data class Query(val filter: LiveFilter, val sourceId: String?, val search: String, val groupByStation: Boolean = true,
+        val favoriteIds: Set<String> = emptySet(), val favoriteStationIds: Set<String>? = null, val includeHidden: Boolean? = null,
+        val hiddenRevision: Long = 0)
     private val pages = LivePageGate<Query>()
     val isContextCurrent get() = dataContext == ProfileDataContext.current
     private fun checkContext() = ProfileDataContext.requireCurrent(dataContext)
 
-    private val profileId = ApiClient.profileId
-    private var filterState = mutableStateOf(LiveFilter.selecting(LivePrefs.categories(profileId)))
+    private var filterState = mutableStateOf(LiveFilter.selecting(preferences.categories(profileId)))
     var filter: LiveFilter
         get() = filterState.value
         set(value) {
             filterState.value = value
-            if (value != LiveFilter.Favorites) LivePrefs.saveCategories(profileId, value.categories)
+            if (value != LiveFilter.Favorites) preferences.saveCategories(profileId, value.categories)
         }
     /** Where the header's star goes back to when Favorites is turned off. */
     private var filterBeforeFavorites: LiveFilter = filter
-    private val grouping = mutableStateOf(LivePrefs.groupStations(profileId))
+    private val grouping = mutableStateOf(preferences.groupStations(profileId))
     var groupByStation: Boolean
         get() = grouping.value
-        set(value) { if (isContextCurrent) { grouping.value = value; LivePrefs.saveGroupStations(profileId,value) } }
+        set(value) { if (isContextCurrent) { grouping.value = value; preferences.saveGroupStations(profileId,value) } }
     private var collapsedStations by mutableStateOf<Set<String>>(emptySet())
     private val stationRows = derivedStateOf { LiveStationGroups.rows(visibleChannels,groupByStation,collapsedStations) }
     val channelRows get() = stationRows.value
@@ -66,7 +75,10 @@ class LiveStore(private val scope: CoroutineScope, val dataContext: Long = Profi
     var sourceId by mutableStateOf<String?>(null)
     var search by mutableStateOf("")
         private set
-    var showHidden by mutableStateOf(false)
+    private var hiddenVisible by mutableStateOf(false)
+    var showHidden: Boolean
+        get() = hiddenVisible
+        set(value) { if(isContextCurrent) { val before=query;hiddenVisible=value;invalidateIfChanged(before) } }
 
     var channels by mutableStateOf<List<LiveChannel>>(emptyList())
         private set
@@ -107,11 +119,51 @@ class LiveStore(private val scope: CoroutineScope, val dataContext: Long = Profi
     private var loadingFor by mutableStateOf<Query?>(null)
     private var loadedFor: Query? = null
     private var listsLoaded = false
+    private var legacyRevision = 0L
+    private var legacyReadSequence = 0L
+    private var legacySaves = 0
     private var searchJob: Job? = null
     /** Waits out a server guide refresh, then re-fetches the guide data. */
     private var guideRefreshJob: Job? = null
 
-    val query get() = Query(filter, sourceId, search, groupByStation,if (filter == LiveFilter.Favorites) favorites else emptySet())
+    private var stationState by mutableStateOf(stationFavorites.state.value)
+    private var hiddenRevision by mutableStateOf(0L)
+    init { scope.launch { stationFavorites.state.collect { if(isContextCurrent)applyStationState(it) } } }
+    private fun invalidateIfChanged(before: Query) {
+        if(query!=before) { pages.reset();loadingFor=null;loadedFor=null }
+    }
+    private fun applyStationState(state: StationFavoriteState) {
+        val before=query
+        stationState=state
+        invalidateIfChanged(before)
+    }
+    val stationFavoritesSupported get() = isContextCurrent && stationState.supported
+    val favoriteStationIds get() = if(isContextCurrent)stationState.ids else emptySet()
+    val stationFavoriteFailure get() = stationState.failures.values.firstOrNull()
+    val stationFavoriteSettingsFailed get() = stationState.loadError != null
+    val stationFavoriteSaving get() = stationState.pending.isNotEmpty()
+    val stationFavoriteError get() = stationState.loadError ?: stationFavoriteFailure?.message
+    val stationFavoriteBusy get() = stationFavoriteFailure?.stationId in stationState.pending
+    val query: Query get() {
+        val ids=if(!stationState.supported)null else if(filter==LiveFilter.Favorites)stationState.ids.toSet() else emptySet()
+        val stationMode=!ids.isNullOrEmpty()
+        return Query(filter,sourceId,search,groupByStation,if(filter==LiveFilter.Favorites)favorites.toSet() else emptySet(),
+            ids,if(stationMode)showHidden else null,if(stationMode && !showHidden)hiddenRevision else 0)
+    }
+    fun stationAction(channel: LiveChannel): StationFavoriteAction? = StationFavoriteIds.from(channel)?.let(::stationAction)
+    fun stationAction(id: String): StationFavoriteAction? =
+        if(isCurrent && channels.any { StationFavoriteIds.from(it)==id }) stationFavorites.action(id) else null
+    fun setStationFavorite(action: StationFavoriteAction) {
+        if(!isContextCurrent || !isCurrent || !channels.any { StationFavoriteIds.from(it)==action.stationId })return
+        stationFavorites.set(action.stationId,action.desired)
+        applyStationState(stationFavorites.state.value)
+    }
+    fun retryStationFavorite() {
+        if(!isContextCurrent)return
+        stationFavoriteFailure?.let { stationFavorites.retry(it);applyStationState(stationFavorites.state.value) }
+    }
+    fun retryFavoriteSettings() { if(isContextCurrent)scope.launch { loadFavoriteSettings();reload(force=true) } }
+
     /** The channels to show: hidden ones only while [showHidden] is on. */
     val visibleChannels get() = if (showHidden || hidden.isEmpty()) channels else channels.filterNot { it.id in hidden }
     val isLoading get() = loadingFor != null
@@ -123,21 +175,33 @@ class LiveStore(private val scope: CoroutineScope, val dataContext: Long = Profi
     /** First load: the profile's lists and the EPG status, then the first page. */
     suspend fun start() {
         checkContext()
-        if (!listsLoaded) {
-            val lists = try { ApiClient.liveChannelLists(expectedContext = dataContext) }
-                catch (error: CancellationException) { throw error }
-                catch (_: Exception) { null }
-            checkContext()
-            lists?.let { (fav, hid) ->
-                favorites = fav.toSet()
-                hidden = hid.toSet()
-                listsLoaded = true
-            }
-            val enabled = ApiClient.epgEnabled()
+        if (!listsLoaded) loadFavoriteSettings()
+        if (epgEnabled == null) {
+            val enabled = catalog.epgEnabled(dataContext)
+            currentCoroutineContext().ensureActive()
             checkContext()
             epgEnabled = enabled
         }
         reload()
+    }
+
+    private suspend fun loadFavoriteSettings() {
+        checkContext()
+        val ticket=stationFavorites.beginRead()
+        val legacyRead=legacyRevision
+        val sequence=++legacyReadSequence
+        val lists=try { catalog.preferences(dataContext) }
+            catch(error: CancellationException){throw error}
+            catch(_:Exception){stationFavorites.failRead(ticket);null}
+        checkContext()
+        currentCoroutineContext().ensureActive()
+        lists?.let {
+            if(legacyRead==legacyRevision && sequence==legacyReadSequence && legacySaves==0) {
+                favorites=it.favorites.toSet();hidden=it.hidden.toSet();listsLoaded=true
+            }
+            stationFavorites.acceptRead(ticket,it)
+        }
+        applyStationState(stationFavorites.state.value)
     }
 
     /** Debounced into [search] before it reaches the server. */
@@ -174,18 +238,8 @@ class LiveStore(private val scope: CoroutineScope, val dataContext: Long = Profi
         loadingFor = requested
         pageError = null
         val offset = ticket.offset
-        val favoritesOnly = requested.filter == LiveFilter.Favorites
         try {
-            val page = ApiClient.liveChannels(
-                // Sent with any other filter, the server would list favorites first (and keep them
-                // in every category and search), so they go only with Favorites.
-                favoriteIds = requested.favoriteIds.sorted(), favoritesOnly = favoritesOnly,
-                offset = offset, limit = PAGE, sourceId = requested.sourceId,
-                categories = requested.filter.categories.sorted(),
-                search = requested.search,
-                groupByStation = requested.groupByStation,
-                expectedContext = dataContext,
-            )
+            val page = catalog.page(requested,offset,PAGE,dataContext)
             if (!isContextCurrent || !pages.commitPage(ticket,query,page.channels.size)) return
             val seen = if (offset == 0) mutableSetOf() else channels.map(LiveStationGroups::entryKey).toMutableSet()
             val fresh = page.channels.filter { seen.add(LiveStationGroups.entryKey(it)) }
@@ -243,17 +297,18 @@ class LiveStore(private val scope: CoroutineScope, val dataContext: Long = Profi
         val previous = favorites
         val previousChannels = channels
         favorites = if (channel.id in favorites) favorites - channel.id else favorites + channel.id
-        if (filter == LiveFilter.Favorites && channel.id !in favorites) {
+        if (filter == LiveFilter.Favorites && channel.id !in favorites &&
+            !(stationFavoritesSupported && StationFavoriteIds.from(channel) in favoriteStationIds)) {
             channels = channels.filterNot { it.id == channel.id }
         }
-        save { favorites = previous; channels = previousChannels }
+        save(revert = { favorites = previous; channels = previousChannels })
     }
 
     fun toggleHidden(channel: LiveChannel) {
         if (!isContextCurrent) return
         val previous = hidden
         hidden = if (channel.id in hidden) hidden - channel.id else hidden + channel.id
-        save { hidden = previous }
+        save(revert = { hidden = previous },onSaved = { val before=query;hiddenRevision++;invalidateIfChanged(before) })
     }
 
     // Choose Source
@@ -296,20 +351,25 @@ class LiveStore(private val scope: CoroutineScope, val dataContext: Long = Profi
         }
     }
 
-    private fun save(revert: () -> Unit) {
+    private fun save(revert: () -> Unit, onSaved: () -> Unit = {}) {
+        legacyRevision++
+        legacySaves++
         val fav = favorites.sorted()
         val hid = hidden.sorted()
         scope.launch {
             try {
-                ApiClient.saveLiveChannelLists(fav, hid, expectedContext = dataContext)
+                catalog.saveLegacy(fav, hid, dataContext)
                 checkContext()
                 actionError = null
+                onSaved()
             } catch (error: CancellationException) {
                 throw error
             } catch (e: Exception) {
                 checkContext()
                 revert()
                 actionError = e.message
+            } finally {
+                if(isContextCurrent) { legacyRevision++;legacySaves-- }
             }
         }
     }

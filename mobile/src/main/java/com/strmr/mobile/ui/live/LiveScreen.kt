@@ -128,6 +128,7 @@ fun LiveScreen(asPage: Boolean) {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
                      modifier = Modifier.padding(horizontal = 16.dp))
             }
+            StationFavoriteStatus(store)
             PullToRefreshBox(
                 isRefreshing = refreshing,
                 onRefresh = { scope.launch { refreshing = true; store.reload(force = true); refreshing = false } },

@@ -8,6 +8,7 @@ import com.strmr.tv.live.SeriesRule
 
 /** One action in a channel's or programme's menu and sheet, with its TV wording. */
 sealed class LiveAction(val label: String) {
+    open val enabled: Boolean get() = true
     /** Tunes the channel live. */
     class WatchLive(label: String, val program: EpgProgram?) : LiveAction(label)
     /** Plays [program] from the provider's catch-up (an ended one, or Start Over on air). */
@@ -20,6 +21,7 @@ sealed class LiveAction(val label: String) {
     class RecordBlock : LiveAction("Record 2 Hour Block")
     class ChooseSource : LiveAction("Choose Source")
     class Favorite(label: String) : LiveAction(label)
+    class StationFavorite(val station: com.strmr.tv.live.StationFavoriteAction) : LiveAction(station.label) { override val enabled get() = !station.pending }
     class Hide(label: String) : LiveAction(label)
 }
 
@@ -78,9 +80,13 @@ object LiveActions {
     }
 
     /** The channel's own choices: Choose Source (Stremio channels), favorite and hide. */
-    fun channel(channel: LiveChannel, favorite: Boolean, hidden: Boolean): List<LiveAction> = listOfNotNull(
+    fun channel(channel: LiveChannel, favorite: Boolean, hidden: Boolean,
+        station: com.strmr.tv.live.StationFavoriteAction? = null, stationSupported: Boolean = false): List<LiveAction> = listOfNotNull(
         if (channel.hasStremioSources) LiveAction.ChooseSource() else null,
-        LiveAction.Favorite(if (favorite) "Remove from Favorites" else "Add to Favorites"),
+        station?.let { LiveAction.StationFavorite(it) },
+        LiveAction.Favorite(if(stationSupported) {
+            if(favorite) "Remove stream from Favorites" else "Add stream to Favorites"
+        } else if(favorite) "Remove from Favorites" else "Add to Favorites"),
         LiveAction.Hide(if (hidden) "Show Channel" else "Hide Channel"),
     )
 }

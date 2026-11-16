@@ -57,7 +57,8 @@ fun LiveChannelList(store: LiveStore, now: Long, onMenu: (LiveSheetTarget) -> Un
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = 24.dp)) {
         itemsIndexed(rows,key = { _,row -> row.key }) { _,row ->
             if (row is LiveStationGroups.Header) {
-                OutlinedButton(onClick = { store.toggleStation(row.stationId) },modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp,vertical = 8.dp).semantics {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp,vertical = 8.dp),horizontalArrangement = Arrangement.spacedBy(8.dp),verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(onClick = { store.toggleStation(row.stationId) },modifier = Modifier.weight(1f).semantics {
                     stateDescription = if (row.expanded) "Expanded" else "Collapsed"
                 }) {
                     Row(Modifier.fillMaxWidth(),horizontalArrangement = Arrangement.spacedBy(12.dp),verticalAlignment = Alignment.CenterVertically) {
@@ -68,6 +69,8 @@ fun LiveChannelList(store: LiveStore, now: Long, onMenu: (LiveSheetTarget) -> Un
                         }
                         Text(if (row.expanded) "Hide sources" else "Show sources")
                     }
+                }
+                StationFavoriteButton(store,row.stationId)
                 }
             } else if (row is LiveStationGroups.Channel) {
                 val channel = row.channel

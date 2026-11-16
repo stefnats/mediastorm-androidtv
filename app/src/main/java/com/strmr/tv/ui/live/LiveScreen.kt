@@ -180,6 +180,8 @@ fun LiveScreen(pick: LivePick? = null, sharedStore: LiveStore? = null) {
             store.notice?.let { Text(it, color = Color.White.copy(alpha = 0.6f), modifier = Modifier.padding(horizontal = PageMargin, vertical = 4.dp)) }
         }
 
+        StationFavoriteStatus(store)
+
         // Down from the controls enters the content where it was left (or its top).
         val content = Modifier.weight(1f).onFocusChanged { contentFocused = it.hasFocus }
         key(store.dataContext) { when {

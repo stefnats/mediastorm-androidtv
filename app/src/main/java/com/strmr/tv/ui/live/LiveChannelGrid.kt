@@ -72,7 +72,8 @@ fun LiveChannelGrid(store: LiveStore, now: Long, entry: FocusRequester, modifier
     ) {
         itemsIndexed(rows,key = { _,row -> row.key },span = { _,row -> GridItemSpan(if (row is LiveStationGroups.Header) maxLineSpan else 1) }) { _,row ->
             if (row is LiveStationGroups.Header) {
-                OutlinedButton(onClick = { store.toggleStation(row.stationId) },modifier = Modifier.fillMaxWidth().semantics {
+                Row(Modifier.fillMaxWidth(),horizontalArrangement = Arrangement.spacedBy(8.dp),verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(onClick = { store.toggleStation(row.stationId) },modifier = Modifier.weight(1f).semantics {
                     stateDescription = if (row.expanded) "Expanded" else "Collapsed"
                 }) {
                     Row(Modifier.fillMaxWidth(),horizontalArrangement = Arrangement.spacedBy(12.dp),verticalAlignment = Alignment.CenterVertically) {
@@ -83,6 +84,8 @@ fun LiveChannelGrid(store: LiveStore, now: Long, entry: FocusRequester, modifier
                         }
                         Text(if (row.expanded) "Hide sources" else "Show sources")
                     }
+                }
+                StationFavoriteButton(store,row.stationId)
                 }
             } else if (row is LiveStationGroups.Channel) {
                 val channel = row.channel

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "files": [
+    "channels-request.json",
+    "channels-station-favorites.json",
+    "empty-snapshot.json",
+    "favorite-snapshot.json",
+    "settings-supported.json"
+  ]
+}

@@ -37,8 +37,13 @@ private data class LiveStart(
 )
 
 /** The profile's settings document, read raw so writes keep every field this app doesn't model. */
-private suspend fun ApiClient.userSettingsObject(expectedContext: Long? = null): JsonObject =
-    json.parseToJsonElement(sendRaw("GET", "$profilePath/settings", expectedContext = expectedContext)) as? JsonObject ?: JsonObject(emptyMap())
+private suspend fun ApiClient.userSettingsObject(expectedContext: Long? = null): JsonObject {
+    val captured=expectedContext ?: ProfileDataContext.current
+    val path=inContext(captured) { "$profilePath/settings" }
+    val value=json.parseToJsonElement(sendRaw("GET",path,expectedContext=captured)) as? JsonObject ?: JsonObject(emptyMap())
+    ProfileDataContext.requireCurrent(captured)
+    return value
+}
 
 /** The profile's `liveTV` favorites and hidden channels, from user settings. */
 suspend fun ApiClient.liveChannelLists(expectedContext: Long? = null): Pair<List<String>, List<String>> {
@@ -74,9 +79,21 @@ suspend fun ApiClient.liveChannels(
     search: String = "",
     groupByStation: Boolean? = null,
     expectedContext: Long? = null,
+    favoriteStationIds: List<String>? = null,
+    includeHidden: Boolean? = null,
 ): LiveChannelsPage {
-    val body = buildJsonObject {
-        put("profileId", profileId)
+    val captured=expectedContext ?: ProfileDataContext.current
+    val profile=inContext(captured) { profileId }
+    val body = liveChannelsBody(profile,favoriteIds,favoritesOnly,offset,limit,sourceId,categories,search,groupByStation,favoriteStationIds,includeHidden)
+    return send("POST", "/api/live/channels", body = body, timeoutMs = 60_000, expectedContext = captured)
+}
+
+internal fun liveChannelsBody(
+    profile: String, favoriteIds: List<String>, favoritesOnly: Boolean, offset: Int, limit: Int,
+    sourceId: String? = null, categories: List<String> = emptyList(), search: String = "", groupByStation: Boolean? = null,
+    favoriteStationIds: List<String>? = null, includeHidden: Boolean? = null,
+): JsonObject = buildJsonObject {
+        put("profileId", profile)
         put("offset", offset)
         put("limit", limit)
         put("favoritesOnly", favoritesOnly)
@@ -85,13 +102,22 @@ suspend fun ApiClient.liveChannels(
         sourceId?.let { put("sourceId", it) }
         if (categories.isNotEmpty()) putJsonArray("categories") { categories.forEach { add(JsonPrimitive(it)) } }
         if (search.isNotEmpty()) put("filter", search)
-    }
-    return send("POST", "/api/live/channels", body = body, timeoutMs = 60_000, expectedContext = expectedContext)
+        favoriteStationIds?.let { ids ->
+            require(ids.size<=StationFavoriteIds.MAX && ids.all(StationFavoriteIds::valid)) { "Invalid station favorites" }
+            putJsonArray("favoriteStationIds") { ids.distinct().sorted().forEach { add(JsonPrimitive(it)) } }
+            if(ids.isNotEmpty()) includeHidden?.let { put("includeHidden",it) }
+        }
 }
 
-suspend fun ApiClient.epgStatus(): EpgStatus = send("GET", "/api/live/epg/status", mapOf("profileId" to profileId))
+suspend fun ApiClient.epgStatus(expectedContext: Long? = null): EpgStatus {
+    val captured=expectedContext ?: ProfileDataContext.current
+    val profile=inContext(captured) { profileId }
+    return send("GET", "/api/live/epg/status", mapOf("profileId" to profile),expectedContext=captured)
+}
 
-suspend fun ApiClient.epgEnabled(): Boolean = runCatching { epgStatus().enabled }.getOrDefault(false)
+suspend fun ApiClient.epgEnabled(expectedContext: Long? = null): Boolean = try { epgStatus(expectedContext).enabled }
+    catch(error: kotlinx.coroutines.CancellationException) { throw error }
+    catch(_:Exception) { false }
 
 /** Has the server re-download its guide in the background; false when it couldn't start. */
 suspend fun ApiClient.startEpgRefresh(): Boolean = runCatching { sendRaw("POST", "/api/live/epg/refresh") }.isSuccess
