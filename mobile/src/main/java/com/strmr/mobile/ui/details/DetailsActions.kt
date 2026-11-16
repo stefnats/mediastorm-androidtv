@@ -95,16 +95,17 @@ fun PrimaryActions(state: DetailsPageState) {
  * for a movie, the bulk sheet for a series), then whatever [DetailsExtras] adds.
  */
 @Composable
-fun SecondaryActions(state: DetailsPageState, trailer: TrailerController, extras: DetailsActionContext) {
+fun SecondaryActions(state: DetailsPageState, trailer: TrailerController, extras: DetailsActionContext, currentRoute: () -> Boolean) {
     val model = state.model
     val target = model.target
     val listScope = rememberCoroutineScope()
-    val listOperations = remember(model, model.accessGeneration) {
-        CustomListOperations(model.dataContext, target) { listScope.coroutineContext[Job]?.isActive != false }
+    val active = currentRoute()
+    val listOperations = remember(model, model.accessGeneration, active) {
+        CustomListOperations(model.dataContext, target) { currentRoute() && listScope.coroutineContext[Job]?.isActive != false }
     }
     DisposableEffect(listOperations) { onDispose { listOperations.close() } }
     val scope = rememberCoroutineScope()
-    var watchlistBusy by remember { mutableStateOf(false) }
+    var watchlistBusy by remember(listOperations) { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Top) {
         DetailsActionItem("Sources", Icons.Outlined.Search, enabled = state.playbackCurrent && (target.isMovie || state.activeEpisode != null)) {
             state.sourcesFor = EpisodeTarget(state.activeEpisode)
@@ -118,10 +119,14 @@ fun SecondaryActions(state: DetailsPageState, trailer: TrailerController, extras
         val inList = WatchlistStore.contains(target, model.serverInWatchlist)
         DetailsActionItem(if (inList) "Saved" else "Watchlist", if (inList) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder) {
             if (!watchlistBusy) {
-                watchlistBusy = true
+                val operation = listOperations.begin(key = "watchlist") ?: return@DetailsActionItem
+                val saved = !inList
+                operation.publish { watchlistBusy = true }
                 scope.launch {
-                    runCatching { WatchlistStore.toggle(target, model.serverInWatchlist) }
-                    watchlistBusy = false
+                    try { listOperations.run(operation) { WatchlistStore.setSaved(target, saved, it) } }
+                    catch (error: kotlinx.coroutines.CancellationException) { throw error }
+                    catch (error: Exception) { operation.publish { com.strmr.tv.ui.AppToast.show(com.strmr.tv.library.watchlistFailureMessage(error)) } }
+                    finally { operation.publish { watchlistBusy = false } }
                 }
             }
         }

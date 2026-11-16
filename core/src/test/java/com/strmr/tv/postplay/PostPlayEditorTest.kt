@@ -43,7 +43,7 @@ class PostPlayEditorTest {
             return PostPlaySuggestions(items,source,captured,kind)
         }
         override suspend fun rate(target: DetailsTarget, value: PersonalRating): String { writes += value; rating = value.wire; afterWrite(); return writeReply ?: rating }
-        override suspend fun saveToList(target: DetailsTarget) { listWrites += target.titleId; beforeList() }
+        override suspend fun saveToList(target: DetailsTarget, operation: com.strmr.tv.library.CustomListOperation) { listWrites += target.titleId; beforeList() }
     }
     @Test fun `opening an unrated completion loads optional question and never writes or navigates`() = runTest {
         val g = Gateway(); var opened = 0; val e = PostPlayEditor(target,g,onRated = {},navigate = { _,_ -> opened++ }); e.load()
@@ -132,12 +132,12 @@ class PostPlayEditorTest {
         assertFalse(stale.select(candidate,true)); assertEquals(1,opened.size)
     }
     @Test fun `my list is independent confirmed and deduplicates a pending save`() = runTest {
-        val g = Gateway(); val gate = CompletableDeferred<Unit>(); val e = PostPlayEditor(target,g,onRated = {}); e.load(); g.beforeList = { gate.await() }
+        val g = Gateway(); val gate = CompletableDeferred<Unit>(); val e = PostPlayEditor(target,g,onRated = {}); e.load(); val candidate = e.state.value.suggestions.single(); g.beforeList = { gate.await() }
         val first = launch { e.saveToList(candidate) }; runCurrent(); e.saveToList(candidate); assertEquals(1,g.listWrites.size)
         gate.complete(Unit); first.join(); e.saveToList(candidate); assertEquals(1,g.listWrites.size); assertTrue(g.writes.isEmpty()); assertTrue(e.state.value.savedToList.isNotEmpty())
     }
     @Test fun `failed list save keeps it unconfirmed and allows retry`() = runTest {
-        val g = Gateway(); g.beforeList = { throw IOException("private") }; val e = PostPlayEditor(target,g,onRated = {}); e.load(); e.saveToList(candidate)
+        val g = Gateway(); g.beforeList = { throw IOException("private") }; val e = PostPlayEditor(target,g,onRated = {}); e.load(); val candidate = e.state.value.suggestions.single(); e.saveToList(candidate)
         assertTrue(e.state.value.savedToList.isEmpty()); assertNotNull(e.state.value.listError)
         g.beforeList = {}; e.saveToList(candidate); assertEquals(2,g.listWrites.size); assertTrue(e.state.value.savedToList.isNotEmpty()); assertTrue(g.writes.isEmpty())
     }

@@ -7,6 +7,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Job
 import androidx.compose.runtime.setValue
 import com.strmr.tv.launcher.DeepLink
 import com.strmr.tv.launcher.DeepLinkRouter
@@ -16,6 +18,7 @@ import com.strmr.tv.player.PlayerController
 /** Wait for the canonical progress acknowledgement before opening the scoped end context. */
 @Composable
 fun rememberPostPlayEditor(controller: PlayerController, onClose: () -> Unit): PostPlayEditor? {
+    val producer = rememberCoroutineScope()
     val request by controller.postPlay.collectAsState()
     val epoch by ProfileDataContext.changes.collectAsState()
     var ready by remember(controller) { mutableStateOf(false) }
@@ -29,10 +32,10 @@ fun rememberPostPlayEditor(controller: PlayerController, onClose: () -> Unit): P
     }
     val editor = remember(controller,request,ready,itemId,epoch) {
         request?.takeIf { ready && epoch == controller.dataContext }?.let { completed ->
-            PostPlayEditor(completed.title, ServerPostPlayGateway(completed.title) { controller.storedCompletedItemId ?: itemId }, navigate = { target,play ->
+            PostPlayEditor(completed.title, ServerPostPlayGateway(completed.title, controller.dataContext) { controller.storedCompletedItemId ?: itemId }, navigate = { target,play ->
                 val link = DeepLink(if (play) DeepLink.Action.PLAY else DeepLink.Action.DETAILS,target,controller.profileId)
                 if (DeepLinkRouter.openInternal(link,controller.dataContext)) onClose()
-            })
+            }, expectedContext = controller.dataContext, producer = requireNotNull(producer.coroutineContext[Job]))
         }
     }
     DisposableEffect(editor) { onDispose { editor?.close() } }

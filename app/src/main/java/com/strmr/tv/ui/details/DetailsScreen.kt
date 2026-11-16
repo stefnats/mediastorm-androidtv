@@ -214,6 +214,7 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
             Box(Modifier.fillMaxWidth().height(screenHeight).graphicsLayer { alpha = 1f - belowFold() }) {
                 DetailsHeader(
                     model, trailer,
+                    currentPage = currentPage,
                     onPlay = { p -> model.play(p.episode, p.start, prequeueTracks.pick(warm)) },
                     onStartOver = startOver,
                     onVersions = openVersions,

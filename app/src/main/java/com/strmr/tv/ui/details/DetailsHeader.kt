@@ -78,11 +78,13 @@ fun BoxScope.DetailsHeader(
     onWatchState: () -> Unit,
     onMore: () -> Unit,
     onFocusChanged: (Boolean) -> Unit,
+    currentPage: () -> Boolean,
 ) {
     val target = model.target
     val listScope = rememberCoroutineScope()
-    val listOperations = remember(model, model.accessGeneration) {
-        CustomListOperations(model.dataContext, target) { listScope.coroutineContext[Job]?.isActive != false }
+    val active = currentPage()
+    val listOperations = remember(model, model.accessGeneration, active) {
+        CustomListOperations(model.dataContext, target) { currentPage() && listScope.coroutineContext[Job]?.isActive != false }
     }
     DisposableEffect(listOperations) { onDispose { listOperations.close() } }
     val primary = model.primary
@@ -142,7 +144,7 @@ fun BoxScope.DetailsHeader(
                     }
                 }
             }
-            if (DetailsButtons.inRow(DetailsAction.WATCHLIST)) WatchlistButton(model)
+            if (DetailsButtons.inRow(DetailsAction.WATCHLIST)) WatchlistButton(model, listOperations)
             if (DetailsButtons.inRow(DetailsAction.LISTS)) {
                 IconButton(onClick = { listOperations.begin(key = "picker")?.let { CustomListsStore.openPicking(target, it) } }) {
                     Icon(AppIcons.PlaylistAdd, contentDescription = "Manage Lists")
@@ -231,16 +233,20 @@ private fun VersionsButton(model: DetailsModel, onVersions: () -> Unit) {
 
 /** One button whose icon flips, so focus stays on it; repeat presses while a change is in flight are ignored. */
 @Composable
-private fun WatchlistButton(model: DetailsModel) {
+private fun WatchlistButton(model: DetailsModel, operations: CustomListOperations) {
     val scope = rememberCoroutineScope()
-    var busy by remember { mutableStateOf(false) }
+    var busy by remember(operations) { mutableStateOf(false) }
     val inList = WatchlistStore.contains(model.target, model.serverInWatchlist)
     IconButton(onClick = {
         if (busy) return@IconButton
-        busy = true
+        val operation = operations.begin(key = "watchlist") ?: return@IconButton
+        val saved = !inList
+        operation.publish { busy = true }
         scope.launch {
-            runCatching { WatchlistStore.toggle(model.target, model.serverInWatchlist) }
-            busy = false
+            try { operations.run(operation) { WatchlistStore.setSaved(model.target, saved, it) } }
+            catch (error: kotlinx.coroutines.CancellationException) { throw error }
+            catch (error: Exception) { operation.publish { com.strmr.tv.ui.AppToast.show(com.strmr.tv.library.watchlistFailureMessage(error)) } }
+            finally { operation.publish { busy = false } }
         }
     }) {
         Icon(if (inList) AppIcons.Bookmark else AppIcons.BookmarkBorder, contentDescription = if (inList) "In Watchlist" else "Add to Watchlist")

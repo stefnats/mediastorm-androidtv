@@ -101,7 +101,7 @@ internal val FOCUS_ROOM = 20.dp
  * menu style Left on the first slide is left to open the menu. Down goes to the rows.
  */
 @Composable
-fun CarouselControls(slides: List<HomeCard>, state: CarouselState, focus: FocusRequester, height: Dp, bottom: Dp, onDown: () -> Unit) {
+fun CarouselControls(slides: List<HomeCard>, state: CarouselState, focus: FocusRequester, height: Dp, bottom: Dp, onDown: () -> Unit, owner: CarouselSetup) {
     val count = slides.size
     if (count > 0 && state.index >= count) state.index = 0
     val slide = slides.getOrNull(state.index)
@@ -120,7 +120,7 @@ fun CarouselControls(slides: List<HomeCard>, state: CarouselState, focus: FocusR
         },
     ) {
         Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(CONTROLS_HEIGHT + bottom).padding(start = ContentMargin, end = ContentMargin, bottom = bottom)) {
-            if (slide != null) Box(Modifier.align(Alignment.CenterStart)) { CarouselButtons(slide, state, focus, onEdge = ::step) }
+            if (slide != null) Box(Modifier.align(Alignment.CenterStart)) { CarouselButtons(slide, state, focus, owner, onEdge = ::step) }
             CarouselDots(count, state.index, Modifier.align(Alignment.CenterEnd))
         }
     }

@@ -71,9 +71,11 @@ fun TitleMenu(
         }
         if (SetAsideStore.contains(target)) add(DialogChoice("Remove from Set Aside", TitleListAction(origin, scope) { TitleActions.removeFromSetAside(target, it) }))
         add(DialogChoice("Manage Lists…", TitleListAction(origin, scope) { CustomListsStore.openPicking(target, it) }))
-        add(DialogChoice(if (inWatchlist) "Remove from Watchlist" else "Add to Watchlist") {
-            scope.launch { runCatching { WatchlistStore.toggle(target) }.onFailure { onError(it.message ?: "Unknown error") } }
-        })
+        add(DialogChoice(if (inWatchlist) "Remove from Watchlist" else "Add to Watchlist", TitleListAction(origin, scope) { operation ->
+            try { WatchlistStore.setSaved(target, !inWatchlist, operation) }
+            catch (error: kotlinx.coroutines.CancellationException) { throw error }
+            catch (error: Exception) { operation.publish { com.strmr.tv.ui.AppToast.show(com.strmr.tv.library.watchlistFailureMessage(error)) } }
+        }))
         if (card.hiddenManagementEntry || HiddenItemsStore.isHidden(target)) {
             add(DialogChoice("Unhide", TitleListAction(origin, scope) { TitleActions.unhide(target, it) }))
         } else {

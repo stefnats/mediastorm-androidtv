@@ -32,7 +32,11 @@ import com.strmr.tv.home.ShelfTransition
 import com.strmr.tv.ui.ContentMargin
 
 /** The Top Carousel's row, its slides and its page-held focus and slide. */
-class CarouselSetup(val shelf: HomeShelf?, val slides: List<HomeCard>, val focus: FocusRequester, val state: CarouselState)
+class CarouselSetup(
+    val shelf: HomeShelf?, val slides: List<HomeCard>, val focus: FocusRequester, val state: CarouselState,
+    val context: Long, val parent: kotlinx.coroutines.Job,
+    val selected: () -> Boolean, val currentSlides: () -> List<HomeCard>,
+)
 
 /**
  * Home without the Classic layout: the rows stacked under the Top Carousel
@@ -106,10 +110,10 @@ internal fun StackedHome(
         // clipped there the row stopped short of the edge with the carousel's art under it.
         val header = RowsHeader(carousel.focus, active, tail = if (info) areaHeight else 0.dp, overflow = if (peeking) areaBottom else FOCUS_ROOM) { onDown ->
             if (peeking) {
-                CarouselControls(carousel.slides, carousel.state, carousel.focus, areaHeight - peek, FOCUS_ROOM, onDown)
+                CarouselControls(carousel.slides, carousel.state, carousel.focus, areaHeight - peek, FOCUS_ROOM, onDown, carousel)
             } else {
                 val bottom = if (areaBottom == 0.dp) SAFE_BOTTOM else 0.dp
-                CarouselControls(carousel.slides, carousel.state, carousel.focus, areaHeight + FOCUS_ROOM, bottom + FOCUS_ROOM, onDown)
+                CarouselControls(carousel.slides, carousel.state, carousel.focus, areaHeight + FOCUS_ROOM, bottom + FOCUS_ROOM, onDown, carousel)
             }
         }
         rows(slots, Modifier.fillMaxSize().padding(top = areaTop, bottom = areaBottom).graphicsLayer { alpha = fade.value }, onHero, header)

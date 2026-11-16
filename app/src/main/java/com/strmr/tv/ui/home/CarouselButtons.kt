@@ -50,7 +50,7 @@ import kotlinx.coroutines.launch
  * title that just replaced the one the press was meant for.
  */
 @Composable
-fun CarouselButtons(slide: HomeCard, state: CarouselState, focus: FocusRequester, onEdge: (Int) -> Boolean) {
+fun CarouselButtons(slide: HomeCard, state: CarouselState, focus: FocusRequester, owner: CarouselSetup, onEdge: (Int) -> Boolean) {
     val target = slide.target ?: return
     val navigator = LocalNavigator.current
     var focused by remember { mutableIntStateOf(-1) }
@@ -85,7 +85,7 @@ fun CarouselButtons(slide: HomeCard, state: CarouselState, focus: FocusRequester
             Spacer(Modifier.width(ButtonDefaults.IconSpacing))
             Text(if (slide.progress > 0f) "Resume" else "Play")
         }
-        WatchlistToggle(target, state, button(1))
+        WatchlistToggle(target, slide, state, owner, button(1))
         IconButton(
             onClick = { if (!state.selectBlocked()) navigator.openDetails(target) },
             modifier = button(2),
@@ -97,18 +97,28 @@ fun CarouselButtons(slide: HomeCard, state: CarouselState, focus: FocusRequester
 
 /** One button whose icon flips, so focus stays on it; presses while a change is in flight are ignored. */
 @Composable
-private fun WatchlistToggle(target: DetailsTarget, state: CarouselState, modifier: Modifier) {
+private fun WatchlistToggle(target: DetailsTarget, slide: HomeCard, state: CarouselState, owner: CarouselSetup, modifier: Modifier) {
     val scope = rememberCoroutineScope()
-    var busy by remember { mutableStateOf(false) }
+    val active = owner.selected() && owner.currentSlides().getOrNull(state.index) === slide
+    val operations = remember(owner.context, owner.parent, com.strmr.tv.library.CustomListSelectionKey(owner.shelf), com.strmr.tv.library.CustomListSelectionKey(slide), active) {
+        com.strmr.tv.library.CustomListOperations(owner.context, target) {
+            owner.parent.isActive && owner.selected() && owner.currentSlides().getOrNull(state.index) === slide
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(operations) { onDispose { operations.close() } }
+    var busy by remember(operations) { mutableStateOf(false) }
     val inList = WatchlistStore.contains(target)
     IconButton(
         onClick = {
             if (busy || state.selectBlocked()) return@IconButton
-            busy = true
-            scope.launch {
-                runCatching { WatchlistStore.toggle(target) }
-                    .onFailure { AppLog.w(CAROUSEL_LOG, "watchlist toggle failed: ${it.message}") }
-                busy = false
+            val operation = operations.begin(key = "watchlist") ?: return@IconButton
+            val saved = !inList
+            operation.publish { busy = true }
+            scope.launch(owner.parent) {
+                try { operations.run(operation) { WatchlistStore.setSaved(target, saved, it) } }
+                catch (error: kotlinx.coroutines.CancellationException) { throw error }
+                catch (error: Exception) { operation.publish { com.strmr.tv.ui.AppToast.show(com.strmr.tv.library.watchlistFailureMessage(error)) } }
+                finally { operation.publish { busy = false } }
             }
         },
         modifier = modifier,

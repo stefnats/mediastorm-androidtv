@@ -180,7 +180,10 @@ private fun HomePage(store: HomeStore, memory: HomeFocusMemory, tabsFocused: () 
     } else {
         StackedHome(
             store.slots.filterNot { it.id == carouselId },
-            carouselId?.let { CarouselSetup(carouselShelf, slides, carouselFocus, carouselState) },
+            carouselId?.let { CarouselSetup(carouselShelf, slides, carouselFocus, carouselState,
+                store.dataContext, requireNotNull(scope.coroutineContext[Job]),
+                selected = { store.isCurrent && HomeViewStore.current == store.view && !navigator.isCovered && CarouselPick.pick(store.slots, layout.carouselRow) == carouselId },
+                currentSlides = { (store.slots.firstOrNull { it.id == carouselId } as? HomeSlot.Shelf)?.shelf?.let(CarouselPick::slides).orEmpty() }) },
             hero, shownRow, rowFade, onHero = { hero = it }, rows = rows,
         )
     }

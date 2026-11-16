@@ -109,7 +109,7 @@ fun DetailsScreen(target: DetailsTarget, autoplay: Boolean, prewarmOnOpen: Boole
                     Column(Modifier.widthIn(max = 760.dp).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         DetailsInfo(model, model.loadError ?: model.watchedError ?: trailer.errorMessage)
                         PrimaryActions(state)
-                        SecondaryActions(state, trailer, extras)
+                        SecondaryActions(state, trailer, extras, currentRoute)
                         DetailsSourceLine(state, warm)
                     }
                 }

@@ -7,6 +7,11 @@ import com.strmr.tv.api.ListedTitle
 import com.strmr.tv.api.Title
 import com.strmr.tv.library.ProfileDataContext
 import com.strmr.tv.library.WatchlistStore
+import com.strmr.tv.library.CustomListOperation
+import com.strmr.tv.library.CustomListOperations
+import kotlinx.coroutines.*
+import java.util.IdentityHashMap
+import kotlin.coroutines.EmptyCoroutineContext
 import com.strmr.tv.ratings.PersonalRating
 import com.strmr.tv.ratings.ServerTitleRatingGateway
 import com.strmr.tv.ratings.TitleRatingChanges
@@ -26,12 +31,11 @@ interface PostPlayGateway {
     suspend fun context(): PostPlayReply
     suspend fun suggestions(): PostPlaySuggestions
     suspend fun rate(target: DetailsTarget, value: PersonalRating): String
-    suspend fun saveToList(target: DetailsTarget)
+    suspend fun saveToList(target: DetailsTarget, operation: CustomListOperation)
 }
 
-class ServerPostPlayGateway(private val target: DetailsTarget, private val itemId: () -> String?) : PostPlayGateway {
-    private val epoch = ProfileDataContext.current
-    private val path = "${ApiClient.profilePath}/post-play/${if (target.isMovie) "movie" else "series"}/${ApiClient.segment(target.titleId)}"
+class ServerPostPlayGateway(private val target: DetailsTarget, private val epoch: Long, private val itemId: () -> String?) : PostPlayGateway {
+    private val path = ApiClient.inContext(epoch) { "${ApiClient.profilePath}/post-play/${if (target.isMovie) "movie" else "series"}/${ApiClient.segment(target.titleId)}" }
     private val query get() = itemId()?.let { mapOf("itemId" to it) }.orEmpty()
     private val ratings = ServerTitleRatingGateway(promptOnLock = false)
     override fun isCurrent() = epoch == ProfileDataContext.current
@@ -45,7 +49,10 @@ class ServerPostPlayGateway(private val target: DetailsTarget, private val itemI
     override suspend fun rate(target: DetailsTarget, value: PersonalRating): String {
         checkCurrent(); val reply = ratings.write(target,value); checkCurrent(); return reply.rating
     }
-    override suspend fun saveToList(target: DetailsTarget) { checkCurrent(); WatchlistStore.add(target); checkCurrent() }
+    override suspend fun saveToList(target: DetailsTarget, operation: CustomListOperation) {
+        checkCurrent(); require(operation.owner.epoch == epoch)
+        WatchlistStore.add(target, operation); checkCurrent()
+    }
 }
 
 data class PostPlayState(
@@ -71,6 +78,8 @@ class PostPlayEditor(
     private val gateway: PostPlayGateway,
     private val onRated: () -> Unit = TitleRatingChanges::saved,
     private val navigate: (DetailsTarget, Boolean) -> Unit = { _, _ -> },
+    private val expectedContext: Long = ProfileDataContext.current,
+    private val producer: Job? = null,
 ) {
     private val _state = MutableStateFlow(PostPlayState())
     val state: StateFlow<PostPlayState> = _state.asStateFlow()
@@ -80,14 +89,17 @@ class PostPlayEditor(
     private var generation = 0L
     private var questionDismissed = false
     private val kind get() = if (target.isMovie) "movie" else "series"
-    fun close() { closed = true; generation++ }
-    private fun current() = !closed && gateway.isCurrent()
+    private class ListWrite(val target: DetailsTarget, val operations: CustomListOperations, val operation: CustomListOperation)
+    private val listWrites = IdentityHashMap<Title, ListWrite>()
+    private fun retireListWrites() { listWrites.values.forEach { it.operations.close() }; listWrites.clear() }
+    fun close() { closed = true; generation++; retireListWrites() }
+    private fun current() = !closed && expectedContext == ProfileDataContext.current && producer?.isActive != false && gateway.isCurrent()
     private fun checkCurrent() { if (!current()) throw CancellationException("Post-play profile changed") }
 
     suspend fun load() {
         if (busy) return
-        checkCurrent(); busy = true; generation++
-        _state.value = PostPlayState(savedToList = _state.value.savedToList, listSaving = _state.value.listSaving)
+        checkCurrent(); busy = true; generation++; retireListWrites()
+        _state.value = PostPlayState(savedToList = _state.value.savedToList)
         try {
             val reply = gateway.context(); checkCurrent()
             check(reply.title.id == target.titleId && reply.ratingScope == kind && reply.title.mediaType == kind &&
@@ -103,9 +115,9 @@ class PostPlayEditor(
 
     suspend fun refreshSuggestions() {
         if (busy || _state.value.title == null) return
-        checkCurrent(); val captured = ++generation
+        checkCurrent(); val captured = ++generation; retireListWrites()
         val expected = _state.value.rating
-        _state.value = _state.value.copy(suggestionsLoading = true, suggestionsError = null)
+        _state.value = _state.value.copy(suggestions = emptyList(), suggestionsSource = null, listSaving = emptySet(), suggestionsLoading = true, suggestionsError = null)
         try {
             val reply = gateway.suggestions(); checkCurrent()
             if (captured != generation) return
@@ -115,7 +127,12 @@ class PostPlayEditor(
             val titles = reply.items.map { it.title }.filter { it.id.isNotBlank() && it.id.length <= 128 && it.mediaType in setOf("movie", "series") && (it.id != target.titleId || it.isMovie != target.isMovie) && it.personalRating != "dislike" }.distinctBy { it.mediaType to it.id }.filter { title ->
                 val count = (counts[title.mediaType] ?: 0) + 1; counts[title.mediaType] = count; count <= 6
             }.take(12)
-            _state.value = _state.value.copy(suggestions = titles, suggestionsLoading = false, suggestionsSource = reply.source)
+            _state.value = _state.value.copy(suggestions = titles, suggestionsLoading = false, suggestionsSource = reply.source, listSaving = emptySet())
+            for (title in titles) {
+                val selected = DetailsTarget.from(title)
+                val operations = CustomListOperations(expectedContext, selected) { current() && _state.value.suggestions.any { it === title } }
+                operations.begin(key = "watchlist")?.let { listWrites[title] = ListWrite(selected, operations, it) }
+            }
         } catch (error: CancellationException) { throw error
         } catch (_: Exception) {
             checkCurrent(); if (captured != generation) return
@@ -133,7 +150,7 @@ class PostPlayEditor(
         try {
             val reply = gateway.rate(DetailsTarget.from(requireNotNull(previous.title)),value); checkCurrent()
             check(PersonalRating.from(reply) == value) { "Unexpected rating confirmation" }
-            generation++; questionDismissed = true
+            generation++; retireListWrites(); questionDismissed = true
             _state.value = _state.value.copy(rating = value, saving = false, error = null, questionVisible = false, expandedRating = false,
                 suggestions = emptyList(), suggestionsLoading = true, suggestionsError = null)
             onRated(); saved = true
@@ -148,15 +165,28 @@ class PostPlayEditor(
     fun editRating() { if (current() && !busy && _state.value.title != null) { questionDismissed = false; _state.value = _state.value.copy(questionVisible = true, expandedRating = true) } }
 
     suspend fun saveToList(title: Title) {
+        val write = listWrites[title] ?: return
         val key = title.mediaType + ":" + title.id
-        if (!current() || busy || !hasSuggestion(title) || key in _state.value.listSaving || key in _state.value.savedToList) return
+        if (!current() || busy || key in _state.value.listSaving || key in _state.value.savedToList) return
+        write.operation.check()
         _state.value = _state.value.copy(listSaving = _state.value.listSaving + key, listError = null)
         try {
-            gateway.saveToList(DetailsTarget.from(title)); checkCurrent()
-            _state.value = _state.value.copy(listSaving = _state.value.listSaving - key, savedToList = _state.value.savedToList + key)
+            coroutineScope {
+                val child = async(producer ?: EmptyCoroutineContext) {
+                    write.operations.run(write.operation) { gateway.saveToList(write.target, it) }
+                }
+                try { child.await() } finally { child.cancel() }
+            }
+            write.operation.publish {
+                _state.value = _state.value.copy(listSaving = _state.value.listSaving - key, savedToList = _state.value.savedToList + key)
+            }
         } catch (error: CancellationException) { throw error
-        } catch (_: Exception) {
-            checkCurrent(); _state.value = _state.value.copy(listSaving = _state.value.listSaving - key, listError = "Could not save to My List. Try again.")
+        } catch (error: Exception) {
+            write.operation.publish {
+                _state.value = _state.value.copy(listSaving = _state.value.listSaving - key,
+                    savedToList = if (error is com.strmr.tv.library.WatchlistRefreshFailure) _state.value.savedToList + key else _state.value.savedToList,
+                    listError = com.strmr.tv.library.watchlistFailureMessage(error))
+            }
         }
     }
 

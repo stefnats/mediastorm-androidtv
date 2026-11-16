@@ -129,9 +129,11 @@ fun movedActions(
             add(DialogChoice(if (trailer.showing && !trailer.paused) "Pause Trailer" else "Play Trailer") { trailer.buttonPressed(target.name) })
         }
         if (DetailsAction.WATCHLIST in more) {
-            add(DialogChoice(if (inWatchlist) "Remove from Watchlist" else "Add to Watchlist") {
-                scope.launch { runCatching { WatchlistStore.toggle(target, model.serverInWatchlist) } }
-            })
+            add(DialogChoice(if (inWatchlist) "Remove from Watchlist" else "Add to Watchlist", TitleListAction(listOrigin, scope) { operation ->
+                try { WatchlistStore.setSaved(target, !inWatchlist, operation) }
+                catch (error: kotlinx.coroutines.CancellationException) { throw error }
+                catch (error: Exception) { operation.publish { com.strmr.tv.ui.AppToast.show(com.strmr.tv.library.watchlistFailureMessage(error)) } }
+            }))
         }
         if (DetailsAction.LISTS in more) add(DialogChoice("Manage Lists…", TitleListAction(listOrigin, scope) { CustomListsStore.openPicking(target, it) }))
         if (DetailsAction.WATCHED in more) {

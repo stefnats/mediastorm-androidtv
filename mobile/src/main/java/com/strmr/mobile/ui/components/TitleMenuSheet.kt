@@ -131,9 +131,11 @@ internal fun TitleMenuSheet(
         add(SheetAction("Go to Details", Icons.Outlined.Info) { navigator.openDetails(target) })
         val inWatchlist = WatchlistStore.contains(target)
         add(SheetAction(if (inWatchlist) "Remove from Watchlist" else "Add to Watchlist",
-                        if (inWatchlist) Icons.Outlined.BookmarkRemove else Icons.Outlined.BookmarkAdd) {
-            act { runCatching { WatchlistStore.toggle(target) }.onFailure { AppToast.show(it.message ?: "Couldn't update the watchlist") } }
-        })
+                        if (inWatchlist) Icons.Outlined.BookmarkRemove else Icons.Outlined.BookmarkAdd, action = TitleListAction(origin, scope) { operation ->
+            try { WatchlistStore.setSaved(target, !inWatchlist, operation) }
+            catch (error: kotlinx.coroutines.CancellationException) { throw error }
+            catch (error: Exception) { operation.publish { AppToast.show(com.strmr.tv.library.watchlistFailureMessage(error)) } }
+        }))
         add(SheetAction("Add to List…", Icons.AutoMirrored.Outlined.PlaylistAdd, action = TitleListAction(origin, scope) { CustomListsStore.openPicking(target, it) }))
         val isWatched = watched == true
         if (target.isMovie) {
