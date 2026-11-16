@@ -1,7 +1,12 @@
 package com.strmr.tv.api
 
+import com.strmr.tv.library.ProfileDataContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.*
 
 // Online subtitles: search and download through the server's providers (OpenSubtitles,
 // SubDL, SubSource), machine translation of a WebVTT source, and extraction of an embedded
@@ -38,18 +43,18 @@ data class SubtitleQuery(
     }.toMutableMap()
 }
 
-suspend fun ApiClient.searchSubtitles(query: SubtitleQuery, language: String): List<SubtitleSearchResult> {
+suspend fun ApiClient.searchSubtitles(query: SubtitleQuery, language: String, expected: Long = ProfileDataContext.current): List<SubtitleSearchResult> {
     val params = query.params(language)
     query.releaseName?.takeIf { it.isNotEmpty() }?.let { params["releaseName"] = it }
-    return send("GET", "/api/subtitles/search", params, promptOnLock = false, timeoutMs = 60_000)
+    return send("GET", "/api/subtitles/search", preparationQuery(expected, params), promptOnLock = false, timeoutMs = 60_000, expectedContext = expected)
 }
 
 /** The chosen result as WebVTT. */
-suspend fun ApiClient.downloadSubtitle(result: SubtitleSearchResult, query: SubtitleQuery, language: String): String {
+suspend fun ApiClient.downloadSubtitle(result: SubtitleSearchResult, query: SubtitleQuery, language: String, expected: Long = ProfileDataContext.current): String {
     val params = query.params(language)
     params["subtitleId"] = result.id
     params["provider"] = result.provider
-    return sendRaw("GET", "/api/subtitles/download", params, promptOnLock = false, timeoutMs = 60_000)
+    return sendRaw("GET", "/api/subtitles/download", preparationQuery(expected, params), promptOnLock = false, timeoutMs = 60_000, expectedContext = expected)
 }
 
 /**
@@ -57,12 +62,16 @@ suspend fun ApiClient.downloadSubtitle(result: SubtitleSearchResult, query: Subt
  * loopback with this request's Authorization) translated to `targetLanguage`. Incremental:
  * each call translates more cues and returns what is done so far.
  */
-suspend fun ApiClient.translateSubtitle(sourcePath: String, targetLanguage: String, sourceLanguage: String = "en"): String =
-    sendRaw(
-        "GET", "/api/subtitles/translate",
-        mapOf("sourceUrl" to sourcePath, "targetLanguage" to targetLanguage, "sourceLanguage" to sourceLanguage, "userId" to profileId),
-        promptOnLock = false, timeoutMs = 60_000,
-    )
+suspend fun ApiClient.translateSubtitle(sourcePath: String, targetLanguage: String, sourceLanguage: String = "en", expected: Long = ProfileDataContext.current): String {
+    val query = subtitleTranslationQuery(sourcePath, targetLanguage, sourceLanguage, expected)
+    return sendRaw("GET", "/api/subtitles/translate", query,
+        promptOnLock = false, timeoutMs = 60_000, expectedContext = expected)
+}
+
+internal fun ApiClient.subtitleTranslationQuery(source: String, target: String, language: String, expected: Long): Map<String, String> {
+    val query = preparationQuery(expected, mapOf("sourceUrl" to source, "targetLanguage" to target, "sourceLanguage" to language))
+    return query + ("userId" to query.getValue("profileId"))
+}
 
 @Serializable
 data class SubtitleExtractSession(val sessionId: String = "", val subtitleUrl: String = "", val firstCueTime: Double? = null)
@@ -71,39 +80,45 @@ data class SubtitleExtractSession(val sessionId: String = "", val subtitleUrl: S
  * Starts extracting embedded subtitle track `subtitleTrack` (its position among the file's
  * subtitle streams) to WebVTT from `startOffset` seconds; `subtitleUrl` is server-relative.
  */
-suspend fun ApiClient.startSubtitleExtract(path: String, subtitleTrack: Int, startOffset: Double): SubtitleExtractSession {
+suspend fun ApiClient.startSubtitleExtract(path: String, subtitleTrack: Int, startOffset: Double, expected: Long = ProfileDataContext.current): SubtitleExtractSession {
     val query = buildMap {
         put("path", path)
         put("subtitleTrack", subtitleTrack.toString())
         if (startOffset > 0) put("startOffset", "%.3f".format(java.util.Locale.ROOT, startOffset))
         put("format", "vtt")
     }
-    return send("GET", "/api/video/subtitles/start", query, promptOnLock = false, timeoutMs = 60_000)
+    return send("GET", "/api/video/subtitles/start", preparationQuery(expected, query), promptOnLock = false, timeoutMs = 60_000, expectedContext = expected)
 }
 
 /** The server's subtitle settings that decide what the player may try. */
 data class SubtitleServerSettings(val providerConfigured: Boolean, val translationEnabled: Boolean)
 
-@Serializable
-private data class SubtitleSettingsEnvelope(val subtitles: Fields? = null) {
-    @Serializable
-    data class Fields(
-        val openSubtitlesUsername: String? = null,
-        val openSubtitlesPassword: String? = null,
-        val subdlApiKey: String? = null,
-        val subsourceApiKey: String? = null,
-        val enableTranslatedSubs: Boolean? = null,
-    )
+/** Read known flags strictly; missing sections/errors never enable an optional feature. */
+internal fun subtitleSettingsFrom(raw: JsonObject): SubtitleServerSettings {
+    val fields = raw["subtitles"] as? JsonObject ?: return SubtitleServerSettings(false, false)
+    fun configured(name: String) = (fields[name] as? JsonPrimitive)?.takeIf { it.isString }?.content?.isNotEmpty() == true
+    val provider = configured("openSubtitlesUsername") && configured("openSubtitlesPassword") || configured("subdlApiKey") || configured("subsourceApiKey")
+    val translation = if ("enableTranslatedSubs" !in fields) true
+        else (fields["enableTranslatedSubs"] as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull == true
+    return SubtitleServerSettings(provider, translation)
 }
 
-/**
- * `/api/settings` `subtitles` (secrets come back masked but non-empty when set). Unreadable
- * settings count as no provider, translation on, as in the Expo app.
- */
-suspend fun ApiClient.subtitleServerSettings(): SubtitleServerSettings {
-    val s = runCatching { send<SubtitleSettingsEnvelope>("GET", "/api/settings", promptOnLock = false, timeoutMs = 10_000) }
-        .getOrNull()?.subtitles
-    val provider = s != null && ((!s.openSubtitlesUsername.isNullOrEmpty() && !s.openSubtitlesPassword.isNullOrEmpty()) ||
-        !s.subdlApiKey.isNullOrEmpty() || !s.subsourceApiKey.isNullOrEmpty())
-    return SubtitleServerSettings(provider, s?.enableTranslatedSubs != false)
+/** Successful legacy sections keep their old absent-flag default; failed reads remain unavailable. */
+suspend fun ApiClient.subtitleServerSettings(expected: Long = ProfileDataContext.current): SubtitleServerSettings =
+    readSubtitleSettings(expected) {
+        subtitleSettingsFrom(send<JsonObject>("GET", "/api/settings", preparationQuery(expected), promptOnLock = false, timeoutMs = 10_000, expectedContext = expected))
+    }
+
+/** The actual settings fallback, also exercised independently of Android credential storage. */
+internal suspend fun readSubtitleSettings(expected: Long, read: suspend () -> SubtitleServerSettings): SubtitleServerSettings {
+    currentCoroutineContext().ensureActive()
+    ProfileDataContext.requireCurrent(expected)
+    return try { read().also { currentCoroutineContext().ensureActive(); ProfileDataContext.requireCurrent(expected) }
+    } catch (error: CancellationException) { throw error
+    } catch (error: Exception) {
+        currentCoroutineContext().ensureActive()
+        ProfileDataContext.requireCurrent(expected)
+        error.rethrowVodDenial()
+        SubtitleServerSettings(false, false)
+    }
 }

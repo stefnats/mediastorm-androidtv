@@ -3,259 +3,246 @@ package com.strmr.tv.player
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.Tracks
-import com.strmr.tv.api.ApiClient
-import com.strmr.tv.api.SubtitleQuery
-import com.strmr.tv.api.SubtitleSearchResult
-import com.strmr.tv.api.SubtitleServerSettings
-import com.strmr.tv.api.downloadSubtitle
-import com.strmr.tv.api.playbackSettings
-import com.strmr.tv.api.searchSubtitles
-import com.strmr.tv.api.subtitleServerSettings
+import com.strmr.tv.api.*
 import com.strmr.tv.app.AppLog
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+import java.util.IdentityHashMap
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
-/**
- * Online subtitles for one playback, as the Expo player has them: the automatic search when
- * the stream has no subtitles in the profile's language ([AutoSubtitleRun]: a translation of
- * the English track, else the best provider match, else the English track), the manual
- * Search Online page, and short status messages. Never for live TV or trailers.
- */
+/** Original playback identity and operation ordering; not a content permission or persisted grant. */
+internal class SubtitlePlaybackAccess(
+    private val owner: PlaybackSessionContext,
+    private val titleId: String,
+    private val playerCurrent: () -> Boolean = { true },
+    private val onDenied: (VodAccessDenial) -> Unit = {},
+) {
+    class Run internal constructor()
+    private class Search(val run: Run, val language: String)
+    private var run: Run? = null
+    private var closed = false
+    private var refreshJob: Job? = null
+    private val results = IdentityHashMap<SubtitleSearchResult, Search>()
+    fun current(ticket: Run? = null) = !closed && owner.isCurrent() && playerCurrent() && (ticket == null || ticket === run)
+    fun check(ticket: Run? = null) {
+        owner.requireCurrent()
+        if (!current(ticket)) throw CancellationException("Subtitle operation retired")
+    }
+    fun <T> use(ticket: Run? = null, action: () -> T): T = owner.use { check(ticket); action() }
+    fun begin(): Run? {
+        if (!current()) return null
+        invalidate()
+        return Run().also { run = it }
+    }
+    fun invalidate() { run = null; results.clear(); refreshJob?.cancel(); refreshJob = null }
+    fun close() { closed = true; invalidate() }
+    fun launchRefresh(scope: CoroutineScope, ticket: Run, work: suspend () -> Unit): Job = use(ticket) {
+        refreshJob?.cancel()
+        val job = scope.launch(start = CoroutineStart.LAZY) { check(ticket); work() }
+        refreshJob = job
+        job.start()
+        job
+    }
+    suspend fun <T> guarded(ticket: Run? = null, action: suspend () -> T): T {
+        currentCoroutineContext().ensureActive(); check(ticket)
+        val value = action()
+        currentCoroutineContext().ensureActive(); check(ticket)
+        return value
+    }
+    suspend fun <T> request(ticket: Run? = null, fetch: suspend (Long) -> T): T {
+        currentCoroutineContext().ensureActive(); check(ticket)
+        val attempt = VodDenialEvents.begin(titleId, owner.epoch)
+        return try { guarded(ticket) { fetch(owner.epoch) }
+        } catch (error: CancellationException) { throw error
+        } catch (error: Exception) {
+            currentCoroutineContext().ensureActive(); check(ticket)
+            error.vodDenial?.let { denial ->
+                close()
+                VodDenialEvents.reject(attempt, denial)
+                onDenied(denial)
+                // UI search-language effects have no generic error handler. Retire them safely.
+                throw CancellationException("Subtitle access denied").apply { initCause(error) }
+            }
+            throw error
+        }
+    }
+    fun <T : Any> updateExpected(ticket: Run, expected: T, current: () -> T?, update: () -> T?): T? = use(ticket) {
+        if (current() !== expected) null else update()
+    }
+    fun rememberSearch(ticket: Run, language: String, rows: List<SubtitleSearchResult>): List<SubtitleSearchResult> = use(ticket) {
+        results.clear(); rows.forEach { results[it] = Search(ticket, language) }; rows
+    }
+    fun chooseSearch(result: SubtitleSearchResult, language: String): Run? {
+        if (!current()) return null
+        val binding = results[result] ?: return null
+        if (!current(binding.run) || binding.language != language) return null
+        return begin()
+    }
+}
+
+/** One player's search, download and translation; every asynchronous stage keeps its original owner. */
 class OnlineSubtitles(private val controller: PlayerController, private val scope: CoroutineScope) {
     private val session = controller.session
-    val available: Boolean = !session.isLive && session.reportsProgress && session.streamPath != null
+    private val access = SubtitlePlaybackAccess(requireNotNull(session.ownership), session.request.title.titleId,
+        controller::canUsePlayerAux, { controller.denyVod(it) })
+    val available: Boolean get() = access.current() && !session.isLive && session.reportsProgress && session.streamPath != null
     val releaseName: String? = session.releaseName
-    val query = session.request.let { r ->
-        SubtitleQuery(r.title.imdbId, r.title.name, releaseName, r.title.year, r.episode?.season, r.episode?.episode)
-    }
-    /** "Searching for subtitles…", "Subtitles ready"…; cleared after a few seconds. */
+    val query = session.request.let { r -> SubtitleQuery(r.title.imdbId, r.title.name, releaseName, r.title.year, r.episode?.season, r.episode?.episode) }
     val status = MutableStateFlow<String?>(null)
-
+    val serverTranslation = MutableStateFlow<Boolean?>(null)
     private var checked = false
     private var translateJob: Job? = null
-    /**
-     * The server's translation switch (`subtitles.enableTranslatedSubs`), null until read:
-     * Translate… shows only while it is on. The device's Subtitle Translation override governs
-     * the automatic flow only; Translate… is an explicit choice.
-     */
-    val serverTranslation = MutableStateFlow<Boolean?>(null)
+    private var downloadJob: Job? = null
     private var autoJob: Job? = null
-    private var runs = 0
     private var statusJob: Job? = null
+    private var runs = 0
     private var serverSettings: SubtitleServerSettings? = null
-    private var playback: com.strmr.tv.api.PlaybackSettings? = null
+    private var playback: PlaybackSettings? = null
 
     init {
-        // Read the server's switches up front, so the Subtitles menu knows whether to offer Translate….
-        if (available) scope.launch { runCatching { server() } }
+        if (available) scope.launch {
+            try { server() } catch (error: CancellationException) { throw error } catch (_: Exception) { }
+        }
     }
-
-    fun log(area: String, event: String, details: String = "") =
-        AppLog.i(area, if (details.isEmpty()) event else "$event $details")
-
-    fun setStatus(message: String?, clearAfterMs: Long = 0) {
-        statusJob?.cancel()
-        status.value = message
-        if (message != null && clearAfterMs > 0) {
-            statusJob = scope.launch {
-                delay(clearAfterMs)
-                status.value = null
+    fun log(area: String, event: String, details: String = "") {
+        if (!access.current()) return
+        val safe = if (details.contains("error=")) details.substringBefore("error=") + "error=unavailable" else details
+        AppLog.i(area, if (safe.isEmpty()) event else "$event $safe")
+    }
+    internal fun current(run: SubtitlePlaybackAccess.Run) = access.current(run)
+    internal fun launchRefresh(run: SubtitlePlaybackAccess.Run, work: suspend () -> Unit) = access.launchRefresh(scope, run, work)
+    internal fun setStatus(message: String?, clearAfterMs: Long = 0, run: SubtitlePlaybackAccess.Run? = null) {
+        if (!access.current(run)) return
+        access.use(run) {
+            statusJob?.cancel(); status.value = message
+            if (message != null && clearAfterMs > 0) statusJob = scope.launch {
+                delay(clearAfterMs); access.use(run) { status.value = null }
             }
         }
     }
-
-    /**
-     * The server's subtitle settings with this device's Subtitle Translation override: the
-     * server's switch is a kill switch, so the device can only turn translation off.
-     */
-    suspend fun server(): SubtitleServerSettings {
-        val s = serverSettings ?: ApiClient.subtitleServerSettings().also { serverSettings = it; serverTranslation.value = it.translationEnabled }
-        return s.copy(translationEnabled = s.translationEnabled && TrackOverrides.translation != false)
-    }
-
-    private suspend fun playbackSettings() = playback ?: session.playback ?: ApiClient.playbackSettings().also { playback = it }
-
-    /**
-     * The subtitle language and mode in effect: this device's overrides, else the server's
-     * track choice, else the profile settings.
-     */
-    private suspend fun preference(): Pair<String?, String?> {
-        val e = controller.effectiveTracks
-        if (session.tracks != null || session.playback != null) return e.subtitleLanguage to e.subtitleMode
-        val p = playbackSettings()
-        return (TrackOverrides.subtitleLanguage ?: p.preferredSubtitleLanguage) to (TrackOverrides.subtitleMode ?: p.preferredSubtitleMode)
-    }
-
-    /**
-     * Once per playback, after the server's track choice is applied: starts the automatic
-     * search when the mode is `on`, a language is set, no embedded track is in that language
-     * (the server's pick, if any, is a fallback and stays on screen meanwhile) and there is a
-     * provider or a translation to try.
-     */
-    fun tracksReady(tracks: Tracks, pick: PlayerTrack?) {
-        if (checked) return
-        checked = true
-        if (!available) {
-            log(TAG, "trigger_skip_live_tv", "live=${session.isLive}")
-            return
+    internal suspend fun server(run: SubtitlePlaybackAccess.Run? = null): SubtitleServerSettings {
+        access.check(run)
+        val value = serverSettings ?: access.request(run) { ApiClient.subtitleServerSettings(it) }.also { result ->
+            access.use(run) { serverSettings = result; serverTranslation.value = result.translationEnabled }
         }
+        return access.use(run) { value.copy(translationEnabled = value.translationEnabled && TrackOverrides.translation != false) }
+    }
+    private suspend fun playbackSettings(run: SubtitlePlaybackAccess.Run? = null): PlaybackSettings {
+        access.check(run)
+        return playback ?: session.playback ?: access.request(run) { ApiClient.playbackSettings(it) }.also { result -> access.use(run) { playback = result } }
+    }
+    private suspend fun preference(run: SubtitlePlaybackAccess.Run? = null): Pair<String?, String?> {
+        access.check(run)
+        val effective = controller.effectiveTracks
+        if (session.tracks != null || session.playback != null) return access.use(run) { effective.subtitleLanguage to effective.subtitleMode }
+        val settings = playbackSettings(run)
+        return access.use(run) { (TrackOverrides.subtitleLanguage ?: settings.preferredSubtitleLanguage) to (TrackOverrides.subtitleMode ?: settings.preferredSubtitleMode) }
+    }
+    fun tracksReady(tracks: Tracks, pick: PlayerTrack?) {
+        if (checked || !available) return
+        checked = true
+        val run = access.begin() ?: return
         autoJob = scope.launch {
-            val (language, preferredMode) = preference()
-            // foreign-audio searches only when the audio playing is not in the subtitle language.
+            val (language, preferredMode) = preference(run)
             val playing = tracks.ofType(C.TRACK_TYPE_AUDIO).firstOrNull { it.selected }?.format?.language
             val mode = ClientTrackSelector.resolveMode(preferredMode, playing, language)
-            log(TAG, "trigger_check", "mode=$mode language=$language pick=${pick?.format?.language}")
-            if (mode != "on") return@launch log(TAG, "trigger_skip_mode_off", "mode=$mode")
-            if (language == null) return@launch log(TAG, "trigger_skip_no_language")
+            if (mode != "on" || language == null) return@launch
             val code = SubtitleLanguages.canonical(language) ?: language
             val text = textTracks(tracks)
-            val matches = pick?.let { TrackPreferences.sameLanguage(it.format.language, code) } == true ||
-                text.any { !it.format.isForcedSubtitle && TrackPreferences.sameLanguage(it.format.language, code) }
-            if (matches) return@launch log(TAG, "trigger_skip_embedded_match", "language=$language")
-            if (text.isNotEmpty() && text.none { it.format.knownLanguage != null }) {
-                return@launch log(TAG, "trigger_skip_unknown_embedded_languages", "tracks=${text.size}")
-            }
-            val server = server()
-            val translationEligible = server.translationEnabled && !SubtitleLanguages.isEnglish(language)
-            if (!server.providerConfigured && !translationEligible) {
-                return@launch log(TAG, "trigger_skip_missing_credentials", "language=$language")
-            }
-            runs += 1
-            val id = "auto-$runs-${System.currentTimeMillis()}"
-            log(TAG, "trigger_fire", "run=$id language=$language tracks=${text.size} fallback=${pick?.format?.language}")
-            AutoSubtitleRun(this@OnlineSubtitles, controller, id, language, server).run()
+            if (pick?.let { TrackPreferences.sameLanguage(it.format.language, code) } == true || text.any { !it.format.isForcedSubtitle && TrackPreferences.sameLanguage(it.format.language, code) }) return@launch
+            if (text.isNotEmpty() && text.none { it.format.knownLanguage != null }) return@launch
+            val settings = server(run)
+            if (!settings.providerConfigured && !(settings.translationEnabled && !SubtitleLanguages.isEnglish(language))) return@launch
+            access.check(run)
+            runs++
+            AutoSubtitleRun(this@OnlineSubtitles, controller, "auto-$runs", language, settings, run).run()
         }
     }
+    private fun stopJobs() { autoJob?.cancel(); translateJob?.cancel(); downloadJob?.cancel() }
+    fun userChose() { access.invalidate(); stopJobs() }
 
-    /** The user picked a track (or Off) themselves: a running automatic search stops. */
-    fun userChose() {
-        if (autoJob?.isActive == true) log(TAG, "cancelled_by_user")
-        autoJob?.cancel()
-        translateJob?.cancel()
-    }
-
-    // Manual search
-
-    /** The search page's languages and the one it opens on: the profile's, else the first allowed. */
+    /** Both platform search effects call this instance; the effect's scope cannot change its owner. */
     suspend fun searchLanguages(): Pair<List<SubtitleLanguages.Option>, String> {
-        val options = SubtitleLanguages.allowed(playbackSettings().allowedTrackLanguages).ifEmpty { SubtitleLanguages.options }
+        val settings = playbackSettings()
         val preferred = preference().first?.let { SubtitleLanguages.searchCode(it) }
-        return options to (options.firstOrNull { it.code == preferred }?.code ?: options.first().code)
+        return access.use {
+            val options = SubtitleLanguages.allowed(settings.allowedTrackLanguages).ifEmpty { SubtitleLanguages.options }
+            options to (options.firstOrNull { it.code == preferred }?.code ?: options.first().code)
+        }
     }
-
     suspend fun search(language: String): List<SubtitleSearchResult> {
-        log(SEARCH_TAG, "search", "language=$language")
-        val results = ApiClient.searchSubtitles(query, language)
-        log(SEARCH_TAG, "search_results", "language=$language count=${results.size}")
-        return SubtitleMatching.sortForDisplay(results, releaseName)
+        val run = access.begin() ?: throw CancellationException("Subtitle operation retired")
+        stopJobs()
+        val rows = searchForRun(language, run)
+        return access.rememberSearch(run, language, SubtitleMatching.sortForDisplay(rows, releaseName))
     }
+    internal suspend fun searchForRun(language: String, run: SubtitlePlaybackAccess.Run): List<SubtitleSearchResult> =
+        access.request(run) { ApiClient.searchSubtitles(query, language, it) }
 
-    /** Downloads a picked result and shows it as "Online: <language>". */
     fun use(result: SubtitleSearchResult, language: String) {
-        userChose()
-        log(SEARCH_TAG, "selected", "provider=${result.provider} release=${result.release}")
-        setStatus("Downloading subtitles…")
-        scope.launch {
-            val cues = download(result, language, SEARCH_TAG, "manual-download")
-            if (cues == null) {
-                setStatus("No usable subtitles found", 3_000)
-                return@launch
-            }
-            controller.showExternal(ExternalTrack("Online: ${SubtitleLanguages.displayName(language)}", result.release.ifEmpty { result.provider }, cues))
-            setStatus("Subtitles ready", 2_000)
+        val run = access.chooseSearch(result, language) ?: return
+        stopJobs()
+        setStatus("Downloading subtitles…", run = run)
+        downloadJob = scope.launch {
+            val cues = download(result, language, SEARCH_TAG, "manual-download", run)
+            if (cues == null) { setStatus("No usable subtitles found", 3_000, run); return@launch }
+            show(ExternalTrack("Online: ${SubtitleLanguages.displayName(language)}", result.release.ifEmpty { result.provider }, cues), run)
+            setStatus("Subtitles ready", 2_000, run)
         }
     }
-
-    /** A result's cues, once its WebVTT has at least one (up to 8 tries 200 ms apart); null if none. */
-    suspend fun download(result: SubtitleSearchResult, language: String, area: String, phase: String): List<VttCue>? {
-        val body = waitForCues(area, phase, attempts = 8, delayMs = 200) { ApiClient.downloadSubtitle(result, query, language) }
-        return body?.let { parse(it) }?.takeIf { it.isNotEmpty() }
+    internal suspend fun download(result: SubtitleSearchResult, language: String, area: String, phase: String, run: SubtitlePlaybackAccess.Run): List<VttCue>? {
+        val body = waitForCues(area, phase, 8, 200, run = run) { access.request(run) { ApiClient.downloadSubtitle(result, query, language, it) } }
+        return body?.let { parse(it, run) }?.takeIf { it.isNotEmpty() }
     }
-
-    /**
-     * Fetches until the WebVTT has `minCues` cues or `minBytes` bytes (and at least one cue),
-     * as the Expo player's `waitForVttCues`: a failed fetch gives up; when the tries run out,
-     * any body with cues is accepted if `acceptPartial`.
-     */
-    suspend fun waitForCues(
-        area: String, phase: String, attempts: Int, delayMs: Long,
-        minCues: Int = 1, minBytes: Int = 0, acceptPartial: Boolean = true,
-        fetch: suspend () -> String,
-    ): String? {
-        var best: String? = null
-        var bestCount = 0
+    internal suspend fun waitForCues(area: String, phase: String, attempts: Int, delayMs: Long, minCues: Int = 1, minBytes: Int = 0, acceptPartial: Boolean = true,
+        run: SubtitlePlaybackAccess.Run, fetch: suspend () -> String): String? {
+        var best: String? = null; var bestCount = 0
         for (attempt in 1..attempts) {
-            val body = try {
-                fetch()
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                log(area, "probe_fetch_error", "phase=$phase attempt=$attempt error=${e.message}")
-                return null
-            }
+            val body = try { access.guarded(run) { fetch() }
+            } catch (error: CancellationException) { throw error
+            } catch (error: Exception) { error.rethrowVodDenial(); return null }
             val count = WebVtt.countCues(body)
-            log(area, "probe_attempt", "phase=$phase attempt=$attempt/$attempts cues=$count bytes=${body.length}")
-            if (count > 0 && (count >= minCues || body.length >= minBytes)) {
-                log(area, "probe_ready", "phase=$phase attempt=$attempt cues=$count")
-                return body
-            }
+            if (count > 0 && (count >= minCues || body.length >= minBytes)) return body
             if (count >= bestCount && count > 0) { best = body; bestCount = count }
-            if (attempt < attempts) delay(delayMs)
+            if (attempt < attempts) { delay(delayMs); access.check(run) }
         }
-        log(area, "probe_exhausted", "phase=$phase maxCues=$bestCount")
         return if (acceptPartial) best else null
     }
+    internal suspend fun parse(body: String, run: SubtitlePlaybackAccess.Run): List<VttCue> = access.guarded(run) { withContext(Dispatchers.Default) { WebVtt.parse(body) } }
+    internal suspend fun extract(track: Int, offset: Double, run: SubtitlePlaybackAccess.Run): SubtitleExtractSession =
+        access.request(run) { ApiClient.startSubtitleExtract(requireNotNull(session.streamPath), track, offset, it) }
+    internal suspend fun translated(source: String, target: String, language: String, run: SubtitlePlaybackAccess.Run): String =
+        access.request(run) { ApiClient.translateSubtitle(source, target, language, it) }
+    internal fun show(track: ExternalTrack, run: SubtitlePlaybackAccess.Run) = access.use(run) { controller.showExternal(track) }
+    internal fun update(expected: ExternalTrack, cues: List<VttCue>, run: SubtitlePlaybackAccess.Run): ExternalTrack? =
+        access.updateExpected(run, expected, { controller.external.track.value }) {
+            controller.external.updateCues(cues); controller.external.track.value
+        }
+    internal fun select(track: PlayerTrack, run: SubtitlePlaybackAccess.Run) = access.use(run) { controller.select(track, byUser = false) }
 
-    suspend fun parse(body: String): List<VttCue> = withContext(Dispatchers.Default) { WebVtt.parse(body) }
-
-    // Translate…
-
-    /** The tracks Translate… offers: the stream's text subtitles (bitmap ones can't be extracted to text). */
-    fun translatableTracks(tracks: Tracks) =
-        textTracks(tracks).filter { it.supported && !it.format.isBitmapSubtitle && it.format.subtitleCandidate().codec != "dvd_subtitle" }
-
-    /** Translates `track` to `target` (a search language code) and shows it, as the Expo player's Translate. */
+    fun translatableTracks(tracks: Tracks) = textTracks(tracks).filter { it.supported && !it.format.isBitmapSubtitle && it.format.subtitleCandidate().codec != "dvd_subtitle" }
     fun translate(track: PlayerTrack, target: String) {
-        userChose()
-        translateJob?.cancel()
+        if (!available || textTracks(controller.tracks.value).none { it.group === track.group && it.index == track.index }) return
+        val run = access.begin() ?: return
+        stopJobs()
         val streams = session.subtitleStreams
         val id = track.format.id?.toIntOrNull()
         val text = textTracks(controller.tracks.value)
         val index = TranslationSource.extractIndex(id, streams, text.indexOfFirst { it.group == track.group && it.index == track.index })
         val label = listOfNotNull(track.format.menuTitle(""), track.format.label).joinToString(" ")
         val source = TranslationSource.language(TranslationSource.stream(id, streams)?.language?.ifEmpty { null } ?: track.format.knownLanguage, label)
-        log(TRANSLATE_TAG, "translate_requested", "track=$index id=$id from=$source to=$target label=$label")
-        setStatus("Translating subtitles…")
+        setStatus("Translating subtitles…", run = run)
         translateJob = scope.launch {
-            val shown = try {
-                SubtitleTranslation(this@OnlineSubtitles, controller, TRANSLATE_TAG, "").run(index, source, target)
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                log(TRANSLATE_TAG, "translate_error", "error=${e.message}")
-                false
-            }
-            if (!shown) setStatus("Translation failed", 3_000)
+            val shown = try { SubtitleTranslation(this@OnlineSubtitles, controller, TRANSLATE_TAG, "", run).run(index, source, target)
+            } catch (error: CancellationException) { throw error
+            } catch (error: Exception) { error.rethrowVodDenial(); false }
+            if (!shown) setStatus("Translation failed", 3_000, run)
         }
     }
-
-    fun cancel() {
-        translateJob?.cancel()
-        autoJob?.cancel()
-        statusJob?.cancel()
-    }
-
+    fun cancel() { access.close(); stopJobs(); statusJob?.cancel(); status.value = null; serverTranslation.value = null }
     companion object {
         const val TAG = "AutoSub"
         const val SEARCH_TAG = "SubSearch"
         const val TRANSLATE_TAG = "SubTranslate"
-
-        /** The stream's subtitle tracks, without closed captions. */
         fun textTracks(tracks: Tracks) = tracks.ofType(C.TRACK_TYPE_TEXT).filter { !TrackPreferences.isClosedCaption(it.format) }
     }
 }

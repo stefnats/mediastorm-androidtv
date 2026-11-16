@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 
 /** `byUser`: picked in a menu, which stops a running automatic subtitle search. */
 fun PlayerController.select(track: PlayerTrack, byUser: Boolean = true) {
+    if (!canUsePlayerAux()) return
     if (track.group.type == C.TRACK_TYPE_TEXT) {
         if (byUser) online.userChose()
         external.deselect()
@@ -24,6 +25,7 @@ fun PlayerController.select(track: PlayerTrack, byUser: Boolean = true) {
 }
 
 fun PlayerController.subtitlesOff() {
+    if (!canUsePlayerAux()) return
     online.userChose()
     external.deselect()
     disableEmbeddedSubtitles()
@@ -31,6 +33,7 @@ fun PlayerController.subtitlesOff() {
 
 /** The loaded external track, picked in the Subtitles menu. */
 fun PlayerController.selectExternal() {
+    if (!canUsePlayerAux()) return
     online.userChose()
     disableEmbeddedSubtitles()
     external.select()
@@ -38,6 +41,7 @@ fun PlayerController.selectExternal() {
 
 /** A new external track (downloaded or translated), shown in place of the stream's subtitles. */
 fun PlayerController.showExternal(track: ExternalTrack) {
+    if (!canUsePlayerAux()) return
     disableEmbeddedSubtitles()
     external.show(track)
 }

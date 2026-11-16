@@ -1,8 +1,7 @@
 package com.strmr.tv.player
 
-import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.SubtitleServerSettings
-import com.strmr.tv.api.searchSubtitles
+import com.strmr.tv.api.rethrowVodDenial
 import kotlinx.coroutines.CancellationException
 
 /**
@@ -16,57 +15,60 @@ import kotlinx.coroutines.CancellationException
  * 4. download the best match ([SubtitleMatching.selectBest]) and show it.
  * Runs in [OnlineSubtitles]' job, so a new run or leaving the player cancels it.
  */
-class AutoSubtitleRun(
+internal class AutoSubtitleRun(
     private val online: OnlineSubtitles,
     private val controller: PlayerController,
     private val runId: String,
     private val language: String,
     private val server: SubtitleServerSettings,
+    private val ticket: SubtitlePlaybackAccess.Run,
 ) {
     private fun log(event: String, details: String = "") = online.log(OnlineSubtitles.TAG, "run=$runId $event", details)
 
     suspend fun run() {
+        if (!online.current(ticket)) throw CancellationException("Subtitle operation retired")
         log("start", "language=$language provider=${server.providerConfigured} translation=${server.translationEnabled} " +
             "release=${online.releaseName} streams=${controller.session.subtitleStreams.size}")
-        online.setStatus("Searching for subtitles…")
+        online.setStatus("Searching for subtitles…", run = ticket)
         try {
             if (!SubtitleLanguages.isEnglish(language) && server.translationEnabled && translate()) return
             if (!server.providerConfigured) {
                 log("search_skip_missing_credentials")
-                online.setStatus("No subtitle provider configured", 3_000)
+                online.setStatus("No subtitle provider configured", 3_000, run = ticket)
                 return
             }
             val q = online.query
-            val results = ApiClient.searchSubtitles(q, language)
+            val results = online.searchForRun(language, ticket)
             log("search_results", "count=${results.size}")
             if (results.isEmpty()) {
                 if (!useEnglishEmbedded("fallback_to_english_embedded")) {
                     log("no_results")
-                    online.setStatus("No subtitles found", 3_000)
+                    online.setStatus("No subtitles found", 3_000, run = ticket)
                 }
                 return
             }
-            online.setStatus("Downloading subtitles…")
+            online.setStatus("Downloading subtitles…", run = ticket)
             val best = SubtitleMatching.selectBest(results, online.releaseName, q.season, q.episode)
             log("selected_online_match", "provider=${best.provider} id=${best.id} release=${best.release}")
-            val cues = online.download(best, language, OnlineSubtitles.TAG, "external-download")
+            val cues = online.download(best, language, OnlineSubtitles.TAG, "external-download", ticket)
             if (cues == null) {
                 log("external_no_cues")
-                online.setStatus("No usable subtitles found", 3_000)
+                online.setStatus("No usable subtitles found", 3_000, run = ticket)
                 return
             }
-            controller.showExternal(ExternalTrack("Online: ${SubtitleLanguages.displayName(language)}", best.release.ifEmpty { best.provider }, cues))
+            online.show(ExternalTrack("Online: ${SubtitleLanguages.displayName(language)}", best.release.ifEmpty { best.provider }, cues), ticket)
             log("external_ready", "cues=${cues.size}")
-            online.setStatus("Subtitles ready", 2_000)
+            online.setStatus("Subtitles ready", 2_000, run = ticket)
         } catch (e: CancellationException) {
             log("cancelled")
-            online.setStatus(null)
+            online.setStatus(null, run = ticket)
             throw e
         } catch (e: Exception) {
+            e.rethrowVodDenial()
             log("search_error", "error=${e.message}")
             if (useEnglishEmbedded("error_fallback_to_english_embedded")) return
             log("failed")
-            online.setStatus("Subtitle search failed", 3_000)
+            online.setStatus("Subtitle search failed", 3_000, run = ticket)
         }
     }
 
@@ -75,8 +77,8 @@ class AutoSubtitleRun(
         val english = englishSourceTrack()
         log("english_track_resolution", "track=$english")
         if (english == null) return false
-        online.setStatus("Extracting & translating subtitles…")
-        return SubtitleTranslation(online, controller, OnlineSubtitles.TAG, "run=$runId english_").run(english, "en", language)
+        online.setStatus("Extracting & translating subtitles…", run = ticket)
+        return SubtitleTranslation(online, controller, OnlineSubtitles.TAG, "run=$runId english_", ticket).run(english, "en", language)
     }
 
     /**
@@ -108,13 +110,13 @@ class AutoSubtitleRun(
 
     /** For a non-English language, the English embedded track ("Using English subtitles"); false if none. */
     private fun useEnglishEmbedded(event: String): Boolean {
-        if (SubtitleLanguages.isEnglish(language)) return false
+        if (!online.current(ticket) || SubtitleLanguages.isEnglish(language)) return false
         val track = OnlineSubtitles.textTracks(controller.tracks.value).firstOrNull {
             it.supported && SubtitleLanguages.canonical(it.format.language) == "eng" && !it.format.isForcedSubtitle
         } ?: return false
-        controller.select(track, byUser = false)
+        online.select(track, ticket)
         log(event, "track=${track.typeIndex}")
-        online.setStatus("Using English subtitles", 2_000)
+        online.setStatus("Using English subtitles", 2_000, run = ticket)
         return true
     }
 }

@@ -181,6 +181,8 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     private val mediaAccess=VodMediaAccess(ApiClient.inContext(dataContext) {ApiClient.baseUrl},
         enabled=session.reportsProgress && !session.isLive && !session.localFile,backendHeaders=backendMediaHeaders,denialTitleId=request.title.titleId,context=dataContext,requireCurrent=ownership::requireCurrent)
 
+    internal fun canUsePlayerAux(): Boolean = !released && ownership.isCurrent() && vodDenied.value == null
+
     internal fun denyVod(denial:com.strmr.tv.api.VodAccessDenial,attempt:com.strmr.tv.api.VodAttempt?=null) {
         if(released || dataContext!=ProfileDataContext.current || vodDenied.value!=null)return
         attempt?.let {com.strmr.tv.api.VodDenialEvents.reject(it,denial)}
