@@ -6,8 +6,9 @@ import androidx.compose.runtime.setValue
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.CardEpisode
 import com.strmr.tv.api.DetailsTarget
-import com.strmr.tv.api.deleteMovieProgress
 import com.strmr.tv.api.setWatched
+import com.strmr.tv.api.WatchedSelection
+import com.strmr.tv.api.vodDenial
 import com.strmr.tv.app.AppLog
 import com.strmr.tv.home.hideFromContinueWatching
 import com.strmr.tv.ui.AppToast
@@ -87,20 +88,17 @@ object TitleActions {
     suspend fun unhide(target: DetailsTarget, operation: CustomListOperation) =
         run("unhide", target, "Unhidden", "Failed to unhide item", operation) { HiddenItemsStore.unhide(target, operation) }
 
-    suspend fun setMovieWatched(movie: DetailsTarget, watched: Boolean) = run(
-        if (watched) "mark-watched" else "mark-unwatched", movie,
-        if (watched) "Marked as watched" else "Marked as unwatched", "Failed to update watched state",
-    ) {
-        // As the Expo app and tvOS: unwatched also drops the resume point, after the history change.
-        ApiClient.setWatched(watched, movie)
-        if (!watched) ApiClient.deleteMovieProgress(movie)
+    suspend fun setWatched(selection: WatchedSelection): Boolean = try {
+        selection.check()
+        ApiClient.setWatched(selection)
+        selection.publish { changes++; AppToast.show(if (selection.watched) "Marked as watched" else "Marked as unwatched") }
+    } catch (error: CancellationException) { throw error
+    } catch (error: Exception) {
+        selection.publish { AppToast.show(error.vodDenial?.message ?: "Failed to update watched state") }
+        false
     }
 
-    suspend fun setEpisodeWatched(series: DetailsTarget, episode: CardEpisode, watched: Boolean) = run(
-        if (watched) "mark-watched ${episode.code}" else "mark-unwatched ${episode.code}", series,
-        if (watched) "Marked as watched" else "Marked as unwatched", "Failed to update watched state",
-    ) { ApiClient.setWatched(watched, episode, series) }
+    /** Only a current original mutation may publish a change notification. */
+    fun changed(operation: CustomListOperation) { operation.publish { changes++ } }
 
-    /** Something else changed a title's state (a details page's watched button): refresh what shows it. */
-    fun changed() { changes++ }
 }

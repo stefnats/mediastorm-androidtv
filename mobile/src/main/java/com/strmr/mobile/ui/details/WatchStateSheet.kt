@@ -38,17 +38,34 @@ import com.strmr.tv.api.DetailsTarget
 import com.strmr.tv.api.Episode
 import com.strmr.tv.api.Season
 import com.strmr.tv.api.WatchedScope
-import com.strmr.tv.api.setWatched
+import com.strmr.tv.api.WatchedSelection
+import com.strmr.tv.api.WatchedConfirmation
+import com.strmr.tv.library.CustomListOperations
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import androidx.compose.runtime.DisposableEffect
 import com.strmr.tv.library.TitleActions
 import com.strmr.tv.ui.details.DetailsModel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import com.strmr.tv.player.PlaybackSessionContext
 
-/** A series' Watch State from a card's menu: its details are loaded first, then the sheet. */
+/** Original menu origin retained through delayed composition; never a server/content grant. */
+class WatchStateOrigin(val target: DetailsTarget, val context: Long, val parent: Job) {
+    private val owner = PlaybackSessionContext.capture(context)
+    val isCurrent get() = parent.isActive && owner.isCurrent()
+}
+
 @Composable
-fun WatchStateLoader(target: DetailsTarget, onDismiss: () -> Unit) {
-    val model = remember(target) { DetailsModel(target) }
-    LaunchedEffect(model) { model.load() }
-    WatchStateSheet(model, episode = model.primaryEpisode, onDismiss = onDismiss)
+fun WatchStateLoader(origin: WatchStateOrigin, current: () -> Boolean, onDismiss: () -> Unit) {
+    val uiScope = rememberCoroutineScope()
+    val scope = remember(origin) { CoroutineScope(uiScope.coroutineContext + SupervisorJob(origin.parent)) }
+    DisposableEffect(scope) { onDispose { scope.cancel() } }
+    val model = remember(origin) { DetailsModel(origin.target, scope, expectedContext = origin.context) }
+    LaunchedEffect(model) { if (origin.isCurrent && current()) model.load() }
+    WatchStateSheet(model, episode = model.primaryEpisode, currentPage = { origin.isCurrent && current() }, onDismiss = onDismiss)
 }
 
 /**
@@ -62,10 +79,13 @@ fun WatchStateLoader(target: DetailsTarget, onDismiss: () -> Unit) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WatchStateSheet(model: DetailsModel, episode: Episode?, onDismiss: () -> Unit) {
+fun WatchStateSheet(model: DetailsModel, episode: Episode?, currentPage: () -> Boolean, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     var error by remember { mutableStateOf<String?>(null) }
-    var pending by remember { mutableStateOf<Pair<BulkWatchConfirmation.Prompt, () -> Unit>?>(null) }
+    var pending by remember { mutableStateOf<Pair<BulkWatchConfirmation.Prompt, WatchedConfirmation>?>(null) }
+    val active = currentPage()
+    val operations = remember(model, model.accessGeneration, active) { CustomListOperations(model.dataContext, model.target, currentPage) }
+    DisposableEffect(operations) { onDispose { pending?.second?.cancel(); operations.close() } }
     val show = model.target.name
     val ordered = remember(model.seasons) { model.seasons.sortedBy { it.number } }
     val aired = remember(model.seasons) { ordered.associate { s -> s.number to s.episodes.filter(DetailsModel::hasAired) } }
@@ -73,30 +93,35 @@ fun WatchStateSheet(model: DetailsModel, episode: Episode?, onDismiss: () -> Uni
     val latest = if (regular.size > 1) regular.max() else null
     val rest = ordered.filter { it.number != latest }
 
-    fun apply(watched: Boolean, episodes: List<Episode>, watchedScope: WatchedScope?, close: Boolean) {
-        if (episodes.isEmpty()) return
-        val previous = episodes.associate { it.id to model.watchedOverrides[it.id] }
-        episodes.forEach { model.watchedOverrides[it.id] = watched }
+    fun prepare(watched: Boolean, episodes: List<Episode>, watchedScope: WatchedScope?): WatchedSelection? {
+        val intent = model.episodeWatchIntent(episodes.toList(), watched, watchedScope) ?: return null
+        val operation = operations.begin(key = "watched:${episodes.map { it.id }.sorted().joinToString(",")}") ?: return null
+        return intent.bind(operation)
+    }
+    fun execute(selection: WatchedSelection, close: Boolean) {
         scope.launch {
-            try {
-                ApiClient.setWatched(watched, episodes, model.target, watchedScope)
-                error = null
-                TitleActions.changed()
-                if (close) onDismiss()
-            } catch (e: Exception) {
-                previous.forEach { (id, value) -> if (value == null) model.watchedOverrides.remove(id) else model.watchedOverrides[id] = value }
-                error = e.message
+            operations.run(selection.operation) {
+                val success = model.applyWatchForUi(selection)
+                selection.publish {
+                    error = if (success) null else model.watchedError
+                    if (success && close) onDismiss()
+                }
             }
         }
     }
-
+    fun apply(watched: Boolean, episodes: List<Episode>, watchedScope: WatchedScope?, close: Boolean) {
+        prepare(watched, episodes, watchedScope)?.let { execute(it, close) }
+    }
+    fun confirm(watched: Boolean, episodes: List<Episode>, watchedScope: WatchedScope?, prompt: BulkWatchConfirmation.Prompt, close: Boolean) {
+        val selection = prepare(watched, episodes, watchedScope) ?: return
+        pending?.second?.cancel()
+        pending = prompt to WatchedConfirmation(selection, close)
+    }
     fun confirmAll(watched: Boolean, episodes: List<Episode>, watchedScope: WatchedScope?, exceptSeason: Int? = null) {
-        if (episodes.isEmpty()) return
-        pending = BulkWatchConfirmation.allEpisodes(watched, episodes.size, show, exceptSeason) to
-            { apply(watched, episodes, watchedScope, close = true) }
+        if (episodes.isNotEmpty()) confirm(watched, episodes, watchedScope, BulkWatchConfirmation.allEpisodes(watched, episodes.size, show, exceptSeason), close = true)
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState()) {
+    ModalBottomSheet(onDismissRequest = { pending?.second?.cancel(); operations.close(); onDismiss() }, sheetState = rememberModalBottomSheetState()) {
         LazyColumn(Modifier.fillMaxWidth().navigationBarsPadding()) {
             item { SheetHeader("Watch State", model.target.name, null) }
             error?.let { item { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp)) } }
@@ -130,20 +155,20 @@ fun WatchStateSheet(model: DetailsModel, episode: Episode?, onDismiss: () -> Uni
                         val seasonScope = if (season.number > 0) WatchedScope.SEASON else null
                         val prompt = BulkWatchConfirmation.season(w, eps.size, show, seasonName(season.number))
                         if (prompt == null) apply(w, eps, seasonScope, close = false)
-                        else pending = prompt to { apply(w, eps, seasonScope, close = false) }
+                        else confirm(w, eps, seasonScope, prompt, close = false)
                     }
                 }
             }
         }
     }
 
-    pending?.let { (prompt, run) ->
+    pending?.let { (prompt, ticket) ->
         AlertDialog(
-            onDismissRequest = { pending = null },
+            onDismissRequest = { if (pending?.second === ticket) { ticket.cancel(); pending = null } },
             title = { Text(prompt.title) },
             text = { Text(prompt.message) },
-            confirmButton = { TextButton(onClick = { pending = null; run() }) { Text(prompt.confirm) } },
-            dismissButton = { TextButton(onClick = { pending = null }) { Text("Cancel") } },
+            confirmButton = { TextButton(onClick = { if (pending?.second === ticket) { val selection = ticket.confirm(); pending = null; if (selection != null) execute(selection, ticket.close) } }) { Text(prompt.confirm) } },
+            dismissButton = { TextButton(onClick = { if (pending?.second === ticket) { ticket.cancel(); pending = null } }) { Text("Cancel") } },
         )
     }
 }

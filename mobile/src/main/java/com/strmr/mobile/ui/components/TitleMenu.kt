@@ -26,7 +26,16 @@ object TitleMenu {
     val selection get() = storedSelection?.takeIf { it.isCurrent }
     val card get() = selection?.card
     val continueWatching get() = selection?.continueWatching == true
-    var watchStateFor by mutableStateOf<DetailsTarget?>(null)
+    private var storedParent: Job? = null
+    private var storedWatchState by mutableStateOf<com.strmr.mobile.ui.details.WatchStateOrigin?>(null, referentialEqualityPolicy())
+    val watchStateFor get() = storedWatchState?.takeIf { it.isCurrent }
+    fun parentFor(selection: TitleMenuSelection): Job? = storedParent.takeIf { storedSelection === selection }
+    fun openWatchState(target: DetailsTarget, context: Long, parent: Job) {
+        if (context == ProfileDataContext.current && parent.isActive) storedWatchState = com.strmr.mobile.ui.details.WatchStateOrigin(target, context, parent)
+    }
+    fun clearWatchState(origin: com.strmr.mobile.ui.details.WatchStateOrigin) {
+        if (storedWatchState === origin) storedWatchState = null
+    }
 
     fun show(card: HomeCard, expectedContext: Long, parent: Job, continueWatching: Boolean = false) {
         if (expectedContext != ProfileDataContext.current) return
@@ -35,6 +44,7 @@ object TitleMenu {
             if (!next.isCurrent) return
             storedSelection?.close()
             storedSelection = next
+            storedParent = parent
         }
     }
 
@@ -42,6 +52,7 @@ object TitleMenu {
         if (storedSelection === expected) {
             storedSelection?.close()
             storedSelection = null
+            storedParent = null
         }
     }
 
@@ -64,5 +75,5 @@ fun TitleMenuHost() {
         val owner = CustomListsStore.pickingOwner(target)
         AddToListSheet(target, onDismiss = { if (owner?.isCurrent() == true) CustomListsStore.clearPicking(target, owner.epoch) })
     }
-    TitleMenu.watchStateFor?.let { target -> WatchStateLoader(target, onDismiss = { TitleMenu.watchStateFor = null }) }
+    TitleMenu.watchStateFor?.let { origin -> WatchStateLoader(origin, current = { TitleMenu.watchStateFor === origin }, onDismiss = { TitleMenu.clearWatchState(origin) }) }
 }

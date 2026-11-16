@@ -23,9 +23,9 @@ fun DetailsPresentations(state: DetailsPageState, warm: WarmPrequeue?, scope: Co
         ContentLocalPreferenceDialog(targets, expectedContext = model.dataContext, onSaved = { model.sourcePreferenceChanged(); state.prequeueTracks.clear() }, onDismiss = { state.localPreferenceScopes = null })
     }
     if (state.more) DetailsMoreSheet(state, warm, scope, extras, currentRoute, onHidden)
-    state.episodeMenu?.let { EpisodeMenuSheet(state, it, scope, extras) }
+    state.episodeMenu?.let { EpisodeMenuSheet(state, it, scope, extras, currentRoute) }
     if (state.episodeOrder) EpisodeOrderSheet(state, scope)
-    if (state.watchState) WatchStateSheet(model, state.activeEpisode) { state.watchState = false }
+    if (state.watchState) WatchStateSheet(model, state.activeEpisode, currentRoute) { if (currentRoute()) state.watchState = false }
 
     val tracks = state.prequeueTracks
     if (tracks.open) {

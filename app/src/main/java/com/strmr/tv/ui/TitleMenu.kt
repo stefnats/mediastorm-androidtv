@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.strmr.tv.api.ApiClient
+import com.strmr.tv.api.vodDenial
 import com.strmr.tv.api.isEpisodeWatched
 import com.strmr.tv.api.isMovieWatched
 import com.strmr.tv.home.titleSourceCoordinate
@@ -47,14 +48,25 @@ fun TitleMenu(
     val sourceHint = rememberSourceHint(com.strmr.tv.ui.rememberTitleSourceEvidence(card))
     val navigator = LocalNavigator.current
     val inWatchlist = WatchlistStore.contains(target)
-    var watched by remember { mutableStateOf<Boolean?>(null) }
+    var watched by remember(selection) { mutableStateOf<Boolean?>(null) }
+    var watchedBlocked by remember(selection) { mutableStateOf(false) }
     val episode = card.episode
     LaunchedEffect(selection) {
         // Continue Watching's next episode is unwatched by definition.
-        watched = when {
-            target.isMovie -> runCatching { ApiClient.isMovieWatched(target) }.getOrNull()
-            episode != null && !continueWatching -> runCatching { ApiClient.isEpisodeWatched(episode, target) }.getOrNull()
+        watched = try { when {
+            target.isMovie -> ApiClient.isMovieWatched(target, origin.context)
+            episode != null && !continueWatching -> ApiClient.isEpisodeWatched(episode, target, origin.context)
             else -> null
+        }.also { if (!origin.isCurrent) throw kotlinx.coroutines.CancellationException("Menu changed") } }
+        catch (error: kotlinx.coroutines.CancellationException) { throw error }
+        catch (error: Exception) {
+            if (!origin.isCurrent) return@LaunchedEffect
+            if (error.vodDenial != null) {
+                watchedBlocked = true
+                com.strmr.tv.ui.AppToast.show(requireNotNull(error.vodDenial).message)
+                return@LaunchedEffect
+            }
+            null
         }
         SetAsideStore.refresh(origin.context)
     }
@@ -81,18 +93,22 @@ fun TitleMenu(
         } else {
             add(DialogChoice("Hide from this profile", TitleListAction(origin, scope) { TitleActions.hide(target, it) }))
         }
-        if (target.isMovie) {
-            // A partly watched movie (Continue Watching) or an unknown state offers Mark as watched.
-            val isWatched = watched == true
-            add(DialogChoice(if (isWatched) "Mark as unwatched" else "Mark as watched") { act { TitleActions.setMovieWatched(target, !isWatched) } })
-        } else {
-            if (episode != null) {
-                val isWatched = watched == true
-                add(DialogChoice(if (isWatched) "Mark ${episode.code} as unwatched" else "Mark ${episode.code} as watched") {
-                    act { TitleActions.setEpisodeWatched(target, episode, !isWatched) }
-                })
+        if (!watchedBlocked) {
+            val desired = watched != true
+            if (target.isMovie) {
+                val intent = com.strmr.tv.api.movieWatchedIntent(target, desired, origin.context)
+                add(DialogChoice(if (desired) "Mark as watched" else "Mark as unwatched", TitleListAction(origin, scope) { operation ->
+                    intent.bind(operation)?.let { TitleActions.setWatched(it) }
+                }))
+            } else {
+                if (episode != null) {
+                    val intent = com.strmr.tv.api.cardEpisodeWatchedIntent(target, episode, desired, origin.context)
+                    add(DialogChoice(if (desired) "Mark ${episode.code} as watched" else "Mark ${episode.code} as unwatched", TitleListAction(origin, scope) { operation ->
+                        intent.bind(operation)?.let { TitleActions.setWatched(it) }
+                    }))
+                }
+                add(DialogChoice("Bulk mark as watched…", TitleListAction(origin, scope) { operation -> operation.publish { navigator.openDetails(target, openWatchState = true) } }))
             }
-            add(DialogChoice("Bulk mark as watched…") { navigator.openDetails(target, openWatchState = true) })
         }
         addAll(extra)
         add(DialogChoice("Cancel") {})

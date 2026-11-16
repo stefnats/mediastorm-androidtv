@@ -95,7 +95,7 @@ fun EpisodesSection(
     onPlay: (Episode) -> Unit,
     onChooseSource: (Episode) -> Unit,
     onChooseVersion: (Episode) -> Unit,
-    onToggleWatched: (Episode) -> Unit,
+    onToggleWatched: (Episode, Boolean) -> Unit,
     modifier: Modifier = Modifier,
     onSourcePreference: (Episode) -> Unit = {},
     onReminder: (Episode) -> Unit = {},
@@ -105,6 +105,7 @@ fun EpisodesSection(
     var menuSource by remember { mutableStateOf<SourceAvailability?>(null) }
     var menuFor by remember { mutableStateOf<Episode?>(null) }
     menuFor?.let { ep ->
+        val desired = !model.isWatched(ep)
         ChoiceDialog(
             title = "${ep.code} · ${ep.name}",
             message = rememberSourceHint(menuSource)?.description(),
@@ -114,7 +115,7 @@ fun EpisodesSection(
                 DialogChoice("Choose Source") { onChooseSource(ep) },
                 DialogChoice("Automatic source preference…") { onSourcePreference(ep) }.takeIf { contentLocalScopes(model.target, episode=ep).isNotEmpty() },
                 DialogChoice("Remind me…") { onReminder(ep) }.takeIf { remindersAllowed(reminderProfile) && reminderChoices(ReminderTarget(model.target,ep)).isNotEmpty() },
-                DialogChoice(if (model.isWatched(ep)) "Mark as Unwatched" else "Mark as Watched") { onToggleWatched(ep) },
+                DialogChoice(if (desired) "Mark as Watched" else "Mark as Unwatched") { onToggleWatched(ep, desired) },
                 DialogChoice("Cancel") {},
             ),
             onDismiss = { menuFor = null },

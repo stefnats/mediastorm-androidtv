@@ -23,7 +23,12 @@ import com.strmr.tv.api.BulkWatchConfirmation
 import com.strmr.tv.api.Episode
 import com.strmr.tv.api.Season
 import com.strmr.tv.api.WatchedScope
-import com.strmr.tv.api.setWatched
+import com.strmr.tv.api.WatchedSelection
+import com.strmr.tv.api.WatchedConfirmation
+import com.strmr.tv.library.CustomListOperations
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import androidx.compose.runtime.DisposableEffect
 import com.strmr.tv.ui.ChoiceDialog
 import com.strmr.tv.ui.DialogChoice
 import com.strmr.tv.ui.PanelSection
@@ -42,44 +47,51 @@ import kotlinx.coroutines.launch
  * Cancel focused.
  */
 @Composable
-fun WatchStateDialog(model: DetailsModel, onChanged: suspend () -> Unit, onDismiss: () -> Unit) {
+fun WatchStateDialog(model: DetailsModel, currentPage: () -> Boolean, onDismiss: () -> Unit) {
     val ordered = remember(model.seasons) { model.seasons.sortedBy { it.number } }
     val aired = remember(model.seasons) { ordered.associate { s -> s.number to s.episodes.filter(DetailsModel::hasAired) } }
     val regular = ordered.map { it.number }.filter { it > 0 }
     val latest = if (regular.size > 1) regular.max() else null
     val rest = ordered.filter { it.number != latest }
     var error by remember { mutableStateOf<String?>(null) }
-    var pending by remember { mutableStateOf<Pair<BulkWatchConfirmation.Prompt, () -> Unit>?>(null) }
+    var pending by remember { mutableStateOf<Pair<BulkWatchConfirmation.Prompt, WatchedConfirmation>?>(null) }
     val scope = rememberCoroutineScope()
+    val active = currentPage()
+    val operations = remember(model, model.accessGeneration, active) { CustomListOperations(model.dataContext, model.target, currentPage) }
+    DisposableEffect(operations) { onDispose { pending?.second?.cancel(); operations.close() } }
     val show = model.target.name
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
 
-    fun apply(watched: Boolean, episodes: List<Episode>, watchedScope: WatchedScope?, close: Boolean) {
-        if (episodes.isEmpty()) return
-        val previous = episodes.associate { it.id to model.watchedOverrides[it.id] }
-        episodes.forEach { model.watchedOverrides[it.id] = watched }
-        // Closed only once it went through: the panel's scope ends with it.
+    fun prepare(watched: Boolean, episodes: List<Episode>, watchedScope: WatchedScope?): WatchedSelection? {
+        val intent = model.episodeWatchIntent(episodes.toList(), watched, watchedScope) ?: return null
+        val operation = operations.begin(key = "watched:${episodes.map { it.id }.sorted().joinToString(",")}") ?: return null
+        return intent.bind(operation)
+    }
+    fun execute(selection: WatchedSelection, close: Boolean) {
         scope.launch {
-            try {
-                ApiClient.setWatched(watched, episodes, model.target, watchedScope)
-                error = null
-                onChanged()
-                if (close) onDismiss()
-            } catch (e: Exception) {
-                previous.forEach { (id, value) -> if (value == null) model.watchedOverrides.remove(id) else model.watchedOverrides[id] = value }
-                error = e.message
+            operations.run(selection.operation) {
+                val success = model.applyWatchForUi(selection)
+                selection.publish {
+                    error = if (success) null else model.watchedError
+                    if (success && close) onDismiss()
+                }
             }
         }
     }
-
+    fun apply(watched: Boolean, episodes: List<Episode>, watchedScope: WatchedScope?, close: Boolean) {
+        prepare(watched, episodes, watchedScope)?.let { execute(it, close) }
+    }
+    fun confirm(watched: Boolean, episodes: List<Episode>, watchedScope: WatchedScope?, prompt: BulkWatchConfirmation.Prompt, close: Boolean) {
+        val selection = prepare(watched, episodes, watchedScope) ?: return
+        pending?.second?.cancel()
+        pending = prompt to WatchedConfirmation(selection, close)
+    }
     fun confirmAll(watched: Boolean, episodes: List<Episode>, watchedScope: WatchedScope?, exceptSeason: Int? = null) {
-        if (episodes.isEmpty()) return
-        pending = BulkWatchConfirmation.allEpisodes(watched, episodes.size, show, exceptSeason) to
-            { apply(watched, episodes, watchedScope, close = true) }
+        if (episodes.isNotEmpty()) confirm(watched, episodes, watchedScope, BulkWatchConfirmation.allEpisodes(watched, episodes.size, show, exceptSeason), close = true)
     }
 
-    SidePanelDialog("Watch State", model.target.name, onDismiss) {
+    SidePanelDialog("Watch State", model.target.name, { pending?.second?.cancel(); operations.close(); onDismiss() }) {
         error?.let { item { Text(it, fontSize = 14.sp, color = Color(0xFFFF6B6B)) } }
         model.primaryEpisode?.let { ep ->
             item {
@@ -120,18 +132,21 @@ fun WatchStateDialog(model: DetailsModel, onChanged: suspend () -> Unit, onDismi
             SeasonToggle(season, aired[season.number].orEmpty(), model::isWatched) { w, eps ->
                 val prompt = BulkWatchConfirmation.season(w, eps.size, show, seasonName(season))
                 if (prompt == null) apply(w, eps, seasonScope(season), close = false)
-                else pending = prompt to { apply(w, eps, seasonScope(season), close = false) }
+                else confirm(w, eps, seasonScope(season), prompt, close = false)
             }
         }
     }
 
-    pending?.let { (prompt, run) ->
+    pending?.let { (prompt, ticket) ->
         // Cancel first, so it takes focus; either choice dismisses.
         ChoiceDialog(
             title = prompt.title,
             message = prompt.message,
-            choices = listOf(DialogChoice("Cancel") {}, DialogChoice(prompt.confirm, run)),
-            onDismiss = { pending = null },
+            choices = listOf(DialogChoice("Cancel") { if (pending?.second === ticket) { ticket.cancel(); pending = null } }, DialogChoice(prompt.confirm) {
+                if (pending?.second === ticket) { val selected = ticket.confirm(); pending = null; selected?.let { execute(it, ticket.close) } }
+            }),
+            dismissOnChoice = false,
+            onDismiss = { if (pending?.second === ticket) { ticket.cancel(); pending = null } },
             steady = true,
         )
     }

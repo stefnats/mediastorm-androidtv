@@ -133,8 +133,11 @@ fun SecondaryActions(state: DetailsPageState, trailer: TrailerController, extras
         DetailsActionItem("Lists", Icons.AutoMirrored.Outlined.PlaylistAdd) { listOperations.begin(key = "picker")?.let { CustomListsStore.openPicking(target, it) } }
         if (target.isMovie) {
             val watched = model.movieWatched == true
+            val intent = model.movieWatchIntent(!watched)
             DetailsActionItem(if (watched) "Watched" else "Unwatched", if (watched) AppIcons.WatchedAll else AppIcons.WatchedNone) {
-                scope.launch { model.toggleMovieWatched() }
+                val operation = listOperations.begin(key = "watched") ?: return@DetailsActionItem
+                val selection = intent?.bind(operation) ?: return@DetailsActionItem
+                scope.launch { listOperations.run(operation) { model.applyWatchForUi(selection) } }
             }
         } else if (model.seasons.isNotEmpty()) {
             val icon = when (model.seriesWatchState) {

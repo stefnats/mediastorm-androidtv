@@ -138,9 +138,11 @@ fun movedActions(
         if (DetailsAction.LISTS in more) add(DialogChoice("Manage Lists…", TitleListAction(listOrigin, scope) { CustomListsStore.openPicking(target, it) }))
         if (DetailsAction.WATCHED in more) {
             if (target.isMovie) {
-                add(DialogChoice(if (model.movieWatched == true) "Mark as Unwatched" else "Mark as Watched") {
-                    scope.launch { model.toggleMovieWatched() }
-                })
+                val watched = model.movieWatched == true
+                val intent = model.movieWatchIntent(!watched)
+                add(DialogChoice(if (watched) "Mark as Unwatched" else "Mark as Watched", TitleListAction(listOrigin, scope) { operation ->
+                    intent?.bind(operation)?.let { model.applyWatchForUi(it) }
+                }))
             } else if (model.seasons.isNotEmpty()) {
                 add(DialogChoice("Watch State…", onWatchState))
             }

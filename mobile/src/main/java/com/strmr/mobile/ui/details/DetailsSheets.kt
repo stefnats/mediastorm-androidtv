@@ -1,5 +1,7 @@
 package com.strmr.mobile.ui.details
 
+import com.strmr.tv.library.CustomListSelectionKey
+
 import kotlinx.coroutines.Job
 import androidx.compose.runtime.DisposableEffect
 import com.strmr.tv.library.TitleListAction
@@ -113,12 +115,15 @@ fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: Corout
  * Choose Source, Mark as Watched / Unwatched, and any added actions (Download).
  */
 @Composable
-fun EpisodeMenuSheet(state: DetailsPageState, episode: Episode, scope: CoroutineScope, extras: DetailsActionContext) {
+fun EpisodeMenuSheet(state: DetailsPageState, episode: Episode, scope: CoroutineScope, extras: DetailsActionContext, currentRoute: () -> Boolean) {
     val reminderProfile by AppSession.profile.collectAsState()
     val model = state.model
     val sourceHint = rememberSourceHint(state.episodeSourceHint)
     val resumeAt = model.resumePoint(episode)
     val watched = model.isWatched(episode)
+    val watchedIntent = model.episodeWatchIntent(listOf(episode), !watched, null)
+    val watchedOrigin = remember(model, CustomListSelectionKey(episode)) { TitleListOrigin(model.target, model.dataContext, requireNotNull(scope.coroutineContext[Job]), currentRoute) }
+    DisposableEffect(watchedOrigin) { onDispose { watchedOrigin.close() } }
     val actions = buildList {
         add(SheetAction(resumeAt?.let { "Resume from ${it.label}" } ?: "Play", Icons.Outlined.PlayArrow) { state.play(episode, resumeAt) })
         if (resumeAt != null) add(SheetAction("Start Over", Icons.Outlined.Replay) { state.play(episode, null) })
@@ -130,9 +135,8 @@ fun EpisodeMenuSheet(state: DetailsPageState, episode: Episode, scope: Coroutine
         }
         if (sourceHint != null && episode.numbering != null) add(SheetAction("Check sources again", Icons.Outlined.Refresh) { launchSourceRecheck(scope, model.target, episode) })
         DetailsExtras.providers.forEach { addAll(it.episodeActions(extras, episode)) }
-        add(SheetAction(if (watched) "Mark as Unwatched" else "Mark as Watched", Icons.Outlined.CheckCircle) {
-            scope.launch { model.toggleWatched(episode) }
-        })
+        add(SheetAction(if (watched) "Mark as Unwatched" else "Mark as Watched", Icons.Outlined.CheckCircle,
+            action = TitleListAction(watchedOrigin, scope) { operation -> watchedIntent?.bind(operation)?.let { model.applyWatchForUi(it) } }))
     }
     ActionSheet(
         { state.episodeMenu = null },

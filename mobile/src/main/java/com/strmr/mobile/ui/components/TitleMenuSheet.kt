@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import com.strmr.mobile.ui.shell.LocalNavigator
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.LibraryEntry
+import com.strmr.tv.api.vodDenial
 import com.strmr.tv.api.isEpisodeWatched
 import com.strmr.tv.api.isMovieWatched
 import com.strmr.tv.ui.rememberSourceHint
@@ -91,21 +92,33 @@ internal fun TitleMenuSheet(
 ) {
     val card = selection.card
     val origin = selection.origin
+    val producer = remember(selection) { TitleMenu.parentFor(selection) }
     val continueWatching = selection.continueWatching
     DisposableEffect(selection) { onDispose { selection.close() } }
     val navigator = LocalNavigator.current
     val sourceHint = rememberSourceHint(com.strmr.tv.ui.rememberTitleSourceEvidence(card))
     val target = origin.target
     val rate = target?.let { com.strmr.tv.ui.rememberRatingAction(it) }
-    var watched by remember { mutableStateOf<Boolean?>(null) }
+    var watched by remember(selection) { mutableStateOf<Boolean?>(null) }
+    var watchedBlocked by remember(selection) { mutableStateOf(false) }
     val episode = card.episode
     LaunchedEffect(selection) {
         if (target == null) return@LaunchedEffect
         // Continue Watching's next episode is unwatched by definition.
-        watched = when {
-            target.isMovie -> runCatching { ApiClient.isMovieWatched(target) }.getOrNull()
-            episode != null && !continueWatching -> runCatching { ApiClient.isEpisodeWatched(episode, target) }.getOrNull()
+        watched = try { when {
+            target.isMovie -> ApiClient.isMovieWatched(target, origin.context)
+            episode != null && !continueWatching -> ApiClient.isEpisodeWatched(episode, target, origin.context)
             else -> null
+        }.also { if (!origin.isCurrent) throw kotlinx.coroutines.CancellationException("Menu changed") } }
+        catch (error: kotlinx.coroutines.CancellationException) { throw error }
+        catch (error: Exception) {
+            if (!origin.isCurrent) return@LaunchedEffect
+            if (error.vodDenial != null) {
+                watchedBlocked = true
+                com.strmr.tv.ui.AppToast.show(requireNotNull(error.vodDenial).message)
+                return@LaunchedEffect
+            }
+            null
         }
         SetAsideStore.refresh(origin.context)
     }
@@ -138,18 +151,22 @@ internal fun TitleMenuSheet(
         }))
         add(SheetAction("Add to List…", Icons.AutoMirrored.Outlined.PlaylistAdd, action = TitleListAction(origin, scope) { CustomListsStore.openPicking(target, it) }))
         val isWatched = watched == true
-        if (target.isMovie) {
-            // A partly watched movie (Continue Watching) or an unknown state offers Mark as watched.
-            add(SheetAction(if (isWatched) "Mark as Unwatched" else "Mark as Watched", Icons.Outlined.CheckCircle) {
-                act { TitleActions.setMovieWatched(target, !isWatched) }
-            })
-        } else {
-            if (episode != null) {
-                add(SheetAction(if (isWatched) "Mark ${episode.code} as Unwatched" else "Mark ${episode.code} as Watched", Icons.Outlined.CheckCircle) {
-                    act { TitleActions.setEpisodeWatched(target, episode, !isWatched) }
-                })
+        if (!watchedBlocked) {
+            val desired = watched != true
+            if (target.isMovie) {
+                val intent = com.strmr.tv.api.movieWatchedIntent(target, desired, origin.context)
+                add(SheetAction(if (desired) "Mark as Watched" else "Mark as Unwatched", Icons.Outlined.CheckCircle,
+                    action = TitleListAction(origin, scope) { operation -> intent.bind(operation)?.let { TitleActions.setWatched(it) } }))
+            } else {
+                if (episode != null) {
+                    val intent = com.strmr.tv.api.cardEpisodeWatchedIntent(target, episode, desired, origin.context)
+                    add(SheetAction(if (desired) "Mark ${episode.code} as Watched" else "Mark ${episode.code} as Unwatched", Icons.Outlined.CheckCircle,
+                        action = TitleListAction(origin, scope) { operation -> intent.bind(operation)?.let { TitleActions.setWatched(it) } }))
+                }
+                if (producer != null) add(SheetAction("Watch State…", Icons.Outlined.Checklist, action = TitleListAction(origin, scope) { operation ->
+                    operation.publish { TitleMenu.openWatchState(target, origin.context, producer) }
+                }))
             }
-            add(SheetAction("Watch State…", Icons.Outlined.Checklist) { TitleMenu.watchStateFor = target })
         }
         if (card.hiddenManagementEntry || HiddenItemsStore.isHidden(target)) {
             add(SheetAction("Unhide", Icons.Outlined.Visibility, action = TitleListAction(origin, scope) { TitleActions.unhide(target, it) }))

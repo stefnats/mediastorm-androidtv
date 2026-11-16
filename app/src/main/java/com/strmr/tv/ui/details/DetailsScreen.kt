@@ -63,6 +63,7 @@ import com.strmr.tv.api.Episode
 import com.strmr.tv.api.SourceResult
 import com.strmr.tv.api.StartPoint
 import com.strmr.tv.library.CustomListsStore
+import com.strmr.tv.library.CustomListOperations
 import com.strmr.tv.library.LibraryVersion
 import com.strmr.tv.player.ManualSourceTracks
 import com.strmr.tv.player.PlaybackCoordinator
@@ -93,6 +94,9 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
     val scope = rememberCoroutineScope()
     val model = remember(target) { DetailsModel(target, scope) }
     val actionGeneration=model.accessGeneration
+    val activeWatchedPage = currentPage()
+    val watchedOperations = remember(model, actionGeneration, activeWatchedPage) { CustomListOperations(model.dataContext, target, currentPage) }
+    DisposableEffect(watchedOperations) { onDispose { watchedOperations.close() } }
     val context = LocalContext.current
     val trailer = remember { TrailerController(context, scope) }
     val sessionsEnded by PlaybackCoordinator.sessionsEnded.collectAsState()
@@ -233,7 +237,12 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
                         onPlay = { ep -> model.play(ep, model.resumePoint(ep), prequeueTracks.pick(warm)) },
                         onChooseSource = { ep -> if(model.acceptsPlaybackAction(actionGeneration))picker = PickerTarget(ep) },
                         onChooseVersion = { ep -> if(model.acceptsPlaybackAction(actionGeneration))versionsFor = PickerTarget(ep) },
-                        onToggleWatched = { ep -> scope.launch { model.toggleWatched(ep) } },
+                        onToggleWatched = { ep, desired ->
+                            val intent = model.episodeWatchIntent(listOf(ep), desired, null)
+                            watchedOperations.begin(key = "watched:${ep.id}")?.let { operation -> intent?.bind(operation)?.let { selection ->
+                                scope.launch { watchedOperations.run(operation) { model.applyWatchForUi(selection) } }
+                            } }
+                        },
                         onSourcePreference = { ep -> localPreferenceScopes = contentLocalScopes(target, episode = ep).takeIf { it.isNotEmpty() } },
                         onReminder = { ep -> reminderTarget = ReminderTarget(target,ep) },
                         modifier = Modifier.padding(top = 24.dp),
@@ -248,7 +257,7 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
     PrequeueTracksPanel(prequeueTracks, warm) {
         model.primary?.let { p -> model.play(p.episode, p.start, prequeueTracks.pick(warm)) }
     }
-    if (watchState) WatchStateDialog(model, onChanged = { com.strmr.tv.library.TitleActions.changed() }, onDismiss = { watchState = false })
+    if (watchState) WatchStateDialog(model, currentPage, onDismiss = { if (currentPage()) watchState = false })
     val listOrigin = remember(model, actionGeneration, more) { TitleListOrigin(target, model.dataContext, requireNotNull(scope.coroutineContext[Job]), currentPage) }
     DisposableEffect(listOrigin) { onDispose { listOrigin.close() } }
     if (more) {

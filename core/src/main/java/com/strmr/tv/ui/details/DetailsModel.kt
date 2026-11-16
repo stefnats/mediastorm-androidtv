@@ -28,6 +28,14 @@ import com.strmr.tv.api.formatRuntime
 import com.strmr.tv.api.libraryMatches
 import com.strmr.tv.api.setSeriesOrdering
 import com.strmr.tv.api.setWatched
+import com.strmr.tv.api.WatchedSelection
+import com.strmr.tv.api.WatchedScope
+import com.strmr.tv.api.WatchedAccess
+import com.strmr.tv.api.ServerWatchedAccess
+import com.strmr.tv.api.performWatched
+import com.strmr.tv.api.selectMovieWatched
+import com.strmr.tv.api.selectEpisodesWatched
+import com.strmr.tv.library.CustomListOperation
 import com.strmr.tv.home.CardBadge
 import com.strmr.tv.home.ReleaseBadge
 import com.strmr.tv.library.ProfileDataContext
@@ -58,9 +66,10 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope = MainScope(),
     private val retireWarm:(String,Long)->Unit={id,context->PlaybackCoordinator.invalidateWarmSources(id,context)},
+    expectedContext: Long = ProfileDataContext.current,
     private val lookupLibrary:suspend (DetailsTarget,Long)->List<com.strmr.tv.api.LibraryMatch> = {target,context->ApiClient.libraryMatches(target,context)},
 ) {
-    val dataContext = ProfileDataContext.current
+    val dataContext = expectedContext
     private var playJob: Job? = null
     private var readGeneration=0L
     private var denialFence=VodDenialEvents.fence()
@@ -115,8 +124,10 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
     var serverInWatchlist by mutableStateOf<Boolean?>(null)
         private set
     /** The bundle's movie `watched` (null on older servers or for series). */
-    var movieWatched by mutableStateOf<Boolean?>(null)
-        private set
+    private var movieWatchedBase by mutableStateOf<Boolean?>(null)
+    var movieWatched: Boolean?
+        get() = movieOptimism?.takeIf { it.current() }?.selection?.watched ?: movieWatchedBase
+        private set(value) { movieWatchedBase = value }
     /** Watched changes made here, shown until the reload after the write lands (by episode ID). */
     val watchedOverrides = mutableStateMapOf<String, Boolean>()
     var watchedError by mutableStateOf<String?>(null)
@@ -134,7 +145,14 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
     private var activeOrdering by mutableStateOf<String?>(null)
     /** The ordering picked this visit, asked for explicitly on reload (as the Expo app does). */
     private var pickedOrdering by mutableStateOf<String?>(null)
-    private var watchedBusy = false
+    private class WatchedOptimism(val selection: WatchedSelection) {
+        var active = true
+        fun current() = active && runCatching { selection.check(); true }.getOrDefault(false)
+    }
+    private var movieOptimism by mutableStateOf<WatchedOptimism?>(null)
+    private val episodeOptimism = mutableStateMapOf<String, WatchedOptimism>()
+    private var watchedRevision = 0L
+    private var resumeRevision = 0L
     // State, so the primary button follows a reload after playback (a movie's page has nothing
     // else that changes then).
     private var upNext by mutableStateOf<EpisodeRef?>(null)
@@ -213,20 +231,23 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
     private suspend fun readAndApply(fetch:suspend (Long)->DetailsBundle) {
         val caller=currentCoroutineContext();caller.ensureActive();if(scope.coroutineContext[Job]?.isActive==false)throw CancellationException("Details page closed");ApiClient.inContext(dataContext) {}
         val generation=++readGeneration
+        val watchedAtRead=watchedRevision
+        val resumeAtRead=resumeRevision
         val authorizationAttempt=VodDenialEvents.begin(target.titleId,dataContext)
         try {
             val bundle=fetch(dataContext)
             ApiClient.inContext(dataContext) {
                 caller.ensureActive();if(generation!=readGeneration)throw CancellationException("Details read superseded")
                 val wasDenied=vodDenial!=null
-                applyBundle(bundle);vodDenial=null;denialFence=authorizationAttempt.sequence
+                applyBundle(bundle, watchedAtRead != watchedRevision, resumeAtRead != resumeRevision);vodDenial=null;denialFence=authorizationAttempt.sequence
                 if(wasDenied) {libraryLookup=CompletableDeferred();libraryGeneration++;scope.launch {loadLibrary()}}
             }
         } catch(error:CancellationException) {throw error
         } catch(error:Exception) {caller.ensureActive();ProfileDataContext.requireCurrent(dataContext);if(generation==readGeneration)error.vodDenial?.let(::retireAccess);throw error}
     }
 
-    private fun applyBundle(bundle: DetailsBundle) {
+    private fun applyBundle(bundle: DetailsBundle, preserveWatched: Boolean = false, preserveResume: Boolean = false) {
+        movieOptimism = null; episodeOptimism.clear()
         if (target.isMovie) {
             title = bundle.movieDetails ?: throw ApiError.NotReady("Details unavailable")
         } else {
@@ -240,12 +261,12 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
             privacyEpisode = EpisodePrivacy.currentEpisode(details.seasons, bundle.upNextEpisode)
             if (selectedSeason == null) selectedSeason = primaryEpisode?.seasonNumber
         }
-        resume = bundle.resume
+        if (!preserveResume) resume = bundle.resume
         trailers = bundle.trailers
         serverInWatchlist = bundle.inWatchlist
-        movieWatched = bundle.watched
+        if (!preserveWatched) movieWatched = bundle.watched
         similar = bundle.similar.orEmpty().distinctBy { it.id }
-        watchedOverrides.clear()
+        if (!preserveWatched) watchedOverrides.clear()
         loadError = null
     }
 
@@ -273,7 +294,7 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
     /** The top-billed cast, as many as the Expo TV row shows. */
     val cast: List<CastMember> get() = title?.credits?.cast.orEmpty().distinctBy { it.id }.take(10)
 
-    fun isWatched(episode: Episode): Boolean = watchedOverrides[episode.id] ?: (episode.watched == true)
+    fun isWatched(episode: Episode): Boolean = episodeOptimism[episode.id]?.takeIf { it.current() }?.selection?.watched ?: watchedOverrides[episode.id] ?: (episode.watched == true)
 
     /** Series: none / some / all aired regular-season episodes watched (the Expo rule). */
     val seriesWatchState: WatchState
@@ -287,34 +308,61 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
             }
         }
 
-    /** Repeat presses while a change is in flight are ignored. */
-    suspend fun toggleMovieWatched() {
-        if (watchedBusy) return
-        watchedBusy = true
-        val watched = movieWatched != true
-        try {
-            ApiClient.setWatched(watched, target)
-            movieWatched = watched
-            watchedError = null
-            com.strmr.tv.library.TitleActions.changed()
-        } catch (e: Exception) {
-            watchedError = e.message
-        } finally {
-            watchedBusy = false
+    /** Capture the actual metadata selection and desired state before a job or confirmation. */
+    fun movieWatchIntent(watched: Boolean): com.strmr.tv.api.WatchedIntent? {
+        val original = title ?: return null
+        val generation = readGeneration
+        if (dataContext != ProfileDataContext.current || vodDenial != null) return null
+        return com.strmr.tv.api.movieWatchedIntent(target, watched, dataContext) { readGeneration == generation && title === original && dataContext == ProfileDataContext.current && vodDenial == null && scope.coroutineContext[Job]?.isActive != false }
+    }
+    fun episodeWatchIntent(episodes: List<Episode>, watched: Boolean, watchedScope: WatchedScope?): com.strmr.tv.api.WatchedIntent? {
+        val original = title ?: return null
+        val generation = readGeneration
+        val snapshot = episodes.toList()
+        if (snapshot.isEmpty() || dataContext != ProfileDataContext.current || vodDenial != null || snapshot.any { ep -> seasons.none { season -> season.episodes.any { it === ep } } }) return null
+        return com.strmr.tv.api.episodesWatchedIntent(target, snapshot, watched, watchedScope, dataContext) {
+            readGeneration == generation && title === original && dataContext == ProfileDataContext.current && vodDenial == null && scope.coroutineContext[Job]?.isActive != false &&
+                snapshot.all { ep -> seasons.any { season -> season.episodes.any { it === ep } } }
         }
     }
 
-    suspend fun toggleWatched(episode: Episode) {
-        val watched = !isWatched(episode)
-        watchedOverrides[episode.id] = watched
+    suspend fun applyWatch(selection: WatchedSelection) = applyWatch(selection, ServerWatchedAccess)
+    internal suspend fun applyWatch(selection: WatchedSelection, access: WatchedAccess) {
+        require(selection.target === target) { "Watched title changed" }
+        val optimism = WatchedOptimism(selection)
         try {
-            ApiClient.setWatched(watched, listOf(episode), target)
-            watchedError = null
-            com.strmr.tv.library.TitleActions.changed()
-        } catch (e: Exception) {
-            watchedOverrides.remove(episode.id)
-            watchedError = e.message
+            performWatched(selection, access,
+                start = {
+                    if (target.isMovie) movieOptimism = optimism
+                    else selection.episodes.forEach { episodeOptimism[it.id] = optimism }
+                },
+                success = {
+                    watchedRevision++
+                    if (target.isMovie) { movieWatchedBase = selection.watched; if (!selection.watched) { resume = null; resumeRevision++ } }
+                    else selection.episodes.forEach { watchedOverrides[it.id] = selection.watched }
+                    watchedError = null
+                    com.strmr.tv.library.TitleActions.changed(selection.operation)
+                },
+                failure = { watchedError = "Could not update watched state. Try again." },
+            )
+        } finally {
+            // Ending only this private transient projection cannot overwrite a replacement run.
+            optimism.active = false
+            selection.publish {
+                if (movieOptimism === optimism) movieOptimism = null
+                selection.episodes.forEach { if (episodeOptimism[it.id] === optimism) episodeOptimism.remove(it.id) }
+            }
         }
+    }
+
+    /** UI ends a failed mutation here; it never retries or advances a denied compound operation. */
+    suspend fun applyWatchForUi(selection: WatchedSelection): Boolean = try {
+        applyWatch(selection)
+        true
+    } catch (error: CancellationException) { throw error
+    } catch (error: Exception) {
+        selection.publish { watchedError = error.vodDenial?.message ?: "Could not update watched state. Try again." }
+        false
     }
 
     /** Where to resume, per the server's `resume.eligible` decision. */

@@ -150,7 +150,7 @@ fun BoxScope.DetailsHeader(
                     Icon(AppIcons.PlaylistAdd, contentDescription = "Manage Lists")
                 }
             }
-            if (DetailsButtons.inRow(DetailsAction.WATCHED)) WatchedButton(model, onWatchState)
+            if (DetailsButtons.inRow(DetailsAction.WATCHED)) WatchedButton(model, listOperations, onWatchState)
             IconButton(onClick = onMore) { Icon(AppIcons.MoreHoriz, contentDescription = "More") }
         }
     }
@@ -255,11 +255,16 @@ private fun WatchlistButton(model: DetailsModel, operations: CustomListOperation
 
 /** Movies toggle watched in place; a series opens the bulk watch-state dialog. The eye shows none / some / all. */
 @Composable
-private fun WatchedButton(model: DetailsModel, onWatchState: () -> Unit) {
+private fun WatchedButton(model: DetailsModel, operations: CustomListOperations, onWatchState: () -> Unit) {
     val scope = rememberCoroutineScope()
     if (model.target.isMovie) {
         val watched = model.movieWatched == true
-        IconButton(onClick = { scope.launch { model.toggleMovieWatched() } }) {
+        val intent = model.movieWatchIntent(!watched)
+        IconButton(onClick = {
+            val operation = operations.begin(key = "watched") ?: return@IconButton
+            val selection = intent?.bind(operation) ?: return@IconButton
+            scope.launch { operations.run(operation) { model.applyWatchForUi(selection) } }
+        }) {
             Icon(if (watched) AppIcons.WatchedAll else AppIcons.WatchedNone, contentDescription = if (watched) "Watched" else "Mark as Watched")
         }
     } else if (model.seasons.isNotEmpty()) {
