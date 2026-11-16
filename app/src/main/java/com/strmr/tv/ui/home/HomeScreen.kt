@@ -101,7 +101,7 @@ fun HomeScreen(home: HomeState, tabsFocused: () -> Boolean = { false }) {
     // shown before comes back with the card left focused.
     val topCarousel = HomeLayoutStore.topCarousel
     val focusedInfo = HomeLayoutStore.focusedInfo
-    key(view, topCarousel, focusedInfo) { HomePage(store, home.page("$view/$topCarousel/$focusedInfo"), tabsFocused) }
+    key(view, store, topCarousel, focusedInfo) { HomePage(store, home.page("$view/$topCarousel/$focusedInfo"), tabsFocused) }
 }
 
 @OptIn(ExperimentalFoundationApi::class)

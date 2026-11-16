@@ -8,6 +8,10 @@ import com.strmr.tv.api.libraryGroups
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import com.strmr.tv.library.ProfileDataContext
+import com.strmr.tv.api.vodOptionalRead
 
 /** A configured shelf the app can show, and where its cards come from. */
 data class PlannedShelf(
@@ -37,9 +41,9 @@ data class PlannedShelf(
 
     /** The row's cards; null leaves the row out. `phase` applies to progressive lists. */
     suspend fun load(context: HomeContext, phase: ShelfPhase = ShelfPhase.CARDS): HomeShelf? {
+        context.check()
         val settings = context.settings
-        val api = ApiClient
-        return when (val s = source) {
+        val result = when (val s = source) {
             HomeSource.ContinueWatching -> {
                 var items = context.continueWatching()
                 if (settings.excludeUpcomingFromContinue) items = items.filterNot { it.isUpcoming }
@@ -56,15 +60,15 @@ data class PlannedShelf(
                 HomeShelf(id, config.title, sorted.take(cap).map(HomeCard::from), cap)
             }
             HomeSource.Watchlist -> {
-                val page = api.browsePage(BrowseList.Watchlist, limit = cap + HomeShelf.COLLAGE_OVERFLOW, extra = settings.viewQuery)
+                val page = context.page(BrowseList.Watchlist, cap + HomeShelf.COLLAGE_OVERFLOW, settings.viewQuery, null)
                 val items = page.entries.filterIsInstance<BrowseEntry.ItemEntry>().map { it.item }
                     .filter { matchesHomeView(it.mediaType, settings.filter) }
                 val shown = if (settings.hideWatched) items.filter { it.watchState != "complete" } else items
                 row(shown.map(HomeCard::from), page.total, BrowseList.Watchlist)
             }
             HomeSource.SetAside -> {
-                val list = api.customLists().firstOrNull { it.isSetAside } ?: return null
-                val items = api.customListItems(list.id).filter { matchesHomeView(it.mediaType, settings.filter) }
+                val list = context.lists().firstOrNull { it.isSetAside } ?: return null
+                val items = context.items(list.id).filter { matchesHomeView(it.mediaType, settings.filter) }
                 row(items.map(HomeCard::from), list = BrowseList.Custom(list.id, list.name))
             }
             is HomeSource.List -> {
@@ -77,7 +81,7 @@ data class PlannedShelf(
                 }
                 // A progressive row's first pass asks for a screenful; its complete pass fills the row.
                 val partial = phase == ShelfPhase.CARDS && startsPartial
-                val page = api.browsePage(s.list, limit = if (partial) FIRST_PAGE else wanted, extra = extra, phase = phase)
+                val page = context.page(s.list, if (partial) FIRST_PAGE else wanted, extra, phase)
                 val cards = page.entries.mapIndexed { i, entry ->
                     if (s.ranked && entry is BrowseEntry.TitleEntry) HomeCard.from(entry.title, rank = i + 1) else HomeCard.from(entry)
                 }
@@ -101,7 +105,7 @@ data class PlannedShelf(
                     .sortedByDescending { it.airs ?: Long.MIN_VALUE }
                 HomeShelf(id, config.title, items.take(cap).map { it.card }, cap)
             }
-            HomeSource.Dashboard -> HomeShelf(id, config.title, api.dashboardStreams().mapNotNull { it.card() }, cap)
+            HomeSource.Dashboard -> HomeShelf(id, config.title, context.dashboard().mapNotNull { it.card() }, cap)
             is HomeSource.WatchSomething -> {
                 // Search waits on the Search tab; the AI cards need an AI key on the server.
                 if (!s.hasAI) return null
@@ -127,11 +131,11 @@ data class PlannedShelf(
                              logoUrl = it.logoUrl, logoTile = true)
                 },
             )
-            is HomeSource.Hub -> HomeShelf(id, config.title, cap = cap, cards = HubCards.cards(s.links, cap))
-            HomeSource.LiveFavorites -> HomeShelf(id, config.title, api.favoriteChannelCards(cap), cap)
+            is HomeSource.Hub -> HomeShelf(id, config.title, cap = cap, cards = context.hub(s.links, cap))
+            HomeSource.LiveFavorites -> HomeShelf(id, config.title, context.liveFavorites(cap), cap)
             is HomeSource.Library -> {
                 // Newest first for every source (Plex and Jellyfin default to A–Z), in the view's media type.
-                val page = api.libraryGroups(s.library.id, wanted, sort = "created", mediaType = settings.filter.mediaType)
+                val page = context.library(s.library.id, wanted)
                 HomeShelf(
                     id, s.library.name, page.groups.map { HomeCard.from(com.strmr.tv.api.LibraryEntry(s.library, it)) }, cap = cap,
                     list = if (limited) null else BrowseList.Library(s.library), exploreFirst = exploreFirst,
@@ -139,6 +143,8 @@ data class PlannedShelf(
                 )
             }
         }
+        context.check()
+        return result
     }
 
     companion object {
@@ -201,24 +207,76 @@ data class PlannedShelf(
 }
 
 /** What several rows share within one load: fetched once, on first use. */
-class HomeContext(val settings: HomeSettings, plan: List<PlannedShelf>, scope: CoroutineScope) {
+class HomeContext internal constructor(
+    val settings: HomeSettings,
+    plan: List<PlannedShelf>,
+    scope: CoroutineScope,
+    val dataContext: Long,
+    readContinue: suspend (Long) -> List<ContinueWatchingItem>,
+    readCalendar: suspend (Int, Long) -> List<CalendarItem>,
+    private val access: HomeShelfReads = ServerHomeShelfReads,
+) {
+    constructor(settings: HomeSettings, plan: List<PlannedShelf>, scope: CoroutineScope, dataContext: Long = ProfileDataContext.current) :
+        this(settings, plan, scope, dataContext, { ApiClient.continueWatching(it) }, { limit, expected -> ApiClient.homeCalendar(limit, expected) })
+
+    internal suspend fun check() {
+        currentCoroutineContext().ensureActive()
+        ProfileDataContext.requireCurrent(dataContext)
+    }
     private val continueWatching: Deferred<List<ContinueWatchingItem>>? =
         if (plan.any { it.source == HomeSource.ContinueWatching || it.source == HomeSource.Upcoming }) {
-            scope.async { ApiClient.continueWatching() }
+            scope.async { check(); readContinue(dataContext).also { check() } }
         } else null
-
     private val calendar: Deferred<List<CalendarItem>>? =
         if (plan.any { it.source == HomeSource.Calendar || it.source is HomeSource.RecentlyAired }) {
             val limit = maxOf(plan.maxOfOrNull { it.cap } ?: 20, 20)
-            scope.async { ApiClient.homeCalendar(limit) }
+            scope.async { check(); readCalendar(limit, dataContext).also { check() } }
         } else null
 
-    /** Continue Watching in this view: a movie is an item without a next episode, as in the Expo app. */
-    suspend fun continueWatching(): List<ContinueWatchingItem> = (continueWatching?.await() ?: emptyList())
-        .filter { matchesHomeView(if (it.nextEpisode != null) "series" else "movie", settings.filter) }
+    suspend fun continueWatching(): List<ContinueWatchingItem> {
+        check()
+        val items = continueWatching?.await().orEmpty()
+        check()
+        return items.filter { matchesHomeView(if (it.nextEpisode != null) "series" else "movie", settings.filter) }
+    }
+    suspend fun loadedContinueWatching(): List<ContinueWatchingItem>? {
+        check()
+        return continueWatching?.let { vodOptionalRead { it.await() } }.also { check() }
+    }
+    suspend fun calendar(): List<CalendarItem> {
+        check()
+        val items = calendar?.await().orEmpty()
+        check()
+        return items.filter { matchesHomeView(it.mediaType, settings.filter) }
+    }
+    private suspend fun <T> read(block: suspend () -> T): T { check(); return block().also { check() } }
+    internal suspend fun page(list: BrowseList, count: Int, extra: Map<String, String>, phase: ShelfPhase?) = read { access.page(list, count, extra, phase, dataContext) }
+    internal suspend fun lists() = read { access.lists(dataContext) }
+    internal suspend fun items(id: String) = read { access.items(id, dataContext) }
+    internal suspend fun dashboard() = read { access.dashboard(dataContext) }
+    internal suspend fun hub(links: List<HomeSource.HubLink>, cap: Int) = read { access.hub(links, cap, dataContext) }
+    internal suspend fun liveFavorites(cap: Int) = read { access.liveFavorites(cap, dataContext) }
+    internal suspend fun library(id: String, count: Int) = read { access.library(id, count, settings.filter.mediaType, dataContext) }
 
-    /** This load's whole Continue Watching, when a row fetched it; null otherwise or when it failed. */
-    suspend fun loadedContinueWatching(): List<ContinueWatchingItem>? = continueWatching?.let { runCatching { it.await() }.getOrNull() }
+}
 
-    suspend fun calendar(): List<CalendarItem> = (calendar?.await() ?: emptyList()).filter { matchesHomeView(it.mediaType, settings.filter) }
+
+/** Every actual shelf demand carries the immutable Home owner. No profile or content authority is inferred here. */
+internal interface HomeShelfReads {
+    suspend fun page(list: BrowseList, count: Int, extra: Map<String, String>, phase: ShelfPhase?, expected: Long): BrowsePage
+    suspend fun lists(expected: Long): List<CustomList>
+    suspend fun items(id: String, expected: Long): List<WatchlistItem>
+    suspend fun dashboard(expected: Long): List<DashboardStream>
+    suspend fun hub(links: List<HomeSource.HubLink>, cap: Int, expected: Long): List<HomeCard>
+    suspend fun liveFavorites(cap: Int, expected: Long): List<HomeCard>
+    suspend fun library(id: String, count: Int, mediaType: String?, expected: Long): com.strmr.tv.api.LibraryGroupPage
+}
+private object ServerHomeShelfReads : HomeShelfReads {
+    override suspend fun page(list: BrowseList, count: Int, extra: Map<String, String>, phase: ShelfPhase?, expected: Long) = ApiClient.browsePage(list, count, extra = extra, phase = phase, expectedContext = expected)
+    override suspend fun lists(expected: Long) = ApiClient.customLists(expected)
+    override suspend fun items(id: String, expected: Long) = ApiClient.customListItems(id, expected)
+    override suspend fun dashboard(expected: Long) = ApiClient.dashboardStreams(expected)
+    override suspend fun hub(links: List<HomeSource.HubLink>, cap: Int, expected: Long) = HubCards.cards(links, cap, expected)
+    override suspend fun liveFavorites(cap: Int, expected: Long) = ApiClient.favoriteChannelCards(cap, expected)
+    override suspend fun library(id: String, count: Int, mediaType: String?, expected: Long) = ApiClient.libraryGroups(id, count, sort = "created", mediaType = mediaType, expectedContext = expected)
 }

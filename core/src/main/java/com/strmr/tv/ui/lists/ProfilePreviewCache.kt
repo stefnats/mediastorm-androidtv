@@ -2,6 +2,10 @@ package com.strmr.tv.ui.lists
 
 import com.strmr.tv.library.ProfileDataContext
 import com.strmr.tv.library.optionalProfileRead
+import com.strmr.tv.api.vodOptionalRead
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /** Shared by main-thread list tiles and background Home hub loads. */
 internal class ProfilePreviewCache(
@@ -20,8 +24,10 @@ internal class ProfilePreviewCache(
 
     fun reset() = synchronized(lock) { generation++; items.clear() }
 
-    suspend fun art(list: String, version: Int?, revision: Long = 0, load: suspend () -> TileArt?): TileArt {
-        val captured = context()
+    suspend fun art(list: String, version: Int?, revision: Long = 0, expectedContext: Long? = null, load: suspend () -> TileArt?): TileArt {
+        val captured = expectedContext ?: context()
+        currentCoroutineContext().ensureActive()
+        if (expectedContext != null && context() != captured) throw CancellationException("Preview owner changed")
         val key = Key(captured, list, version, revision)
         val stamp = synchronized(lock) {
             if (context() != captured) return TileArt()
@@ -29,7 +35,10 @@ internal class ProfilePreviewCache(
             items[key]?.let { return it.art }
             generation
         }
-        val loaded = optionalProfileRead(load) ?: return TileArt()
+        val loaded = if (expectedContext != null) vodOptionalRead(load) else optionalProfileRead(load)
+        currentCoroutineContext().ensureActive()
+        if (expectedContext != null && context() != captured) throw CancellationException("Preview owner changed")
+        if (loaded == null) return TileArt()
         return synchronized(lock) {
             if (context() != captured || generation != stamp) return TileArt()
             items[key] = Entry(loaded, now())

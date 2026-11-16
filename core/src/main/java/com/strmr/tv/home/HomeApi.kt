@@ -60,18 +60,27 @@ class HomeCalendarPending : Exception("calendar is still building")
  * The profile's `homeShelves` config resolved for a Home view (see [resolveHomeView]), layered
  * with the server's AI key presence and this device's focus position (set in the admin UI).
  */
-suspend fun ApiClient.homeSettings(view: String = HomeViews.ALL): HomeSettings = coroutineScope {
+suspend fun ApiClient.homeSettings(view: String = HomeViews.ALL, expectedContext: Long = ProfileDataContext.current): HomeSettings = coroutineScope {
+    currentCoroutineContext().ensureActive()
+    ProfileDataContext.requireCurrent(expectedContext)
     // The server's own settings only say whether an AI key is set (masked); a failure there
     // just hides the AI-backed Watch Something cards.
-    val server = async { runCatching { send<ServerHome>("GET", "/api/settings", timeoutMs = 10_000) }.getOrNull() }
+    val server = async { vodOptionalRead {
+        send<ServerHome>("GET", "/api/settings", timeoutMs = 10_000, expectedContext = expectedContext)
+    } }
     val device = async {
-        runCatching {
-            send<DeviceHome>("GET", "/api/clients/${segment(Config.clientId)}/settings", mapOf("userId" to profileId),
-                             promptOnLock = false, timeoutMs = 10_000)
-        }.getOrNull()
+        vodOptionalRead {
+            val query = inContext(expectedContext) { mapOf("userId" to profileId) }
+            send<DeviceHome>("GET", "/api/clients/${segment(Config.clientId)}/settings", query,
+                             promptOnLock = false, timeoutMs = 10_000, expectedContext = expectedContext)
+        }
     }
-    val settings = send<UserHome>("GET", "$profilePath/settings")
+    val path = inContext(expectedContext) { "$profilePath/settings" }
+    val settings = send<UserHome>("GET", path, expectedContext = expectedContext)
     val serverHome = server.await()
+    val deviceHome = device.await()
+    currentCoroutineContext().ensureActive()
+    ProfileDataContext.requireCurrent(expectedContext)
     val metadata = serverHome?.metadata
     val views = HomeViews.merge(serverHome?.homeShelves?.views, settings.homeShelves?.views)
     // A view that no longer exists is Home itself; the caller falls back to All.
@@ -85,7 +94,7 @@ suspend fun ApiClient.homeSettings(view: String = HomeViews.ALL): HomeSettings =
         badgeVisibility = settings.display?.badgeVisibility ?: serverHome?.display?.badgeVisibility,
         excludeUpcomingFromContinue = home.excludeUpcomingFromContinue ?: true,
         layout = ProfileHomeLayout.from(
-            focusModel = device.await()?.homeShelfFocusModel ?: home.homeShelfFocusModel,
+            focusModel = deviceHome?.homeShelfFocusModel ?: home.homeShelfFocusModel,
             disableCardExpansion = home.disableTvLandscapeCardExpansion,
             shelfScale = home.homeShelfScale,
             heroScale = home.homeHeroScale,
@@ -103,8 +112,10 @@ suspend fun ApiClient.homeSettings(view: String = HomeViews.ALL): HomeSettings =
  * A fingerprint of everything Home shows that the server tracks (settings, shelf config,
  * Continue Watching, watchlist, hidden titles); null when it can't be read.
  */
-suspend fun ApiClient.homeRevision(): String? =
-    runCatching { send<Manifest>("GET", "$profilePath/home/manifest", promptOnLock = false, timeoutMs = 15_000) }.getOrNull()?.revision
+suspend fun ApiClient.homeRevision(expectedContext: Long = ProfileDataContext.current): String? = vodOptionalRead {
+    val path = inContext(expectedContext) { "$profilePath/home/manifest" }
+    send<Manifest>("GET", path, promptOnLock = false, timeoutMs = 15_000, expectedContext = expectedContext).revision
+}
 
 /**
  * Continue Watching, minus what the profile put aside. Titles hidden with
@@ -171,20 +182,23 @@ private fun WatchlistItem.matches(item: ContinueWatchingItem): Boolean {
  * The calendar window Home's calendar rows use: two weeks ahead and the recent past. Throws
  * [HomeCalendarPending] while the server is still building the profile's calendar.
  */
-suspend fun ApiClient.homeCalendar(limit: Int): List<CalendarItem> {
+suspend fun ApiClient.homeCalendar(limit: Int, expectedContext: Long = ProfileDataContext.current): List<CalendarItem> {
+    val path = inContext(expectedContext) { "$profilePath/calendar" }
     val response = send<CalendarResponse>(
-        "GET", "$profilePath/calendar",
+        "GET", path,
         mapOf("days" to "14", "recentDays" to "90", "compact" to "1", "home" to "1", "limit" to limit.toString(),
               "tz" to TimeZone.getDefault().id),
-        timeoutMs = 60_000,
+        timeoutMs = 60_000, expectedContext = expectedContext,
     )
+    currentCoroutineContext().ensureActive()
+    ProfileDataContext.requireCurrent(expectedContext)
     if (response.pending && response.items.isEmpty()) throw HomeCalendarPending()
     return response.items
 }
 
 /** Streams playing on the server right now, for the Dashboard row. */
-suspend fun ApiClient.dashboardStreams(): List<DashboardStream> =
-    send<DashboardResponse>("GET", "/api/dashboard/shelf", promptOnLock = false, timeoutMs = 15_000).streams
+suspend fun ApiClient.dashboardStreams(expectedContext: Long = ProfileDataContext.current): List<DashboardStream> =
+    send<DashboardResponse>("GET", "/api/dashboard/shelf", promptOnLock = false, timeoutMs = 15_000, expectedContext = expectedContext).streams
 
 /** A random title for Watch Something's Surprise Me card (needs an AI key on the server), of the view's kind. */
 suspend fun ApiClient.surprise(filter: HomeMediaFilter = HomeMediaFilter.ALL): Title = send<SurprisePick>(

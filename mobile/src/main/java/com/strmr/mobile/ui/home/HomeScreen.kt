@@ -67,7 +67,7 @@ fun HomeScreen() {
     val entry = HomeStores.entry(view)
     PageScaffold(HomeViewStore.label(view), showBack = false, actions = { HomeViewPicker() }) { padding ->
         // A new view starts at the top with its own rows.
-        key(view) { HomeContent(entry, padding) }
+        key(view, entry) { HomeContent(entry, padding) }
     }
 }
 

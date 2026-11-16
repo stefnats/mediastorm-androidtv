@@ -4,7 +4,11 @@ import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.ContinueWatchingItem
 import com.strmr.tv.api.DetailsTarget
 import com.strmr.tv.api.episodeCode
-import com.strmr.tv.live.epgEnabled
+import com.strmr.tv.live.epgStatus
+import com.strmr.tv.api.vodOptionalRead
+import com.strmr.tv.library.ProfileDataContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import com.strmr.tv.live.epgNow
 import com.strmr.tv.live.liveChannelLists
 import com.strmr.tv.live.liveChannels
@@ -163,23 +167,46 @@ val ContinueWatchingItem.airs: Long
  * The Favorite Channels row (`live-favorites`), as the Expo Home builds it: favorites minus
  * hidden ones, in favorites order, each showing what is on now when the guide is on.
  */
-suspend fun ApiClient.favoriteChannelCards(limit: Int): List<HomeCard> {
-    val (favorites, hiddenList) = liveChannelLists()
+suspend fun ApiClient.favoriteChannelCards(limit: Int, expectedContext: Long = ProfileDataContext.current): List<HomeCard> =
+    readFavoriteChannelCards(limit, expectedContext,
+        readLists = { liveChannelLists(it) },
+        readChannels = { ids, count, expected -> liveChannels(ids, favoritesOnly = true, offset = 0, limit = count, expectedContext = expected).channels },
+        readGuide = { epgStatus(it).enabled },
+        readNow = { keys, expected -> epgNow(keys, expected) },
+    )
+
+/** The actual Home live-row stages, preserving ordinary optional guide failure but never a denial. */
+internal suspend fun readFavoriteChannelCards(
+    limit: Int, expectedContext: Long,
+    readLists: suspend (Long) -> Pair<List<String>, List<String>>,
+    readChannels: suspend (List<String>, Int, Long) -> List<com.strmr.tv.live.LiveChannel>,
+    readGuide: suspend (Long) -> Boolean,
+    readNow: suspend (List<String>, Long) -> List<com.strmr.tv.live.EpgNowPlaying>,
+): List<HomeCard> {
+    suspend fun checkOwner() {
+        currentCoroutineContext().ensureActive()
+        ProfileDataContext.requireCurrent(expectedContext)
+    }
+    checkOwner()
+    val (favorites, hiddenList) = readLists(expectedContext).also { checkOwner() }
     val hidden = hiddenList.toSet()
     val wanted = favorites.filterNot { it in hidden }
     if (wanted.isEmpty()) return emptyList()
     val order = wanted.withIndex().associate { it.value to it.index }
-    val channels = liveChannels(wanted, favoritesOnly = true, offset = 0, limit = maxOf(limit, wanted.size)).channels
+    checkOwner()
+    val channels = readChannels(wanted, maxOf(limit, wanted.size), expectedContext).also { checkOwner() }
         .filter { it.id in order && it.id !in hidden }
         .sortedBy { order[it.id] }
         .take(limit)
     // Now playing, when the guide is on; a guide failure just leaves channel names.
     val now = mutableMapOf<String, com.strmr.tv.live.EpgProgram>()
-    if (epgEnabled()) {
+    if (vodOptionalRead { readGuide(expectedContext).also { checkOwner() } } == true) {
+        checkOwner()
         channels.map { it.guideKey }.chunked(50).forEach { batch ->
-            runCatching { epgNow(batch) }.getOrNull()?.forEach { e -> e.current?.let { now[e.channelId] = it } }
+            vodOptionalRead { readNow(batch, expectedContext).also { checkOwner() } }?.forEach { e -> e.current?.let { now[e.channelId] = it } }
         }
     }
+    checkOwner()
     return channels.map { channel ->
         val airing = now[channel.guideKey]?.takeIf { it.isAiring() }
         HomeCard(

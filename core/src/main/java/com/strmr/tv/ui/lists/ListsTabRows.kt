@@ -9,6 +9,7 @@ import com.strmr.tv.home.ShelfConfig
 import com.strmr.tv.home.ShelfPhase
 import com.strmr.tv.home.browsePage
 import com.strmr.tv.library.WatchlistStore
+import com.strmr.tv.library.ProfileDataContext
 
 // The Lists tab's rows as data, shared by the TV and phone Lists tabs.
 
@@ -89,13 +90,17 @@ object BrowsePreviews {
 
     fun reset() { cache.reset() }
 
-    suspend fun art(list: BrowseList, version: Int?, revision: Long = 0): TileArt = art(list, version, revision) {
-        ApiClient.browsePage(list, limit = 4, phase = ShelfPhase.CARDS)
+    suspend fun art(list: BrowseList, version: Int?, revision: Long = 0, expectedContext: Long? = null): TileArt {
+        val expected = expectedContext ?: ProfileDataContext.current
+        return art(list, version, revision, expectedContext) {
+            ApiClient.browsePage(list, limit = 4, phase = ShelfPhase.CARDS, expectedContext = expected)
+        }
     }
 
-    internal suspend fun art(list: BrowseList, version: Int?, revision: Long = 0, load: suspend () -> com.strmr.tv.home.BrowsePage): TileArt {
+    internal suspend fun art(list: BrowseList, version: Int?, revision: Long = 0, expectedContext: Long? = null, load: suspend () -> com.strmr.tv.home.BrowsePage): TileArt {
+        expectedContext?.let { ProfileDataContext.requireCurrent(it) }
         if (list is BrowseList.Similar) return TileArt()
-        return cache.art(list.toString(), version, revision) {
+        return cache.art(list.toString(), version, revision, expectedContext) {
             val page = load()
             TileArt(page.entries.mapNotNull(::posterOf), page.entries.mapNotNull(::backdropOf))
         }

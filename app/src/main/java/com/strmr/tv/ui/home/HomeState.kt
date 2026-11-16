@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.strmr.tv.home.HomeStore
+import com.strmr.tv.library.ProfileDataContext
 import kotlinx.coroutines.CoroutineScope
 
 /**
@@ -14,10 +15,18 @@ import kotlinx.coroutines.CoroutineScope
  * its rows nor forgets the card left: Home's page leaves composition while another tab is up.
  */
 class HomeState(private val scope: CoroutineScope) {
+    private var dataContext = ProfileDataContext.current
     private val stores = mutableMapOf<String, HomeStore>()
     private val pages = mutableMapOf<String, HomeFocusMemory>()
 
-    fun store(view: String): HomeStore = stores.getOrPut(view) { HomeStore(scope, view) }
+    fun store(view: String): HomeStore {
+        val expected = ProfileDataContext.current
+        if (expected != dataContext) {
+            stores.clear(); pages.clear()
+            dataContext = expected
+        }
+        return stores.getOrPut(view) { HomeStore(scope, view, expected) }
+    }
 
     /** A view's page memory, fresh for each layout the page is built for (its key). */
     internal fun page(key: String): HomeFocusMemory = pages.getOrPut(key) { HomeFocusMemory() }

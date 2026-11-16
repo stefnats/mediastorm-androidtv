@@ -2,6 +2,9 @@ package com.strmr.tv.home
 
 import com.strmr.tv.ui.lists.BrowsePreviews
 import com.strmr.tv.ui.lists.TileArt
+import com.strmr.tv.library.ProfileDataContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -12,11 +15,25 @@ import kotlinx.coroutines.coroutineScope
  * than four have art. Only a list that gives no art at all falls back to the name tile.
  */
 object HubCards {
-    suspend fun cards(links: List<HomeSource.HubLink>, cap: Int): List<HomeCard> = coroutineScope {
+    suspend fun cards(links: List<HomeSource.HubLink>, cap: Int, expectedContext: Long = ProfileDataContext.current): List<HomeCard> =
+        cards(links, cap, expectedContext) { list, expected -> BrowsePreviews.art(list, null, expectedContext = expected) }
+
+    internal suspend fun cards(
+        links: List<HomeSource.HubLink>, cap: Int, expectedContext: Long,
+        readPreview: suspend (BrowseList, Long) -> TileArt,
+    ): List<HomeCard> = coroutineScope {
+        currentCoroutineContext().ensureActive()
+        ProfileDataContext.requireCurrent(expectedContext)
         // The shown links' previews, all in flight at once, from the Lists tab's per-profile cache.
         val previews = links.take(cap).map { link ->
-            async { if (link.art == null && link.logo == null) BrowsePreviews.art(link.list, null) else null }
+            async {
+                currentCoroutineContext().ensureActive()
+                ProfileDataContext.requireCurrent(expectedContext)
+                if (link.art == null && link.logo == null) readPreview(link.list, expectedContext) else null
+            }
         }.awaitAll()
+        currentCoroutineContext().ensureActive()
+        ProfileDataContext.requireCurrent(expectedContext)
         links.mapIndexed { i, link -> card(link, previews.getOrNull(i)) }
     }
 
