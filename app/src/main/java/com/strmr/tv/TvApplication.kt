@@ -8,7 +8,6 @@ import com.strmr.tv.app.App
 import com.strmr.tv.app.Platform
 import com.strmr.tv.update.AppForeground
 import com.strmr.tv.update.AppUpdater
-import okhttp3.OkHttpClient
 
 class TvApplication : Application(), ImageLoaderFactory {
     override fun onCreate() {
@@ -38,6 +37,6 @@ class TvApplication : Application(), ImageLoaderFactory {
 
     /** Coil's loader, with the app's credentials on the server's own artwork (Plex and Jellyfin posters). */
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
-        .okHttpClient { OkHttpClient.Builder().addInterceptor(ServerArtwork.interceptor).build() }
+        .okHttpClient { ServerArtwork.client() }
         .build()
 }

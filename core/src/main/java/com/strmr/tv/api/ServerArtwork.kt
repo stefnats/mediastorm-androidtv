@@ -1,27 +1,22 @@
 package com.strmr.tv.api
 
-import okhttp3.Interceptor
+import com.strmr.tv.player.PlaybackSessionContext
+import kotlinx.coroutines.CancellationException
+import okhttp3.OkHttpClient
 
-/**
- * Artwork the server serves itself (`/api/…`: Plex and Jellyfin posters and backdrops through the
- * library API), which needs the app's credentials. Its URL names the active profile (the server
- * checks its access to the library); [interceptor], on the image loader's client, adds the media
- * headers (token, profile unlock, remote-access credential) to requests for the server.
- */
+/** Credential routing for the global image loader, independent of content/cache authorization. */
 object ServerArtwork {
-    /** The server's URL for a server-relative path such as "/api/library/items/…/artwork/poster". */
-    fun url(path: String): String {
-        val query = path.substringAfter('?', "").split('&').filter { it.contains('=') }
-            .associate { it.substringBefore('=') to it.substringAfter('=') }
-        return ApiClient.url(path.substringBefore('?'), query + ("profileId" to ApiClient.profileId)).toString()
+    /** Resolve server-relative artwork without losing query encoding or reverse-proxy paths. */
+    fun url(path: String): String? {
+        return try {
+            val owner = PlaybackSessionContext.capture()
+            owner.use { ArtworkImageAccess(ApiClient.baseUrl, emptyMap(), owner.profileId, owner::isCurrent).url(path) }
+        } catch (_: CancellationException) { null }
     }
 
-    val interceptor = Interceptor { chain ->
-        val request = chain.request()
-        val base = ApiClient.baseUrl
-        val forServer = request.url.host == base.host && request.url.port == base.port &&
-            request.url.encodedPath.startsWith(base.encodedPath.trimEnd('/') + "/api/")
-        if (!forServer) return@Interceptor chain.proceed(request)
-        chain.proceed(request.newBuilder().apply { ApiClient.mediaHeaders.forEach { (name, value) -> header(name, value) } }.build())
+    /** Public images need pairing transport; only protected library artwork needs account/PIN. */
+    fun client(base: OkHttpClient = OkHttpClient()): OkHttpClient = ArtworkImageAccess.client(base) {
+        val owner = PlaybackSessionContext.capture()
+        owner.use { ArtworkImageAccess(ApiClient.baseUrl, ApiClient.mediaHeaders, owner.profileId, owner::isCurrent) }
     }
 }

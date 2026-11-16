@@ -17,7 +17,6 @@ import com.strmr.tv.app.App
 import com.strmr.tv.app.Platform
 import com.strmr.tv.update.AppForeground
 import com.strmr.tv.update.AppUpdater
-import okhttp3.OkHttpClient
 
 class MobileApplication : Application(), ImageLoaderFactory {
     override fun onCreate() {
@@ -58,7 +57,7 @@ class MobileApplication : Application(), ImageLoaderFactory {
      * posters), and a disk cache sized for Home's rows (as the iPhone app's 512 MB).
      */
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
-        .okHttpClient { OkHttpClient.Builder().addInterceptor(ServerArtwork.interceptor).build() }
+        .okHttpClient { ServerArtwork.client() }
         .memoryCache { MemoryCache.Builder(this).maxSizePercent(0.25).build() }
         .diskCache { DiskCache.Builder().directory(cacheDir.resolve("artwork")).maxSizeBytes(512L * 1024 * 1024).build() }
         .crossfade(true)
