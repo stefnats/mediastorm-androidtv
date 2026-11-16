@@ -43,8 +43,9 @@ object DownloadNotifications {
     /** The service's notification for the queue as it stands. */
     fun ongoing(items: List<DownloadItem>): Notification {
         ensureChannels()
-        val running = items.filter { it.status == DownloadItem.Status.DOWNLOADING }
-        val queued = items.filter { it.status == DownloadItem.Status.PENDING }
+        val owned=items.filter {OfflineAccess.allows(it)}
+        val running = owned.filter { it.status == DownloadItem.Status.DOWNLOADING }
+        val queued = owned.filter { it.status == DownloadItem.Status.PENDING }
         val builder = NotificationCompat.Builder(context, CHANNEL_PROGRESS)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setOngoing(true)
@@ -71,18 +72,32 @@ object DownloadNotifications {
 
     fun update(items: List<DownloadItem>) = post(ONGOING_ID, ongoing(items))
 
-    fun completed(item: DownloadItem) = post(
+    fun completed(item: DownloadItem) {if(!OfflineAccess.allows(item))return; post(
         item.id.hashCode(),
         NotificationCompat.Builder(context, CHANNEL_DONE).setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("Downloaded").setContentText(item.displayTitle).setAutoCancel(true).setContentIntent(openApp()).build(),
     )
 
-    fun failed(item: DownloadItem) = post(
+    }
+
+    fun failed(item: DownloadItem) {if(!OfflineAccess.allows(item))return; post(
         item.id.hashCode(),
         NotificationCompat.Builder(context, CHANNEL_DONE).setSmallIcon(android.R.drawable.stat_notify_error)
             .setContentTitle("Download failed").setContentText(item.displayTitle + (item.errorMessage?.let { " · $it" } ?: ""))
             .setAutoCancel(true).setContentIntent(openApp()).build(),
     )
+
+    }
+
+    fun reconcile(all:List<DownloadItem>,visible:List<DownloadItem>) {
+        val manager=context.getSystemService(NotificationManager::class.java)
+        val allowed=visible.filter {OfflineAccess.allows(it)}.map {it.id.hashCode()}.toSet()
+        for(row in all)if(row.id.hashCode() !in allowed)manager.cancel(row.id.hashCode())
+        if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O)for(notification in manager.activeNotifications) {
+            if(notification.notification.channelId in setOf(CHANNEL_PROGRESS,CHANNEL_DONE) && notification.id !in allowed && notification.id!=ONGOING_ID)manager.cancel(notification.tag,notification.id)
+        }
+        if(visible.none {OfflineAccess.allows(it) && it.isActive})manager.cancel(ONGOING_ID)
+    }
 
     private fun post(id: Int, notification: Notification) {
         ensureChannels()

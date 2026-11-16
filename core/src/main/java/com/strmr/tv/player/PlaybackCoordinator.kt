@@ -217,7 +217,7 @@ object PlaybackCoordinator {
      * unless another playback is resolving.
      */
     fun playSession(session: PlayerSession) {
-        if (_resolving.value != null) return
+        if (_resolving.value != null || !session.playbackAllowed()) return
         pending = session
         launchPlayer()
     }

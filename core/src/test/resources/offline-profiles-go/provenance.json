@@ -1,0 +1,1 @@
+{"producer":"UsersHandler.List","producerTest":"backend/handlers/users_offline_contract_test.go","base":"918510883de83ff1de2827887c941a34654ee24d","kind":"actual handler response with synthetic service and server-injected account context; not network authentication recording","sha256":"8487147eab225af9bf3032e7d7179cad24c0ae84d6f0f813b02f65b5cd047f88"}

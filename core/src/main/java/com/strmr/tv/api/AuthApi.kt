@@ -98,7 +98,12 @@ suspend fun ApiClient.login(username: String, password: String): AuthSession {
 /** Revokes the session on the server (best effort) and forgets it locally. */
 suspend fun ApiClient.logout() = revokeSession()
 
-suspend fun ApiClient.profiles(): List<Profile> = send("GET", "/api/users")
+suspend fun ApiClient.profiles(): List<Profile> {
+    val expected=ProfileDataContext.current
+    val context=inContext(expected){profileReadContext()}
+    val raw=send<kotlinx.serialization.json.JsonArray>("GET","/api/users",expectedContext=expected)
+    return authenticatedProfiles(raw,context)
+}
 
 /**
  * `POST /api/users/{id}/pin/verify`; false for a wrong (or empty) PIN. Stores the unlock

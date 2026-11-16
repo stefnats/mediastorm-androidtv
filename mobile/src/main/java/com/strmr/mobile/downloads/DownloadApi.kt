@@ -22,13 +22,14 @@ import kotlinx.serialization.json.put
  * compatible files); season packs only for Download Season.
  */
 suspend fun ApiClient.downloadSources(
-    query: String, title: DetailsTarget, numbering: EpisodeNumbering?, seasonPacksOnly: Boolean,
+    query: String, title: DetailsTarget, numbering: EpisodeNumbering?, seasonPacksOnly: Boolean,expectedContext:Long=ProfileDataContext.current,
 ): List<SourceResult> {
+    val profile=inContext(expectedContext) {profileId}
     val q = buildMap {
         put("q", query)
         put("titleId", title.titleId)
         put("mediaType", if (title.isMovie) "movie" else "series")
-        put("userId", profileId)
+        put("userId", profile)
         put("includeSourceHealth", "true")
         put("limit", "50")
         put("downloadRanking", "true")
@@ -40,7 +41,7 @@ suspend fun ApiClient.downloadSources(
             n.ordering?.takeIf { it.isNotEmpty() }?.let { put("episodeOrdering", it) }
         }
     }
-    val raw = sendRaw("GET", "/api/indexers/search", q, timeoutMs = 90_000, headers = ThroughputStore.headers())
+    val raw = sendRaw("GET", "/api/indexers/search", q, timeoutMs = 90_000, headers = ThroughputStore.headers(),expectedContext=expectedContext)
     val list = json.parseToJsonElement(raw) as? JsonArray ?: return emptyList()
     return list.mapIndexedNotNull { i, e -> (e as? JsonObject)?.let { SourceResult.from(it, i) } }
 }
@@ -87,9 +88,11 @@ suspend fun ApiClient.resolveBatch(result: SourceResult, episodes: List<Episode>
 private data class WatchedKeys(val watched: List<String>? = null)
 
 /** The profile's watched items as keys (`movie:<id>`, `episode:<id>`), lowercased. */
-suspend fun ApiClient.watchedKeys(): Set<String> =
-    send<WatchedKeys>("GET", "$profilePath/history/watched", mapOf("fields" to "status", "format" to "keys"), timeoutMs = 60_000)
-        .watched.orEmpty().map { it.lowercase() }.toSet()
+suspend fun ApiClient.watchedKeys(expectedContext:Long=ProfileDataContext.current): Set<String> {
+    val path=inContext(expectedContext){"$profilePath/history/watched"}
+    return send<WatchedKeys>("GET",path,mapOf("fields" to "status","format" to "keys"),timeoutMs=60_000,expectedContext=expectedContext)
+        .watched.orEmpty().map {it.lowercase()}.toSet()
+}
 
 /** A source result aimed at one episode of a pack, for resolving episodes one by one. */
 fun SourceResult.targeting(ep: Episode): SourceResult? {

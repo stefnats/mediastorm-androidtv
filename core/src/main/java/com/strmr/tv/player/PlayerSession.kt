@@ -73,6 +73,8 @@ data class PlayerSession(
     val prequeueId: String? = null,
     /** Audio explicitly chosen on details/manual selection, saved before any recovery request. */
     val explicitAudioLanguage: String? = null,
+    /** Ephemeral owner check for a local file; never serialized as an offline grant. */
+    val localFileAccess:(()->Boolean)?=null,
 )
 
 /** A resolved stream: its path, the server's track choice and what online subtitles match against. */
@@ -91,3 +93,6 @@ data class ResolvedStream(
     /** A legacy or deliberate library copy chosen while resolving this request. */
     val libraryVersion: com.strmr.tv.library.LibraryVersion? = null,
 )
+
+/** Local-file callers must supply a live owner check at every player entry. */
+fun PlayerSession.playbackAllowed():Boolean = !localFile || runCatching {localFileAccess?.invoke()==true}.getOrDefault(false)

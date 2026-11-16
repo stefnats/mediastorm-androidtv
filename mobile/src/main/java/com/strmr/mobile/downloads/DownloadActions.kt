@@ -22,6 +22,7 @@ data class DownloadRequest(
     val target: DetailsTarget,
     val episode: Episode? = null,
     val season: Season? = null,
+    val ownership:OfflineContext?=null,
 ) {
     val heading: String
         get() = when {
@@ -41,18 +42,22 @@ object DownloadActions {
     val picking = MutableStateFlow<DownloadRequest?>(null)
 
     fun pick(request: DownloadRequest) {
-        picking.value = request
+        val context=OfflineAccess.current()
+        if(context==null) {com.strmr.tv.ui.AppToast.show(OfflineAccess.unavailableMessage());return}
+        picking.value = request.copy(ownership=context)
     }
 
     /** Resolves the picked release and queues it; returns the message to show. */
     suspend fun queue(result: SourceResult, request: DownloadRequest): String {
-        val expected=ProfileDataContext.current
-        request.season?.let { return queueSeason(result, it, request.target,expected) }
+        val context=request.ownership ?: return OfflineAccess.CONTEXT_REQUIRED
+        try {OfflineAccess.require(context)} catch(_:Exception) {return OfflineAccess.CONTEXT_REQUIRED}
+        val expected=context.epoch
+        request.season?.let { return queueSeason(result, it, request.target,context) }
         val attempt=VodDenialEvents.begin(request.target.titleId,expected)
         return try {
             val (path, tracks) = ApiClient.resolveSource(result, request.target.titleId, null,expected)
             ProfileDataContext.requireCurrent(expected)
-            Downloads.start(request.target, request.episode, path, releaseName(result), result.sizeBytes, tracks)
+            Downloads.start(request.target, request.episode, path, releaseName(result), result.sizeBytes, tracks,context)
             "Download started"
         } catch (e: CancellationException) {
             throw e
@@ -65,7 +70,8 @@ object DownloadActions {
     private fun releaseName(r: SourceResult) = SourceSwitchRules.releaseName(r.title, r.attributes["raw_title"])
 
     /** Every aired episode from one pack: in one batch resolve, else one by one. */
-    private suspend fun queueSeason(result: SourceResult, season: Season, target: DetailsTarget,expected:Long): String {
+    private suspend fun queueSeason(result: SourceResult, season: Season, target: DetailsTarget,context:OfflineContext): String {
+        val expected=context.epoch
         val episodes = season.episodes.filter { ReleaseBadge.forEpisode(it.airedDate) == null }
         if (episodes.isEmpty()) return "No episodes to download"
         var queued = 0
@@ -78,7 +84,7 @@ object DownloadActions {
                 return
             }
             try {
-                Downloads.start(target, ep, path, release, size ?: 0)
+                Downloads.start(target, ep, path, release, size ?: 0,context=context)
                 queued++
             } catch (e: DownloadError) {
                 failed++
@@ -88,9 +94,9 @@ object DownloadActions {
         var attempt=VodDenialEvents.begin(target.titleId,expected)
         try {
             resolveSeasonDownloads(result,episodes,
-                batch={attempt=VodDenialEvents.begin(target.titleId,expected);ApiClient.resolveBatch(result,episodes,expected)},
-                single={targeted->attempt=VodDenialEvents.begin(target.titleId,expected);ApiClient.resolveSource(targeted,target.titleId,null,expected).first},
-                enqueue={episode,path,size->ProfileDataContext.requireCurrent(expected);add(episode,path,size)})
+                batch={OfflineAccess.require(context);attempt=VodDenialEvents.begin(target.titleId,expected);ApiClient.resolveBatch(result,episodes,expected)},
+                single={targeted->OfflineAccess.require(context);attempt=VodDenialEvents.begin(target.titleId,expected);ApiClient.resolveSource(targeted,target.titleId,null,expected).first},
+                enqueue={episode,path,size->OfflineAccess.require(context);add(episode,path,size)})
         } catch(error:CancellationException) {throw error
         } catch(error:Exception) {error.vodDenial?.let {VodDenialEvents.reject(attempt,it)};return error.vodDenial?.message ?: "The download couldn't start"}
         return when {
@@ -105,9 +111,11 @@ object DownloadActions {
      * when Downloads opens with the server reachable (offline nothing changes).
      */
     suspend fun deleteWatchedIfEnabled() {
+        val context=OfflineAccess.current() ?: return
         val done = Downloads.completed
         if (!DownloadSettings.deleteWatched || done.isEmpty()) return
-        val keys = runCatching { ApiClient.watchedKeys() }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return
+        val keys = runCatching { ApiClient.watchedKeys(context.epoch) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return
+        OfflineAccess.require(context)
         val watched = done.filter { DownloadWatched.isWatched(it, keys) }
         if (watched.isNotEmpty()) Downloads.delete(watched.map { it.id })
     }

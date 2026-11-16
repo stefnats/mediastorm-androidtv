@@ -183,7 +183,7 @@ fun DownloadPoster(item: DownloadItem) {
     ) {
         Icon(if (item.isMovie) Icons.Outlined.Movie else Icons.Outlined.Tv, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         AsyncImage(
-            model = DownloadStorage.poster(item.id) ?: Artwork.url(item.posterUrl, "w342"),
+            model = DownloadStorage.poster(item) ?: Artwork.url(item.posterUrl, "w342"),
             contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
         )
     }

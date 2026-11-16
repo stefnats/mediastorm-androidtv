@@ -34,6 +34,7 @@ import com.strmr.mobile.downloads.DownloadItem
 import com.strmr.mobile.downloads.DownloadItem.Status
 import com.strmr.mobile.downloads.DownloadRequest
 import com.strmr.mobile.downloads.Downloads
+import com.strmr.mobile.downloads.OfflineAccess
 import com.strmr.tv.api.DetailsTarget
 import com.strmr.tv.api.Episode
 
@@ -45,12 +46,14 @@ import com.strmr.tv.api.Episode
  */
 @Composable
 fun DownloadButton(target: DetailsTarget, episode: Episode?, modifier: Modifier = Modifier) {
-    val item by remember(target.titleId, episode?.id) { Downloads.state(target, episode) }.collectAsState(Downloads.find(target, episode))
+    val currentOwner=offlineUiContext()
+    val observedItem by remember(target.titleId, episode?.id) { Downloads.state(target, episode) }.collectAsState(Downloads.find(target, episode))
+    val item=observedItem?.takeIf {OfflineAccess.allows(it,currentOwner)}
     val prompts = rememberDownloadPrompts()
     var menu by remember { mutableStateOf(false) }
     Box(modifier) {
         IconButton(onClick = { if (item == null) pick(target, episode) else menu = true },
-                   enabled = target.isMovie || episode != null) {
+                   enabled = currentOwner!=null && (target.isMovie || episode != null)) {
             DownloadGlyph(item)
         }
         item?.let { DropdownMenu(menu, onDismissRequest = { menu = false }) { DownloadMenuItems(it, prompts) { menu = false } } }
@@ -61,13 +64,15 @@ fun DownloadButton(target: DetailsTarget, episode: Episode?, modifier: Modifier 
 /** The details page's round Download action (beside Watchlist and Trailer), with the same states. */
 @Composable
 fun RowScope.DownloadActionItem(target: DetailsTarget, episode: Episode?,allowed:()->Boolean={true}) {
-    val item by remember(target.titleId, episode?.id) { Downloads.state(target, episode) }.collectAsState(Downloads.find(target, episode))
+    val currentOwner=offlineUiContext()
+    val observedItem by remember(target.titleId, episode?.id) { Downloads.state(target, episode) }.collectAsState(Downloads.find(target, episode))
+    val item=observedItem?.takeIf {OfflineAccess.allows(it,currentOwner)}
     val prompts = rememberDownloadPrompts()
     var menu by remember { mutableStateOf(false) }
     Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Box {
             FilledTonalIconButton(onClick = { if(allowed()) {if (item == null) pick(target, episode) else menu = true} },
-                                  enabled = allowed() && (target.isMovie || episode != null), modifier = Modifier.size(52.dp)) {
+                                  enabled = currentOwner!=null && allowed() && (target.isMovie || episode != null), modifier = Modifier.size(52.dp)) {
                 DownloadGlyph(item)
             }
             item?.let { DropdownMenu(menu, onDismissRequest = { menu = false }) { DownloadMenuItems(it, prompts) { menu = false } } }

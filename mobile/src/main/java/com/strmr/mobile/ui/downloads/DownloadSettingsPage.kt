@@ -38,8 +38,10 @@ import com.strmr.mobile.ui.shell.LocalNavigator
 @Composable
 fun DownloadSettingsPage(onBack: (() -> Unit)? = null) {
     val back = onBack ?: LocalNavigator.current.let { n -> { n.pop(); Unit } }
-    val items by Downloads.items.collectAsState()
-    var confirmAll by remember { mutableStateOf(false) }
+    val currentOwner=offlineUiContext()
+    val observedItems by Downloads.items.collectAsState()
+    val items=observedItems.filter {com.strmr.mobile.downloads.OfflineAccess.allows(it,currentOwner)}
+    var confirmAll by remember(currentOwner) { mutableStateOf(false) }
     LaunchedEffect(Unit) { Downloads.refreshUsage() }
     DownloadPage("Downloads", onBack = back) { padding ->
         androidx.compose.foundation.layout.Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
@@ -69,7 +71,7 @@ fun DownloadSettingsPage(onBack: (() -> Unit)? = null) {
             ListItem(headlineContent = { Text("Downloads") }, trailingContent = { Text("${items.size}") })
             ListItem(
                 headlineContent = {
-                    Text("Delete All Downloads", color = if (items.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant
+                    Text("Delete This Profile’s Downloads", color = if (items.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.error)
                 },
                 modifier = Modifier.clickable(enabled = items.isNotEmpty()) { confirmAll = true },
@@ -79,11 +81,12 @@ fun DownloadSettingsPage(onBack: (() -> Unit)? = null) {
     if (confirmAll) {
         AlertDialog(
             onDismissRequest = { confirmAll = false },
-            title = { Text("Delete all downloads?") },
-            text = { Text("Every downloaded file is removed from this device, and running downloads are cancelled.") },
+            title = { Text("Delete this profile’s downloads?") },
+            text = { Text("Only downloads belonging to this server, account and profile are removed. Other files remain on this device.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmAll = false
+                    if(currentOwner!=com.strmr.mobile.downloads.OfflineAccess.current())return@TextButton
                     Downloads.delete(items.map { it.id })
                 }) { Text("Delete ${items.size}") }
             },

@@ -40,12 +40,15 @@ val ApiJson = Json { ignoreUnknownKeys = true; explicitNulls = false; coerceInpu
  */
 object ApiClient {
     private val requestContexts = RequestContext()
+    private val profileVerification=ProfileVerificationGeneration()
+    private var preservingProfileVerification=false
     /** Server origin (plus any reverse-proxy path), without `/api`. */
     @Volatile var baseUrl: HttpUrl = "http://127.0.0.1:7777/".toHttpUrl()
         set(value) {
             requestContexts.changeAuthentication(change = {
                 val changed = field != value
                 field = value
+                if(changed && !preservingProfileVerification)profileVerification.invalidate()
                 changed
             })
         }
@@ -58,6 +61,7 @@ object ApiClient {
             requestContexts.changeAuthentication(change = {
                 val changed = field != value
                 field = value
+                if(changed && !preservingProfileVerification)profileVerification.invalidate()
                 changed
             })
         }
@@ -79,6 +83,7 @@ object ApiClient {
             requestContexts.changeAuthentication(change = {
                 val changed = storedSession != value
                 storedSession = value
+                if(changed)profileVerification.invalidate()
                 changed
             }, afterChange = { value?.save() })
         }
@@ -135,8 +140,8 @@ object ApiClient {
 
     /** A verified alternate route retains the account but publishes its credential atomically. */
     fun configureRoute(url: HttpUrl, credential: String? = remoteCredential) = requestContexts.serialized {
-        baseUrl = url
-        remoteCredential = credential
+        preservingProfileVerification=true
+        try {baseUrl=url;remoteCredential=credential} finally {preservingProfileVerification=false}
     }
 
     /** Commit a parsed reply only while its original profile/server identity remains active. */
@@ -353,6 +358,16 @@ object ApiClient {
 
     private val rotations = ScopedRefresh<RefreshOutcome>(scope)
 
+    internal fun profileReadContext()=AuthenticatedProfileRead(requestContexts.captureAuthentication(),profileVerification.capture())
+
+    /** A download retry cannot refresh using a replacement account after its epoch changed. */
+    suspend fun refreshSessionInContext(expected:Long):RefreshOutcome {
+        val version=inContext(expected) {requestContexts.captureAuthentication().authenticationVersion}
+        val result=refreshSession(version)
+        inContext(expected) {}
+        return result
+    }
+
     /** Rotations coalesce only within the captured account/server identity. */
     suspend fun refreshSession(): RefreshOutcome = refreshSession(null)
 
@@ -400,6 +415,7 @@ object ApiClient {
     /** Drops the session and the profile unlocks bound to it. */
     fun forgetSession() = requestContexts.changeAuthentication(change = {
         storedSession = null
+        profileVerification.invalidate()
         true // Explicit logout also invalidates a login that has not returned yet.
     }, afterChange = {
         AuthSession.clear()

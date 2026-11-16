@@ -39,7 +39,9 @@ import com.strmr.mobile.downloads.Downloads
  */
 @Composable
 fun DownloadsShowPage(titleId: String, onBack: () -> Unit) {
-    val items by Downloads.items.collectAsState()
+    val currentOwner=offlineUiContext()
+    val observedItems by Downloads.items.collectAsState()
+    val items=observedItems.filter {com.strmr.mobile.downloads.OfflineAccess.allows(it,currentOwner)}
     val episodes = items.filter { it.isEpisode && it.isCompleted && it.showKey == titleId }
     val prompts = rememberDownloadPrompts()
     LaunchedEffect(episodes.isEmpty()) { if (episodes.isEmpty()) onBack() }
@@ -80,7 +82,10 @@ fun DownloadShowRow(episodes: List<DownloadItem>, prompts: DownloadPrompts, sele
 /** Storage: what downloads take and what is left on the device, as a capacity bar. */
 @Composable
 fun DownloadsStorage() {
-    val used by Downloads.usedBytes.collectAsState()
+    val observed by Downloads.usedBytes.collectAsState()
+    val epoch by com.strmr.tv.library.ProfileDataContext.changes.collectAsState()
+    val currentOwner=offlineUiContext()
+    val used=if(currentOwner!=null)Downloads.usedBytes.value else 0L
     val free = DownloadStorage.availableBytes
     val total = DownloadStorage.totalBytes.coerceAtLeast(1)
     ListItem(

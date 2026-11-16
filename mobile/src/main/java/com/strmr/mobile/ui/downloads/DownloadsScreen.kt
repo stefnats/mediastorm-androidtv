@@ -39,14 +39,15 @@ import com.strmr.mobile.downloads.DownloadSettings
 import com.strmr.mobile.downloads.DownloadSorting
 import com.strmr.mobile.downloads.Downloads
 import com.strmr.mobile.downloads.OfflineProgress
+import com.strmr.mobile.downloads.OfflineAccess
+import com.strmr.tv.library.ProfileDataContext
 import com.strmr.mobile.ui.shell.LocalNavigator
 
 /**
  * Downloads (the iPhone app's `MobileDownloadsView`): storage used, the downloads still in
  * progress, then the finished movies and shows (each a page of its seasons and episodes),
  * sorted by the bar's Sort menu. A tap plays a finished download or pauses / resumes a running
- * one; swipe or long press to delete, Select to delete several. Needs no server: everything
- * listed is on the device, so it also shows offline before sign-in ([onBack] then closes it).
+ * one. Only the current verified original owner can view or change stored downloads.
  * [asPage]: opened from More, with a back arrow.
  */
 @Composable
@@ -54,7 +55,12 @@ fun DownloadsScreen(asPage: Boolean, onBack: (() -> Unit)? = null, topInset: @Co
     val back = onBack ?: if (asPage) LocalNavigator.current.let { n -> { n.pop(); Unit } } else null
     var openShow by rememberSaveable { mutableStateOf<String?>(null) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
-    val items by Downloads.items.collectAsState()
+    val epoch by ProfileDataContext.changes.collectAsState()
+    val access by Downloads.accessMessage.collectAsState()
+    val currentOwner=offlineUiContext()
+    val observedItems by Downloads.items.collectAsState()
+    val items=observedItems.filter {com.strmr.mobile.downloads.OfflineAccess.allows(it,currentOwner)}
+    LaunchedEffect(epoch,access) {openShow=null;settingsOpen=false}
     LaunchedEffect(Unit) {
         Downloads.refreshUsage()
         DownloadActions.deleteWatchedIfEnabled()
@@ -174,9 +180,10 @@ private fun EmptyDownloads(padding: PaddingValues) {
     ) {
         Icon(Icons.Outlined.DownloadForOffline, null, Modifier.padding(bottom = 16.dp).padding(4.dp),
              tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("No Downloads", style = MaterialTheme.typography.titleLarge)
+        val access by Downloads.accessMessage.collectAsState()
+        Text(if(access!=null)"Downloads unavailable" else "No Downloads", style = MaterialTheme.typography.titleLarge)
         Text(
-            "Movies and episodes you download can be watched without a connection. Download from a title's page.",
+            access ?: "Only downloads for this server, account and profile appear here. Older unassigned files are kept. After restarting the app, verify this profile online before opening its downloads.",
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 8.dp),
         )

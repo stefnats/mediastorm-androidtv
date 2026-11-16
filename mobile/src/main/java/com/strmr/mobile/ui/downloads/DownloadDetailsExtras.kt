@@ -14,6 +14,7 @@ import com.strmr.mobile.downloads.DownloadPlayback
 import com.strmr.mobile.downloads.DownloadRequest
 import com.strmr.mobile.downloads.Downloads
 import com.strmr.mobile.downloads.OfflineProgress
+import com.strmr.mobile.downloads.OfflineAccess
 import com.strmr.mobile.ui.components.SheetAction
 import com.strmr.mobile.ui.details.DetailsActionContext
 import com.strmr.mobile.ui.details.DetailsExtraActions
@@ -31,12 +32,12 @@ import com.strmr.tv.ui.details.DetailsModel
 object DownloadDetailsExtras : DetailsExtraActions {
     @Composable
     override fun RowScope.Actions(context: DetailsActionContext) {
-        if(context.playbackCurrent)DownloadActionItem(downloadTarget(context.model), if (context.model.target.isMovie) null else context.episode,allowed={context.playbackCurrent})
+        if(context.playbackCurrent && offlineUiContext()!=null)DownloadActionItem(downloadTarget(context.model), if (context.model.target.isMovie) null else context.episode,allowed={context.playbackCurrent})
     }
 
     override fun moreActions(context: DetailsActionContext): List<SheetAction> {
         val model = context.model
-        if (!context.playbackCurrent || model.target.isMovie) return emptyList()
+        if (!context.playbackCurrent || OfflineAccess.current()==null || model.target.isMovie) return emptyList()
         val season = model.currentSeason?.takeIf { it.episodes.isNotEmpty() } ?: return emptyList()
         val name = if (season.number == 0) "Specials" else "Season ${season.number}"
         return listOf(SheetAction("Download $name…", Icons.Outlined.DownloadForOffline) {
@@ -45,7 +46,7 @@ object DownloadDetailsExtras : DetailsExtraActions {
     }
 
     override fun episodeActions(context: DetailsActionContext, episode: Episode): List<SheetAction> {
-        if(!context.playbackCurrent)return emptyList()
+        if(!context.playbackCurrent || OfflineAccess.current()==null)return emptyList()
         val target = downloadTarget(context.model)
         val item = Downloads.find(target, episode)
             ?: return listOf(SheetAction("Download ${episode.code}…", Icons.Outlined.Download) {
@@ -54,8 +55,10 @@ object DownloadDetailsExtras : DetailsExtraActions {
         val primary = when (item.status) {
             Status.COMPLETED -> SheetAction("Play Download", Icons.Filled.DownloadDone) {
                 // From the sheet there is no prompt: resume from what the device knows.
-                if(context.playbackCurrent)DownloadPlayback.play(item, OfflineProgress.resumePoint(item) ?: context.model.resumePoint(episode))
-                    ?.let(AppToast::show)
+                if(context.playbackCurrent && OfflineAccess.allows(item)) {
+                    val point=runCatching {OfflineProgress.resumePoint(item)}.getOrNull() ?: context.model.resumePoint(episode)
+                    DownloadPlayback.play(item,point)?.let(AppToast::show)
+                }
             }
             Status.DOWNLOADING, Status.PENDING ->
                 SheetAction("Downloading ${Math.round(item.progress * 100)}% · Pause", Icons.Outlined.Pause) { if(context.playbackCurrent)Downloads.pause(item.id) }

@@ -15,24 +15,22 @@ import com.strmr.tv.app.AppSession
  * Keeps the app's process alive while downloads are queued or running (a `dataSync`
  * foreground service with the progress notification), so they continue with the app in the
  * background or swiped away. The transfers themselves run in [Downloads]; this only holds the
- * process and the notification. Restarted by the system after it kills the process (sticky),
- * it loads the records and the queue carries on from the partial files.
+ * process and the notification. A cold restart needs a newly verified owner context before
+ * transfers can continue; it never adopts the account currently selected by another session.
  */
 class DownloadService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
-        runCatching {
-            ServiceCompat.startForeground(this, DownloadNotifications.ONGOING_ID, DownloadNotifications.ongoing(Downloads.items.value), type)
-        }.onFailure { AppLog.w("Downloads", "couldn't go foreground: ${it.message}") }
-        running = true
-        // Restarted by the system without the app: bring the session up so the queue can run
-        // (it waits for the server and, as at launch, a profile in use).
-        AppSession.start(autoSignIn = false)
+        if(OfflineAccess.current()==null) {stop();return START_NOT_STICKY}
         Downloads.start()
-        if (!wanted(Downloads.items.value)) stop()
-        return START_STICKY
+        val items=Downloads.items.value
+        if(!wanted(items)) {stop();return START_NOT_STICKY}
+        val type=if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q)ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
+        runCatching {ServiceCompat.startForeground(this,DownloadNotifications.ONGOING_ID,DownloadNotifications.ongoing(items),type)}
+            .onFailure {stop();return START_NOT_STICKY}
+        running=true
+        return START_NOT_STICKY
     }
 
     /** Android 15's daily limit for data-sync services: pause until the app is opened again. */
@@ -58,11 +56,12 @@ class DownloadService : Service() {
         @Volatile private var running = false
 
         private fun wanted(items: List<DownloadItem>) =
-            items.any { it.status == DownloadItem.Status.DOWNLOADING || it.status == DownloadItem.Status.PENDING }
+            items.any { OfflineAccess.allows(it) && (it.status == DownloadItem.Status.DOWNLOADING || it.status == DownloadItem.Status.PENDING) }
 
         /** Starts the service while there is work, updates its notification, stops it once there is none. */
         fun sync(items: List<DownloadItem>) {
             val context = App.context
+            val items=items.filter {OfflineAccess.allows(it)}
             when {
                 wanted(items) && !running -> runCatching {
                     running = true

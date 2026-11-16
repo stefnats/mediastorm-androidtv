@@ -5,6 +5,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.reportProgress
+import com.strmr.tv.api.vodDenial
 import com.strmr.tv.library.ProfileDataContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -28,7 +29,7 @@ class ProgressReporter(
 ) {
     private val request = session.request
     private var discarded = false
-    val acceptsCompletion get() = !discarded && context == ProfileDataContext.current
+    val acceptsCompletion get() = !discarded && session.playbackAllowed() && context == ProfileDataContext.current
     var lastStoredItemId: String? = null
         private set
     private var periodic: Job? = null
@@ -76,6 +77,7 @@ class ProgressReporter(
             withContext(NonCancellable) {
                 try {
                     ProfileDataContext.requireCurrent(context)
+                    if(!session.playbackAllowed())return@withContext
                     val reply = ApiClient.reportProgress(body, expectedContext = context)
                     ProfileDataContext.requireCurrent(context)
                     lastStoredItemId = reply.itemId?.takeIf { it.isNotBlank() } ?: lastStoredItemId
@@ -86,7 +88,7 @@ class ProgressReporter(
                 } catch (error: CancellationException) { throw error
                 } catch (e: Exception) {
                     log.failed(kind, position, duration, e)
-                    session.progressSink?.undelivered(body)
+                    if(e.vodDenial==null && session.playbackAllowed())session.progressSink?.undelivered(body)
                 }
             }
         }

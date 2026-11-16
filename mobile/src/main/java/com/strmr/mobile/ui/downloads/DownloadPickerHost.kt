@@ -42,6 +42,8 @@ import com.strmr.mobile.downloads.DownloadActions
 import com.strmr.mobile.downloads.DownloadFormat
 import com.strmr.mobile.downloads.DownloadRequest
 import com.strmr.mobile.downloads.DownloadStorage
+import com.strmr.mobile.downloads.OfflineAccess
+import com.strmr.tv.library.ProfileDataContext
 import com.strmr.mobile.downloads.downloadSources
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.SourceResult
@@ -64,11 +66,20 @@ fun DownloadPickerHost() {
     val request by DownloadActions.picking.collectAsState()
     val context = LocalContext.current
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val epoch by ProfileDataContext.changes.collectAsState()
+    val phase by com.strmr.tv.app.AppSession.phase.collectAsState()
+    val profile by com.strmr.tv.app.AppSession.profile.collectAsState()
+    val pin by com.strmr.tv.app.AppSession.pinChallenge.collectAsState()
     val r = request ?: return
+    if(r.ownership==null || r.ownership!=OfflineAccess.current()) {
+        LaunchedEffect(r,epoch,phase,profile,pin) {if(DownloadActions.picking.value===r)DownloadActions.picking.value=null}
+        return
+    }
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     val scope = rememberCoroutineScope()
     ModalBottomSheet(onDismissRequest = { DownloadActions.picking.value = null }, sheetState = sheet) {
         SourceList(r) { result ->
+            if(r.ownership!=OfflineAccess.current())return@SourceList
             scope.launch { sheet.hide() }.invokeOnCompletion { DownloadActions.picking.value = null }
             if (Build.VERSION.SDK_INT >= 33 &&
                 ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -88,7 +99,11 @@ private fun SourceList(request: DownloadRequest, onPick: (SourceResult) -> Unit)
     var error by remember(request) { mutableStateOf<String?>(null) }
     LaunchedEffect(request) {
         try {
-            results = ApiClient.downloadSources(request.query, request.target, request.episode?.numbering, request.season != null)
+            val ownership=request.ownership ?: return@LaunchedEffect
+            OfflineAccess.require(ownership)
+            val found = ApiClient.downloadSources(request.query,request.target,request.episode?.numbering,request.season!=null,ownership.epoch)
+            OfflineAccess.require(ownership)
+            results=found
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

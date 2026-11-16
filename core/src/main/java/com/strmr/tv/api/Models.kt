@@ -30,7 +30,9 @@ data class Profile(
      */
     val kidsMode: String? = null,
     val kidsAllowedLists: List<String>? = null,
+    @kotlinx.serialization.Transient val offlineVerification:ProfileReadVerification?=null,
 ) {
+    val offlineAdultVerified get()=isKidsProfile==false && offlineVerification?.isCurrent(id)==true
     val requiresPin get() = hasPin == true
     val isKidsCurated get() = isKidsProfile == true && kidsMode == "content_list"
 }

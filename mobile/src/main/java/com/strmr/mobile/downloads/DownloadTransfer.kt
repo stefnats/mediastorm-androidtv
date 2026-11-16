@@ -1,8 +1,6 @@
 package com.strmr.mobile.downloads
 
 import com.strmr.tv.api.ApiClient
-import com.strmr.tv.api.mediaHeaders
-import com.strmr.tv.api.streamUrl
 import com.strmr.tv.app.AppLog
 import java.io.File
 import java.io.FileOutputStream
@@ -14,7 +12,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-import okhttp3.Request
 
 /**
  * One download's HTTP transfer: `/api/video/stream` for the item's stream path (the raw file,
@@ -23,10 +20,16 @@ import okhttp3.Request
  * is built per attempt, so it follows the route in use (home address, away address or the
  * tunnel). Cancelling the coroutine stops it, leaving the partial file for later.
  */
-class DownloadTransfer(
+internal class DownloadTransfer(
     private val item: DownloadItem,
+    private val context:OfflineContext,
     /** Bytes on disk so far and the total when known; called at most twice a second. */
     private val onProgress: (written: Long, total: Long?) -> Unit,
+    private val files:OwnedDownloadFiles=DownloadStorage.files,
+    private val verify:(OfflineContext,DownloadItem)->Unit={snapshot,row->OfflineAccess.require(snapshot,row)},
+    private val capture:(DownloadItem,OfflineContext,String?)->OwnedDownloadHttp=OwnedDownloadHttp::stream,
+    private val refresh:suspend (Long)->ApiClient.RefreshOutcome=ApiClient::refreshSessionInContext,
+    private val http:OkHttpClient=client,
 ) {
     sealed interface Outcome {
         data class Completed(val bytes: Long) : Outcome
@@ -36,23 +39,26 @@ class DownloadTransfer(
     private class HttpFailure(val code: Int) : IOException("The server answered $code.")
 
     suspend fun run(): Outcome = withContext(Dispatchers.IO) {
-        val part = DownloadStorage.partFile(item.id)
+        currentCoroutineContext().ensureActive()
+        verify(context,item)
+        val part = files.part(item,context)
         try {
             var refreshed = false
             var attempts = 0
             while (true) {
                 attempts++
                 try {
-                    val bytes = attempt(part)
-                    val target = DownloadStorage.file(item.fileName)
-                    target.delete()
-                    if (!part.renameTo(target)) throw IOException("The download couldn't be saved.")
-                    return@withContext Outcome.Completed(bytes)
+                    attempt(part)
+                    verify(context,item)
+                    val operation=currentCoroutineContext()
+                    val saved=files.use(item,context){operation.ensureActive();files.finish(item,context)}
+                    return@withContext Outcome.Completed(saved)
                 } catch (e: HttpFailure) {
                     // An expired session: refresh once and ask again.
                     if (e.code == 401 && !refreshed) {
                         refreshed = true
-                        if (ApiClient.refreshSession() == ApiClient.RefreshOutcome.REFRESHED) continue
+                        verify(context,item)
+                        if (refresh(context.epoch) == ApiClient.RefreshOutcome.REFRESHED) {verify(context,item);continue}
                     }
                     if (e.code == 416 && attempts < 3) continue // the partial was dropped; ask for the whole file
                     return@withContext Outcome.Failed(e.message ?: "Download failed", RangeResume.retryable(e.code))
@@ -62,21 +68,22 @@ class DownloadTransfer(
             Outcome.Failed("Download failed", true)
         } catch (e: IOException) {
             currentCoroutineContext().ensureActive()
-            AppLog.w("Downloads", "${item.displayTitle}: ${e.message}")
-            Outcome.Failed(e.message ?: "Connection lost", retryable = true)
+            AppLog.w("Downloads", "The download connection could not continue.")
+            Outcome.Failed("The download connection could not continue.", retryable = true)
         }
     }
 
     /** One request, appending to (or restarting) the partial file; returns the file's size. */
+    @OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
     private suspend fun attempt(part: File): Long {
-        val existing = if (part.isFile) part.length() else 0L
-        val request = Request.Builder().url(ApiClient.streamUrl(item.streamPath)).apply {
-            ApiClient.mediaHeaders.forEach { (k, v) -> header(k, v) }
-            RangeResume.header(existing)?.let { header("Range", it) }
-        }.build()
-        val call = client.newCall(request)
+        val operation=currentCoroutineContext()
+        operation.ensureActive()
+        verify(context,item)
+        val existing = files.use(item,context){if(part.isFile)part.length()else 0L}
+        val captured=capture(item,context,RangeResume.header(existing))
+        val call = captured.client(http).newCall(captured.request)
         val job = currentCoroutineContext().job
-        val cancel = job.invokeOnCompletion { call.cancel() }
+        val cancel = job.invokeOnCompletion(onCancelling=true,invokeImmediately=true) {if(it!=null)call.cancel()}
         try {
             call.execute().use { response ->
                 val body = response.body ?: throw IOException("The server sent nothing.")
@@ -86,7 +93,7 @@ class DownloadTransfer(
                     is RangeResume.Decision.Restart -> 0L to decision.total
                     RangeResume.Decision.Complete -> return existing
                     RangeResume.Decision.Discard -> {
-                        part.delete()
+                        files.use(item,context){operation.ensureActive();part.delete()}
                         throw HttpFailure(416)
                     }
                     is RangeResume.Decision.Fail -> throw HttpFailure(decision.code)
@@ -96,14 +103,16 @@ class DownloadTransfer(
                 onProgress(offset, total)
                 var written = offset
                 var lastReport = System.nanoTime()
-                FileOutputStream(part, offset > 0).use { out ->
+                files.use(item,context){operation.ensureActive();FileOutputStream(part,offset>0)}.use { out ->
                     val source = body.byteStream()
                     val buffer = ByteArray(256 * 1024)
                     while (true) {
                         currentCoroutineContext().ensureActive()
                         val n = source.read(buffer)
+                        operation.ensureActive()
                         if (n < 0) break
-                        out.write(buffer, 0, n)
+                        verify(context,item)
+                        files.use(item,context){operation.ensureActive();out.write(buffer,0,n)}
                         written += n
                         val now = System.nanoTime()
                         if (now - lastReport > 500_000_000) {
@@ -113,6 +122,7 @@ class DownloadTransfer(
                     }
                 }
                 if (total != null && written < total) throw IOException("The connection closed early.")
+                verify(context,item)
                 onProgress(written, total ?: written)
                 return written
             }

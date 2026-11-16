@@ -33,15 +33,21 @@ object DownloadPlayback {
      * the one kept on the device.
      */
     suspend fun resumePoint(item: DownloadItem,expectedContext:Long=ProfileDataContext.current): StartPoint? {
+        val context=OfflineAccess.capture()
+        OfflineAccess.require(context,item)
+        ProfileDataContext.requireCurrent(expectedContext)
         val mediaType = if (item.isMovie) "movie" else "episode"
-        return resolveDownloadResume(expectedContext,{ApiClient.resumeState(mediaType,item.progressItemId,expectedContext)},{OfflineProgress.resumePoint(item)})
+        val point=resolveDownloadResume(expectedContext,{ApiClient.resumeState(mediaType,item.progressItemId,expectedContext)},{OfflineProgress.resumePoint(item)})
+        OfflineAccess.require(context,item)
+        return point
     }
 
     /** Opens the player on the file; returns an error message when it can't. */
     fun play(item: DownloadItem, start: StartPoint?): String? {
-        val file = DownloadStorage.file(item.fileName)
+        val context=OfflineAccess.current() ?: return OfflineAccess.unavailableMessage()
+        val file=try {OfflineAccess.require(context,item);DownloadStorage.file(item,context)}catch(_:Exception) {return OfflineAccess.CONTEXT_REQUIRED}
         if (!file.isFile) return "The downloaded file is missing."
-        AppLog.i("Downloads", "playing download ${item.displayTitle} from ${file.name}")
+        if(runCatching {OfflineAccess.require(context,item)}.isFailure)return OfflineAccess.CONTEXT_REQUIRED
         PlaybackCoordinator.playSession(
             PlayerSession(
                 request = request(item, start),
@@ -53,7 +59,8 @@ object DownloadPlayback {
                 pickTracksOnDevice = item.tracks == null,
                 sourceLabel = "Downloaded",
                 localFile = true,
-                progressSink = OfflineProgress.sink(item),
+                progressSink = OfflineProgress.sink(item,context),
+                localFileAccess={runCatching {OfflineAccess.require(context,item);true}.getOrDefault(false)},
             ),
         )
         return null

@@ -58,6 +58,8 @@ data class DownloadItem(
     val retryAt: Long? = null,
     /** Bytes per second while downloading; not persisted. */
     @Transient val bytesPerSecond: Double = 0.0,
+    /** Written only when a new download is queued in its verified current context. */
+    val owner:DownloadOwner?=null,
 ) {
     enum class Status { PENDING, DOWNLOADING, PAUSED, COMPLETED, FAILED }
 
@@ -100,14 +102,16 @@ data class DownloadItem(
     companion object {
         private val containers = setOf("mkv", "mp4", "m4v", "mov", "avi", "ts", "m2ts", "webm", "wmv", "flv", "mpg", "mpeg")
 
+        internal fun mediaExtension(value:String)=value in containers
+
         /** A new record for a title (and episode) at `streamPath`. */
         fun create(
             target: DetailsTarget, episode: Episode?, streamPath: String, releaseName: String?, expectedBytes: Long,
-            tracks: TrackSelection? = null, now: Long = System.currentTimeMillis(),
+            tracks: TrackSelection? = null, now: Long = System.currentTimeMillis(),owner:DownloadOwner.Known?=null,
         ): DownloadItem {
             val id = UUID.randomUUID().toString().lowercase()
             return DownloadItem(
-                id = id, createdAt = now, titleId = target.titleId, isMovie = target.isMovie, name = target.name,
+                id = id, createdAt = now,owner=owner, titleId = target.titleId, isMovie = target.isMovie, name = target.name,
                 year = target.year, tmdbId = target.tmdbId, imdbId = target.imdbId, tvdbId = target.tvdbId,
                 posterUrl = target.posterUrl, backdropUrl = target.backdropUrl, overview = target.overview,
                 seasonNumber = episode?.seasonNumber, episodeNumber = episode?.episodeNumber,

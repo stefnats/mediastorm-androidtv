@@ -29,6 +29,7 @@ import com.strmr.tv.api.playbackSettings
 import com.strmr.tv.app.AppLog
 import com.strmr.tv.player.PlaybackCoordinator
 import com.strmr.tv.player.PlayerController
+import com.strmr.tv.player.playbackAllowed
 import com.strmr.tv.player.SubtitleStyleStore
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -61,7 +62,7 @@ class MobilePlayerActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         val session = PlaybackCoordinator.pending
-        if (session == null) {
+        if (session == null || !session.playbackAllowed()) {
             finish()
             return
         }
@@ -124,7 +125,7 @@ class MobilePlayerActivity : ComponentActivity() {
     /** A title played from elsewhere while this one is open (paused behind the app, say): hand over to it. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (PlaybackCoordinator.pending != null && controller != null) {
+        if (PlaybackCoordinator.pending?.playbackAllowed()==true && controller != null) {
             AppLog.i("Player", "new playback over the open player; restarting")
             relaunch = true
             finish()

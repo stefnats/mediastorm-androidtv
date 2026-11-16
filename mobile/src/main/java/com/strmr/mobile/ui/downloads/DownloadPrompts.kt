@@ -4,6 +4,11 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import com.strmr.mobile.downloads.OfflineAccess
+import com.strmr.mobile.downloads.OfflineContext
+import com.strmr.tv.app.AppSession
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,7 +31,7 @@ import kotlinx.coroutines.launch
  * resume point is known (the server's, else the one kept on the device).
  */
 class DownloadPrompts(private val scope: CoroutineScope) {
-    data class Deletion(val ids: List<String>, val title: String)
+    data class Deletion(val ids: List<String>, val title: String,val owner:OfflineContext)
     data class Resume(val item: DownloadItem, val start: StartPoint,val context:Long=ProfileDataContext.current)
 
     var deletion by mutableStateOf<Deletion?>(null)
@@ -35,7 +40,7 @@ class DownloadPrompts(private val scope: CoroutineScope) {
     var checkingResume by mutableStateOf<String?>(null)
 
     fun play(item: DownloadItem) {
-        if (checkingResume != null) return
+        if (checkingResume != null || !OfflineAccess.allows(item)) return
         checkingResume = item.id
         val expected=ProfileDataContext.current
         scope.launch {
@@ -55,25 +60,33 @@ class DownloadPrompts(private val scope: CoroutineScope) {
     }
 
     fun confirmDelete(item: DownloadItem) {
-        deletion = Deletion(listOf(item.id), if (item.isActive) "Cancel this download?" else "Delete “${item.displayTitle}”?")
+        val context=OfflineAccess.current() ?: return
+        if(!OfflineAccess.allows(item,context))return
+        deletion = Deletion(listOf(item.id), if (item.isActive) "Cancel this download?" else "Delete “${item.displayTitle}”?",context)
     }
 
     fun confirmDelete(ids: List<String>) {
-        if (ids.isEmpty()) return
-        deletion = Deletion(ids, if (ids.size == 1) "Delete 1 download?" else "Delete ${ids.size} downloads?")
+        val context=OfflineAccess.current() ?: return
+        if (ids.isEmpty() || ids.any {Downloads.item(it)==null}) return
+        deletion = Deletion(ids, if (ids.size == 1) "Delete 1 download?" else "Delete ${ids.size} downloads?",context)
     }
 }
 
 @Composable
 fun rememberDownloadPrompts(): DownloadPrompts {
     val scope = rememberCoroutineScope()
-    return remember { DownloadPrompts(scope) }
+    val epoch by ProfileDataContext.changes.collectAsState()
+    val phase by AppSession.phase.collectAsState()
+    val profile by AppSession.profile.collectAsState()
+    val pin by AppSession.pinChallenge.collectAsState()
+    val prompts=remember(epoch,phase,profile,pin) {DownloadPrompts(scope)}
+    return prompts
 }
 
 /** The prompts' dialogs; [onDeleted] runs after a confirmed delete (leave selection mode). */
 @Composable
 fun DownloadPromptDialogs(prompts: DownloadPrompts, onDeleted: () -> Unit = {}) {
-    prompts.deletion?.let { d ->
+    prompts.deletion?.takeIf {it.owner==OfflineAccess.current()}?.let { d ->
         AlertDialog(
             onDismissRequest = { prompts.deletion = null },
             title = { Text(d.title) },
@@ -81,6 +94,7 @@ fun DownloadPromptDialogs(prompts: DownloadPrompts, onDeleted: () -> Unit = {}) 
             confirmButton = {
                 TextButton(onClick = {
                     prompts.deletion = null
+                    if(d.owner!=OfflineAccess.current())return@TextButton
                     Downloads.delete(d.ids)
                     onDeleted()
                 }) { Text("Delete") }
@@ -88,7 +102,7 @@ fun DownloadPromptDialogs(prompts: DownloadPrompts, onDeleted: () -> Unit = {}) 
             dismissButton = { TextButton(onClick = { prompts.deletion = null }) { Text("Cancel") } },
         )
     }
-    prompts.resume?.let { r ->
+    prompts.resume?.takeIf {it.context==ProfileDataContext.current && OfflineAccess.allows(it.item)}?.let { r ->
         AlertDialog(
             onDismissRequest = { prompts.resume = null },
             title = { Text(r.item.displayTitle) },

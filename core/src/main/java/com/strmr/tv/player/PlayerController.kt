@@ -297,6 +297,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     }
 
     init {
+        require(session.playbackAllowed()) {"This local file requires its original verified context."}
         // Passthrough only where the output takes it (not Bluetooth); PCM otherwise.
         val renderers = PassthroughGuard.renderersFactory(context)
             // Platform decoders first; the FFmpeg extension (TrueHD, DTS…) when none can.
@@ -350,6 +351,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     /** Position for the chrome, skip segments and up next. */
     private val clock: Job = scope.launch {
         while (isActive) {
+            if(!session.playbackAllowed()) {progress.discardFuture();player.stop();ended.value=true;break}
             if (postPlay.value != null) { delay(250); continue }
             position.value = player.currentPosition
             duration.value = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
