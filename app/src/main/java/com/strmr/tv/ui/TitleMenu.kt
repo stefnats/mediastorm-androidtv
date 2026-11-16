@@ -66,7 +66,7 @@ fun TitleMenu(
             add(DialogChoice("Check sources again") { launchSourceRecheck(scope, target, onError = onError) })
         }
         if (continueWatching) {
-            add(DialogChoice("Hide from Continue Watching") { act { TitleActions.hideFromContinueWatching(target) } })
+            add(DialogChoice("Hide from Continue Watching", TitleListAction(origin, scope) { TitleActions.hideFromContinueWatching(target, it) }))
             add(DialogChoice("Set Aside", TitleListAction(origin, scope) { TitleActions.setAside(target, it) }))
         }
         if (SetAsideStore.contains(target)) add(DialogChoice("Remove from Set Aside", TitleListAction(origin, scope) { TitleActions.removeFromSetAside(target, it) }))
@@ -75,9 +75,9 @@ fun TitleMenu(
             scope.launch { runCatching { WatchlistStore.toggle(target) }.onFailure { onError(it.message ?: "Unknown error") } }
         })
         if (HiddenItemsStore.isHidden(target)) {
-            add(DialogChoice("Unhide") { act { TitleActions.unhide(target) } })
+            add(DialogChoice("Unhide", TitleListAction(origin, scope) { TitleActions.unhide(target, it) }))
         } else {
-            add(DialogChoice("Hide from this profile") { act { TitleActions.hide(target) } })
+            add(DialogChoice("Hide from this profile", TitleListAction(origin, scope) { TitleActions.hide(target, it) }))
         }
         if (target.isMovie) {
             // A partly watched movie (Continue Watching) or an unknown state offers Mark as watched.

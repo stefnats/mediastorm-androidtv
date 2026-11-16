@@ -58,7 +58,7 @@ import com.strmr.tv.ui.settings.SpoilerSettings
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DetailsScreen(target: DetailsTarget, autoplay: Boolean, prewarmOnOpen: Boolean = true) {
+fun DetailsScreen(target: DetailsTarget, autoplay: Boolean, prewarmOnOpen: Boolean = true, currentRoute: () -> Boolean = { true }) {
     val scope = rememberCoroutineScope()
     val model = remember(target) { DetailsModel(target, scope) }
     val state = remember(model,model.accessGeneration) { DetailsPageState(model) }
@@ -132,7 +132,7 @@ fun DetailsScreen(target: DetailsTarget, autoplay: Boolean, prewarmOnOpen: Boole
         DetailsTopBar(target.name, scrolled, extras) { state.more = true }
     }
 
-    DetailsPresentations(state, warm, scope, extras, onHidden = { navigator.pop() })
+    DetailsPresentations(state, warm, scope, extras, currentRoute, onHidden = { if (currentRoute()) navigator.pop() })
 }
 
 /** Transparent over the hero, the page's colour with the title once scrolled past it. */

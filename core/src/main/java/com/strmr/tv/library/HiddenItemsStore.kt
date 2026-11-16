@@ -7,6 +7,9 @@ import androidx.compose.runtime.setValue
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.ApiError
 import com.strmr.tv.api.DetailsTarget
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.JsonObject
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import com.strmr.tv.app.AppLog
@@ -35,15 +38,22 @@ data class HiddenItem(
  * thread only.
  */
 object HiddenItemsStore {
-    var items by mutableStateOf<List<HiddenItem>>(emptyList())
-        private set
-    var isLoaded by mutableStateOf(false)
-        private set
+    private var storedItems by mutableStateOf<List<HiddenItem>>(emptyList())
+    private var itemsOwner by mutableStateOf<Long?>(null)
+    val items: List<HiddenItem> get() = storedItems.takeIf { itemsOwner == ProfileDataContext.current }.orEmpty()
+    private var loaded by mutableStateOf(false)
+    val isLoaded: Boolean get() = loaded && itemsOwner == ProfileDataContext.current
     /** Bumped by every change, so screens showing titles can drop or restore them. */
     var revision by mutableIntStateOf(0)
         private set
     private val refreshes = ProfileRefresh()
     private var readSequence = 0L
+    private class Writes(val owner: Long) { val mutex = Mutex(); var pending = 0 }
+    private var writes: Writes? = null
+    private fun writing() = writes?.let { it.owner == ProfileDataContext.current && it.pending > 0 } == true
+    private fun store(items: List<HiddenItem>, owner: Long) {
+        storedItems = items.toList(); itemsOwner = owner
+    }
 
     suspend fun refresh(expectedContext: Long = ProfileDataContext.current) {
         checkOwner(expectedContext)
@@ -61,7 +71,7 @@ object HiddenItemsStore {
         return ApiClient.sendList("GET", path, promptOnLock = false, expectedContext = expectedContext)
     }
 
-    /** A page consumes its own immutable response, never another refresh's singleton value. */
+    /** Only complete unfiltered reads enter the global store; filtered management pages stay separate. */
     internal suspend fun pageItems(
         expectedContext: Long,
         load: suspend () -> List<HiddenItem> = { readItems(expectedContext) },
@@ -70,10 +80,10 @@ object HiddenItemsStore {
         val sequence = ++readSequence
         val snapshot = load().toList()
         checkOwner(expectedContext)
-        if (sequence == readSequence) {
+        if (sequence == readSequence && !writing()) {
             refreshes.reset()
-            items = snapshot
-            isLoaded = true
+            store(snapshot, expectedContext)
+            loaded = true
         }
         return snapshot
     }
@@ -83,9 +93,10 @@ object HiddenItemsStore {
         load: suspend () -> List<HiddenItem>,
     ) {
         var sequence = 0L
+        val expected = ProfileDataContext.current
         refreshes.run(
             load = { sequence = ++readSequence; load() },
-            success = { if (sequence == readSequence) { items = it; isLoaded = true } },
+            success = { if (sequence == readSequence && !writing()) { store(it, expected); loaded = true } },
             failure = onFailure,
         )
     }
@@ -101,8 +112,8 @@ object HiddenItemsStore {
     fun reset() {
         readSequence++
         refreshes.reset()
-        items = emptyList()
-        isLoaded = false
+        storedItems = emptyList(); itemsOwner = null
+        loaded = false; writes = null
         revision++
     }
 
@@ -117,8 +128,68 @@ object HiddenItemsStore {
             .any { (key, value) -> !value.isNullOrEmpty() && ids[key] == value }
     }
 
-    suspend fun hide(target: DetailsTarget) {
-        val context = ProfileDataContext.current
+    private fun mutex(operation: CustomListOperation): Writes = operation.owner.use {
+        operation.check()
+        writes?.takeIf { it.owner == operation.owner.epoch } ?: Writes(operation.owner.epoch).also { writes = it }
+    }
+
+    private suspend fun mutate(target: DetailsTarget, operation: CustomListOperation, action: suspend () -> Unit) {
+        operation.requireTarget(target)
+        val state = mutex(operation)
+        state.mutex.withLock {
+            operation.requireTarget(target)
+            state.pending++; readSequence++; refreshes.reset()
+            try { checkedListStage(operation.owner, operation, action) }
+            finally {
+                state.pending--
+                if (writes === state && operation.owner.isCurrent()) operation.owner.use {
+                    readSequence++; refreshes.reset()
+                }
+            }
+        }
+    }
+
+    suspend fun hide(target: DetailsTarget, operation: CustomListOperation) = hideOwned(target, operation, ServerHiddenWrites)
+    internal suspend fun hideOwned(target: DetailsTarget, operation: CustomListOperation, access: HiddenWrites) = mutate(target, operation) {
+        val item = checkedListStage(operation.owner, operation) { access.hide(target, operation) }
+        check(matches(item, target)) { "Unexpected hidden title" }
+        operation.publish {
+            store(items.filterNot { matches(it, target) } + item, operation.owner.epoch)
+            revision++
+        }
+    }
+
+    /** Alias deletes consume the original full-store snapshot; every stage keeps its original owner. */
+    suspend fun unhide(target: DetailsTarget, operation: CustomListOperation) = unhideOwned(target, operation, ServerHiddenWrites)
+    internal suspend fun unhideOwned(target: DetailsTarget, operation: CustomListOperation, access: HiddenWrites) = mutate(target, operation) {
+        val snapshot = items.filter { matches(it, target) }.ifEmpty {
+            listOf(HiddenItem(target.titleId, if (target.isMovie) "movie" else "series"))
+        }.toList()
+        for (item in snapshot) checkedListStage(operation.owner, operation) {
+            try { access.delete(item, operation) }
+            catch (error: ApiError) { if (error.statusCode != 404) throw error }
+        }
+        operation.publish {
+            store(items.filterNot { matches(it, target) }, operation.owner.epoch)
+            revision++
+        }
+    }
+}
+
+internal interface HiddenWrites {
+    suspend fun hide(target: DetailsTarget, operation: CustomListOperation): HiddenItem
+    suspend fun delete(item: HiddenItem, operation: CustomListOperation)
+}
+
+internal data class HiddenRequest(val method: String, val path: String, val body: JsonObject?, val expected: Long)
+internal fun hiddenRequest(operation: CustomListOperation, item: HiddenItem? = null, body: JsonObject? = null): HiddenRequest = operation.owner.use {
+    operation.check()
+    val suffix = item?.let { "/${ApiClient.segment(it.mediaType)}/${ApiClient.segment(it.id)}" }.orEmpty()
+    HiddenRequest(if (item == null) "POST" else "DELETE", "${ApiClient.profilePath}/hidden-items$suffix", body, operation.owner.epoch)
+}
+private object ServerHiddenWrites : HiddenWrites {
+    override suspend fun hide(target: DetailsTarget, operation: CustomListOperation): HiddenItem {
+        operation.requireTarget(target)
         val body = buildJsonObject {
             put("id", target.titleId)
             put("mediaType", if (target.isMovie) "movie" else "series")
@@ -127,32 +198,13 @@ object HiddenItemsStore {
             target.posterUrl?.let { put("posterUrl", it) }
             target.backdropUrl?.let { put("backdropUrl", it) }
             val ids = listOfNotNull(target.tmdbId?.let { "tmdb" to it }, target.imdbId?.let { "imdb" to it }, target.tvdbId?.let { "tvdb" to it })
-            if (ids.isNotEmpty()) putJsonObject("externalIds") { ids.forEach { (k, v) -> put(k, v) } }
+            if (ids.isNotEmpty()) putJsonObject("externalIds") { ids.forEach { (key, value) -> put(key, value) } }
         }
-        val item = ApiClient.json.decodeFromString<HiddenItem>(ApiClient.sendRaw("POST", "${ApiClient.profilePath}/hidden-items", body = body))
-        ProfileDataContext.requireCurrent(context)
-        items = items.filterNot { matches(it, target) } + item
-        revision++
-        AppLog.i("Hidden", "hid ${target.titleId} (${target.name})")
+        val request = hiddenRequest(operation, body = body)
+        return ApiClient.send(request.method, request.path, body = request.body, expectedContext = request.expected)
     }
-
-    /** Unhides every stored entry matching the title (its own media type and ID); a 404 counts as done. */
-    suspend fun unhide(target: DetailsTarget) {
-        val context = ProfileDataContext.current
-        val stored = items.filter { matches(it, target) }.ifEmpty {
-            listOf(HiddenItem(target.titleId, if (target.isMovie) "movie" else "series"))
-        }
-        for (item in stored) {
-            ProfileDataContext.requireCurrent(context)
-            try {
-                ApiClient.sendRaw("DELETE", "${ApiClient.profilePath}/hidden-items/${ApiClient.segment(item.mediaType)}/${ApiClient.segment(item.id)}")
-            } catch (e: ApiError) {
-                if (e.statusCode != 404) throw e
-            }
-        }
-        ProfileDataContext.requireCurrent(context)
-        items = items.filterNot { matches(it, target) }
-        revision++
-        AppLog.i("Hidden", "unhid ${target.titleId} (${target.name})")
+    override suspend fun delete(item: HiddenItem, operation: CustomListOperation) {
+        val request = hiddenRequest(operation, item)
+        ApiClient.sendRaw(request.method, request.path, expectedContext = request.expected)
     }
 }

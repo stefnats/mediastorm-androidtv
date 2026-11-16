@@ -65,13 +65,13 @@ fun DetailsMoreMenu(
         reminder?.let(::add)
         if (inContinueWatching) {
             add(DialogChoice("Set Aside", TitleListAction(listOrigin, scope) { TitleActions.setAside(target, it) }))
-            add(DialogChoice("Remove from Continue Watching") { scope.launch { TitleActions.hideFromContinueWatching(target) } })
+            add(DialogChoice("Remove from Continue Watching", TitleListAction(listOrigin, scope) { TitleActions.hideFromContinueWatching(target, it) }))
         }
         if (SetAsideStore.contains(target)) add(DialogChoice("Remove from Set Aside", TitleListAction(listOrigin, scope) { TitleActions.removeFromSetAside(target, it) }))
         if (HiddenItemsStore.isHidden(target)) {
-            add(DialogChoice("Unhide") { scope.launch { TitleActions.unhide(target) } })
+            add(DialogChoice("Unhide", TitleListAction(listOrigin, scope) { TitleActions.unhide(target, it) }))
         } else {
-            add(DialogChoice("Hide from this profile") { scope.launch { if (TitleActions.hide(target)) onHidden() } })
+            add(DialogChoice("Hide from this profile", TitleListAction(listOrigin, scope) { if (TitleActions.hide(target, it)) it.publish(onHidden) }))
         }
         episodeOrder?.let(::add)
         add(DialogChoice("Customize Buttons…", onCustomize))

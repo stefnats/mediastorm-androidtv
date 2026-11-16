@@ -51,8 +51,11 @@ fun SectionRoot(section: Section, more: List<Section>, asPage: Boolean = false) 
 
 @Composable
 fun RouteScreen(route: Route) {
+    val navigator = LocalNavigator.current
+    val originalSection = androidx.compose.runtime.remember(route) { navigator.section }
+    val currentRoute = { navigator.section == originalSection && navigator.current.lastOrNull() === route }
     when (route) {
-        is Route.Details -> DetailsScreen(route.target, route.autoplay, route.prewarmOnOpen)
+        is Route.Details -> DetailsScreen(route.target, route.autoplay, route.prewarmOnOpen, currentRoute)
         is Route.Grid -> ListGridScreen(route.list, route.query)
         is Route.Person -> PersonScreen(route.person)
         is Route.LibraryShow -> LibraryShowScreen(route.entry)

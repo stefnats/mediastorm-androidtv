@@ -63,11 +63,11 @@ import kotlinx.coroutines.launch
  * Order…, then Hide from This Profile (which leaves the page) or Unhide, and any added actions.
  */
 @Composable
-fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: CoroutineScope, extras: DetailsActionContext, onHidden: () -> Unit) {
+fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: CoroutineScope, extras: DetailsActionContext, currentRoute: () -> Boolean, onHidden: () -> Unit) {
     val reminderProfile by AppSession.profile.collectAsState()
     val model = state.model
     val target = model.target
-    val listOrigin = remember(model, state) { TitleListOrigin(target, model.dataContext, requireNotNull(scope.coroutineContext[Job])) }
+    val listOrigin = remember(model, state) { TitleListOrigin(target, model.dataContext, requireNotNull(scope.coroutineContext[Job]), currentRoute) }
     DisposableEffect(listOrigin) { onDispose { listOrigin.close() } }
     val rate = com.strmr.tv.ui.rememberRatingAction(target)
     var inContinueWatching by remember { mutableStateOf(false) }
@@ -91,9 +91,7 @@ fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: Corout
         if (!target.isMovie && model.seasons.isNotEmpty()) add(SheetAction("Watch State…", Icons.Outlined.Checklist) { state.watchState = true })
         if (inContinueWatching) {
             add(SheetAction("Set Aside", Icons.Outlined.PauseCircle, action = TitleListAction(listOrigin, scope) { TitleActions.setAside(target, it) }))
-            add(SheetAction("Remove from Continue Watching", Icons.Outlined.RemoveCircleOutline) {
-                scope.launch { TitleActions.hideFromContinueWatching(target) }
-            })
+            add(SheetAction("Remove from Continue Watching", Icons.Outlined.RemoveCircleOutline, action = TitleListAction(listOrigin, scope) { TitleActions.hideFromContinueWatching(target, it) }))
         }
         if (SetAsideStore.contains(target)) {
             add(SheetAction("Remove from Set Aside", Icons.Outlined.PauseCircle, action = TitleListAction(listOrigin, scope) { TitleActions.removeFromSetAside(target, it) }))
@@ -102,11 +100,9 @@ fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: Corout
             add(SheetAction("Episode Order: ${model.currentOrdering?.name ?: "Default"}…", Icons.Outlined.FormatListNumbered) { state.episodeOrder = true })
         }
         if (HiddenItemsStore.isHidden(target)) {
-            add(SheetAction("Unhide", Icons.Outlined.Visibility) { scope.launch { TitleActions.unhide(target) } })
+            add(SheetAction("Unhide", Icons.Outlined.Visibility, action = TitleListAction(listOrigin, scope) { TitleActions.unhide(target, it) }))
         } else {
-            add(SheetAction("Hide from This Profile", Icons.Outlined.VisibilityOff, destructive = true) {
-                scope.launch { if (TitleActions.hide(target)) onHidden() }
-            })
+            add(SheetAction("Hide from This Profile", Icons.Outlined.VisibilityOff, destructive = true, action = TitleListAction(listOrigin, scope) { if (TitleActions.hide(target, it)) it.publish(onHidden) }))
         }
     }
     ActionSheet({ listOrigin.dismiss { state.more = false } }, header = { SheetHeader(target.name, model.metadataLine, target.posterUrl) }, actions = actions)

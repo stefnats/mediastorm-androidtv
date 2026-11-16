@@ -88,7 +88,7 @@ private data class PendingVersion(val version: LibraryVersion, val episode: Epis
  * anchored in the lower left of the first screen, seasons and episodes below the fold.
  */
 @Composable
-fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autoplay: Boolean = false) {
+fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autoplay: Boolean = false, currentPage: () -> Boolean = { true }) {
     val reminderProfile by AppSession.profile.collectAsState()
     val scope = rememberCoroutineScope()
     val model = remember(target) { DetailsModel(target, scope) }
@@ -248,7 +248,7 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
         model.primary?.let { p -> model.play(p.episode, p.start, prequeueTracks.pick(warm)) }
     }
     if (watchState) WatchStateDialog(model, onChanged = { com.strmr.tv.library.TitleActions.changed() }, onDismiss = { watchState = false })
-    val listOrigin = remember(model, actionGeneration, more) { TitleListOrigin(target, model.dataContext, requireNotNull(scope.coroutineContext[Job])) }
+    val listOrigin = remember(model, actionGeneration, more) { TitleListOrigin(target, model.dataContext, requireNotNull(scope.coroutineContext[Job]), currentPage) }
     DisposableEffect(listOrigin) { onDispose { listOrigin.close() } }
     if (more) {
         val moved = movedActions(
@@ -258,7 +258,7 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
         val order = if (model.offersOrderings) {
             DialogChoice("Episode Order: ${model.currentOrdering?.name ?: "Default"}…") { episodeOrder = true }
         } else null
-        DetailsMoreMenu(target, listOrigin, scope, moved, order, onCustomize = { customizingButtons = true }, onHidden = { navigator.close() }, onDismiss = { more = false },
+        DetailsMoreMenu(target, listOrigin, scope, moved, order, onCustomize = { customizingButtons = true }, onHidden = { if (currentPage()) navigator.close() }, onDismiss = { more = false },
             sourcePreference = contentLocalScopes(target, model.currentSeason).takeIf { it.isNotEmpty() }?.let { targets ->
                 DialogChoice("Automatic source preference…") { localPreferenceScopes = targets }
             }, reminder = ReminderTarget(target).takeIf { remindersAllowed(reminderProfile) && reminderChoices(it).isNotEmpty() }?.let { value ->

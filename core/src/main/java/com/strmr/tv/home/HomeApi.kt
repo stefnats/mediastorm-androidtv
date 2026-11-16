@@ -166,8 +166,9 @@ internal suspend fun readContinueWatching(
 }
 
 /** Drops a title from Continue Watching until it is played again. */
-suspend fun ApiClient.hideFromContinueWatching(seriesId: String) {
-    sendRaw("POST", "$profilePath/history/continue/hide", body = buildJsonObject { put("seriesId", seriesId) })
+suspend fun ApiClient.hideFromContinueWatching(seriesId: String, expectedContext: Long) {
+    val path = inContext(expectedContext) { "$profilePath/history/continue/hide" }
+    sendRaw("POST", path, body = buildJsonObject { put("seriesId", seriesId) }, expectedContext = expectedContext)
 }
 
 /** The same title: its ID, or a shared provider ID. */

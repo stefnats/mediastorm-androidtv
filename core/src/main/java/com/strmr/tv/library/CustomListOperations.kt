@@ -121,7 +121,10 @@ class TitleMenuSelection(
 }
 
 /** An unchosen menu intent closes with its surface. It is not content or server mutation authority. */
-class TitleListOrigin(val target: DetailsTarget?, val context: Long, internal val parent: Job) {
+class TitleListOrigin(
+    val target: DetailsTarget?, val context: Long, internal val parent: Job,
+    private val selected: () -> Boolean = { true },
+) {
     private val owner = try {
         PlaybackSessionContext.capture(context)
     } catch (_: CancellationException) {
@@ -130,7 +133,9 @@ class TitleListOrigin(val target: DetailsTarget?, val context: Long, internal va
     private var open = true
     private var chosen = false
     private var pending: TitleListClick? = null
-    val isCurrent get() = open && parent.isActive && owner?.isCurrent() == true
+    val isCurrent get() = open && parent.isActive && owner?.isCurrent() == true && selected()
+
+    internal fun selectionCurrent(): Boolean = parent.isActive && selected()
 
     fun accept(scope: CoroutineScope): TitleListClick? {
         if (!isCurrent || chosen || target == null || scope.coroutineContext[Job]?.isActive == false) return null
@@ -148,7 +153,7 @@ class TitleListOrigin(val target: DetailsTarget?, val context: Long, internal va
         val current = owner ?: return false
         if (!current.isCurrent()) return false
         return current.use {
-            if (!open || !parent.isActive) false else {
+            if (!open || !selectionCurrent()) false else {
                 close()
                 action()
                 true
@@ -188,7 +193,7 @@ class TitleListClick internal constructor(
     fun commit(dismiss: () -> Unit, action: suspend (CustomListOperation) -> Unit): Job? {
         if (cancelled || committed || !owner.isCurrent() || scope.coroutineContext[Job]?.isActive == false || !origin.detach(this)) return null
         committed = true
-        val operations = CustomListOperations(owner.epoch, target) { origin.parent.isActive && scope.coroutineContext[Job]?.isActive != false }
+        val operations = CustomListOperations(owner.epoch, target) { origin.selectionCurrent() && scope.coroutineContext[Job]?.isActive != false }
         val operation = operations.begin() ?: return null
         if (!operation.publish(dismiss)) {
             operations.close()

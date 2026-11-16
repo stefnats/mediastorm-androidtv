@@ -125,7 +125,7 @@ fun PageStack(content: @Composable () -> Unit) {
                 properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
             ) {
                 when (page) {
-                    is Page.Details -> DetailsScreen(page.target, page.openWatchState, page.autoplay)
+                    is Page.Details -> DetailsScreen(page.target, page.openWatchState, page.autoplay, currentPage = { stack.lastOrNull() === page })
                     is Page.Grid -> ListGridScreen(page.list, page.query, currentPage = { stack.lastOrNull() === page })
                     is Page.Person -> PersonScreen(page.person)
                     Page.HomeLayout -> HomeLayoutSettings()

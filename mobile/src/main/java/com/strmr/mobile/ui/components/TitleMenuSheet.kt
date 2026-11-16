@@ -122,7 +122,7 @@ internal fun TitleMenuSheet(
             add(SheetAction("Check sources again", Icons.Outlined.Refresh) { launchSourceRecheck(scope, target) })
         }
         if (continueWatching) {
-            add(SheetAction("Hide from Continue Watching", Icons.Outlined.RemoveCircleOutline) { act { TitleActions.hideFromContinueWatching(target) } })
+            add(SheetAction("Hide from Continue Watching", Icons.Outlined.RemoveCircleOutline, action = TitleListAction(origin, scope) { TitleActions.hideFromContinueWatching(target, it) }))
             add(SheetAction("Set Aside", Icons.Outlined.PauseCircle, action = TitleListAction(origin, scope) { TitleActions.setAside(target, it) }))
         }
         if (SetAsideStore.contains(target)) {
@@ -150,9 +150,9 @@ internal fun TitleMenuSheet(
             add(SheetAction("Watch State…", Icons.Outlined.Checklist) { TitleMenu.watchStateFor = target })
         }
         if (HiddenItemsStore.isHidden(target)) {
-            add(SheetAction("Unhide", Icons.Outlined.Visibility) { act { TitleActions.unhide(target) } })
+            add(SheetAction("Unhide", Icons.Outlined.Visibility, action = TitleListAction(origin, scope) { TitleActions.unhide(target, it) }))
         } else {
-            add(SheetAction("Hide from This Profile", Icons.Outlined.VisibilityOff, destructive = true) { act { TitleActions.hide(target) } })
+            add(SheetAction("Hide from This Profile", Icons.Outlined.VisibilityOff, destructive = true, action = TitleListAction(origin, scope) { TitleActions.hide(target, it) }))
         }
     }
     ActionSheet(onDismiss, header = {

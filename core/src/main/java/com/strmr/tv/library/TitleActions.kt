@@ -75,16 +75,17 @@ object TitleActions {
             SetAsideStore.remove(target, operation)
         }
 
-    suspend fun hideFromContinueWatching(target: DetailsTarget) =
-        run("hide-continue-watching", target, "Removed from Continue Watching", "Failed to remove from Continue Watching") {
-            ApiClient.hideFromContinueWatching(target.titleId)
+    suspend fun hideFromContinueWatching(target: DetailsTarget, operation: CustomListOperation) =
+        run("hide-continue-watching", target, "Removed from Continue Watching", "Failed to remove from Continue Watching", operation) {
+            operation.requireTarget(target)
+            checkedListStage(operation.owner, operation) { ApiClient.hideFromContinueWatching(target.titleId, operation.owner.epoch) }
         }
 
-    suspend fun hide(target: DetailsTarget) =
-        run("hide", target, "Hidden from this profile", "Failed to hide item") { HiddenItemsStore.hide(target) }
+    suspend fun hide(target: DetailsTarget, operation: CustomListOperation) =
+        run("hide", target, "Hidden from this profile", "Failed to hide item", operation) { HiddenItemsStore.hide(target, operation) }
 
-    suspend fun unhide(target: DetailsTarget) =
-        run("unhide", target, "Unhidden", "Failed to unhide item") { HiddenItemsStore.unhide(target) }
+    suspend fun unhide(target: DetailsTarget, operation: CustomListOperation) =
+        run("unhide", target, "Unhidden", "Failed to unhide item", operation) { HiddenItemsStore.unhide(target, operation) }
 
     suspend fun setMovieWatched(movie: DetailsTarget, watched: Boolean) = run(
         if (watched) "mark-watched" else "mark-unwatched", movie,

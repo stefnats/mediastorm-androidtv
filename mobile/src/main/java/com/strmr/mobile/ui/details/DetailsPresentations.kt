@@ -16,13 +16,13 @@ import kotlinx.coroutines.CoroutineScope
  * with Stream Instead), and Resume / Start Over after a manual pick.
  */
 @Composable
-fun DetailsPresentations(state: DetailsPageState, warm: WarmPrequeue?, scope: CoroutineScope, extras: DetailsActionContext, onHidden: () -> Unit) {
+fun DetailsPresentations(state: DetailsPageState, warm: WarmPrequeue?, scope: CoroutineScope, extras: DetailsActionContext, currentRoute: () -> Boolean, onHidden: () -> Unit) {
     val model = state.model
     state.reminderTarget?.let { target -> com.strmr.mobile.ui.reminders.ReminderDialog(target,model.dataContext,reloadTitle={model.reloadForReminder()},onDismiss={state.reminderTarget=null}) }
     state.localPreferenceScopes?.let { targets ->
         ContentLocalPreferenceDialog(targets, expectedContext = model.dataContext, onSaved = { model.sourcePreferenceChanged(); state.prequeueTracks.clear() }, onDismiss = { state.localPreferenceScopes = null })
     }
-    if (state.more) DetailsMoreSheet(state, warm, scope, extras, onHidden)
+    if (state.more) DetailsMoreSheet(state, warm, scope, extras, currentRoute, onHidden)
     state.episodeMenu?.let { EpisodeMenuSheet(state, it, scope, extras) }
     if (state.episodeOrder) EpisodeOrderSheet(state, scope)
     if (state.watchState) WatchStateSheet(model, state.activeEpisode) { state.watchState = false }
