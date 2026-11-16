@@ -68,7 +68,7 @@ suspend fun ApiClient.setSeriesOrdering(tvdbId: Long, seasonType: String) {
 
 /** Long-polls the pending source-health checks of one search. */
 suspend fun ApiClient.sourceHealth(token: String, expectedContext: Long = ProfileDataContext.current): SourceHealthSnapshot =
-    send("GET", "/api/indexers/source-health", mapOf("token" to token, "waitMs" to "20000"), timeoutMs = 30_000, expectedContext = expectedContext)
+    send("GET", "/api/indexers/source-health", preparationQuery(expectedContext, mapOf("token" to token, "waitMs" to "20000")), timeoutMs = 30_000, expectedContext = expectedContext)
 
 /**
  * Resolves a manually chosen result to a stream path, waiting on the backend's queue when

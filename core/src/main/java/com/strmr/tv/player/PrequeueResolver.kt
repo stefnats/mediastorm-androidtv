@@ -27,7 +27,7 @@ import kotlinx.serialization.json.put
 internal class PrequeueResolver(
     private val scope: CoroutineScope,
     private val progress: (stage: String, detail: String?) -> Unit,
-    private val settings: suspend () -> PlaybackSettings = { ApiClient.playbackSettings() },
+    private val settings: suspend (Long) -> PlaybackSettings = { expected -> ApiClient.playbackSettings(expected) },
     private val start: suspend (JsonObject, Long) -> String = { body, expected -> ApiClient.startPrequeue(body, expected).prequeueId },
     private val status: suspend (String, Long) -> PrequeueStatus = { id, expected -> ApiClient.prequeueStatus(id, expected) },
     private val profile: () -> String = { ApiClient.profileId },
@@ -83,7 +83,7 @@ internal class PrequeueResolver(
         val task = scope.async {
             val preparation = try {
                 requirePlaybackContext(expected)
-                val playback = settings()
+                val playback = settings(expected)
                 requirePlaybackContext(expected)
                 if (!playback.prequeueOnOpen) null else {
                     when (val plan = sourcePlan(request, playback, expected)) {

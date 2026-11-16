@@ -53,11 +53,10 @@ internal fun PlayerController.rememberAudioLanguage(raw: String?) {
     val language = raw?.trim()?.takeIf { it.isNotEmpty() && it != "und" } ?: return
     if (session.isLive || !session.reportsProgress || session.localFile) return
     val previous = audioPreferenceSave
-    val context = ServerReleaseReportGateway()
-    val expected = com.strmr.tv.library.ProfileDataContext.current
+    val expected = dataContext
     audioPreferenceSave = scope.launch {
         previous?.join()
-        if (!context.isCurrent()) return@launch
+        if (expected != com.strmr.tv.library.ProfileDataContext.current) return@launch
         try {
             savePlaybackAudioLanguage(request.title.titleId, if (request.isEpisode) "series" else "movie", language, expected)
             com.strmr.tv.api.ApiClient.inContext(expected) { audioPreferenceFailed = false }

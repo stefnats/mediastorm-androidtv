@@ -62,7 +62,9 @@ class AutomaticPlaybackSelectionTest {
             return PrequeueStatus(id, "ready", targetEpisode = target, streamPath = "plexmedia:synthetic-$id",
                 automaticLibrarySelection = automatic, librarySourceType = "plex", libraryItemId = "synthetic-$id")
         }
-        val prequeue = PrequeueResolver(test.backgroundScope, { _, _ -> }, { playback },
+        val settingsContexts = mutableListOf<Long>()
+        var readSettings: suspend (Long) -> PlaybackSettings = { context -> settingsContexts += context; playback }
+        val prequeue = PrequeueResolver(test.backgroundScope, { _, _ -> }, { context -> readSettings(context) },
             { body, context -> begin(body, context) }, { id, context -> reply(id, context) }, { "synthetic-profile" }, { "synthetic-client" },
             sourcePlan = { request, settings, context -> selectPlaybackSource(request, settings, context) { _, _ -> preferenceReads++; legacy } },
             now = { test.testScheduler.currentTime })
@@ -71,6 +73,31 @@ class AutomaticPlaybackSelectionTest {
             legacyPreference = { _, _ -> preferenceReads++; legacy })
         suspend fun resolve(request: PlaybackRequest = request(), chooser: (() -> Unit)? = null) =
             resolver.resolve(request, playback, null, expected, chooser)
+    }
+
+    @Test fun `queued warm after profile replacement performs no settings or preparation demand`() = runTest {
+        val f=Fixture(this);f.prequeue.prewarm(title)
+        ProfileDataContext.invalidate();ProfileDataContext.invalidate();runCurrent()
+        assertTrue(f.settingsContexts.isEmpty());assertTrue(f.bodies.isEmpty())
+    }
+    @Test fun `warm settings callback receives original epoch and cannot request replacement settings`() = runTest {
+        val f=Fixture(this);var oldReads=0
+        f.readSettings={ captured ->
+            assertEquals(f.expected,captured);oldReads++
+            ProfileDataContext.invalidate();ProfileDataContext.invalidate()
+            ApiClient.playbackSettings(captured)
+        }
+        f.prequeue.prewarm(title);runCurrent()
+        assertEquals(1,oldReads);assertTrue(f.bodies.isEmpty())
+    }
+    @Test fun `late warm settings cannot start old preparation and next operation gets fresh epoch`() = runTest {
+        val f=Fixture(this);val release=CompletableDeferred<Unit>();val arrived=CompletableDeferred<Unit>()
+        f.readSettings={captured ->f.settingsContexts+=captured;arrived.complete(Unit);withContext(NonCancellable){release.await()};f.playback}
+        f.prequeue.prewarm(title);runCurrent();arrived.await();ProfileDataContext.invalidate();ProfileDataContext.invalidate();release.complete(Unit);runCurrent()
+        assertTrue(f.bodies.isEmpty())
+        val fresh=ProfileDataContext.current;f.readSettings={captured ->f.settingsContexts+=captured;f.playback}
+        f.prequeue.prewarm(title);runCurrent()
+        assertEquals(listOf(f.expected,fresh),f.settingsContexts);assertEquals(1,f.bodies.size);assertTrue(f.contexts.all {it==fresh})
     }
 
     @Test fun `supported ordinary Play ignores blind library first and client hierarchy guesses`() = runTest {

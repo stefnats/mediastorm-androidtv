@@ -82,7 +82,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     val vodDenied=MutableStateFlow<com.strmr.tv.api.VodAccessDenial?>(null)
     val canReportRelease get() = vodDenied.value==null && !session.isLive && !session.localFile && session.reportsProgress && session.prequeueId != null
 
-    private val recoveryContext = ServerReleaseReportGateway()
+    private val recoveryContext = ServerReleaseReportGateway(dataContext)
     private val audioRecoveryPolicy = AudioRecoveryPolicy()
     val audioRecovery by lazy { AudioRecoveryAssistant(scope, { createReleaseReports(true) }, { recoveryContext.isCurrent() }) }
     val audioRecoveryActive get() = audioRecovery.active

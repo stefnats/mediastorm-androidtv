@@ -1,5 +1,6 @@
 package com.strmr.tv.api
 
+import com.strmr.tv.library.ProfileDataContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 
@@ -25,16 +26,16 @@ data class ReleaseReportReply(
 @Serializable
 data class SavedReleaseReport(val id: String)
 
-suspend fun ApiClient.releaseReportOptions(id: String): ReleaseReportOptions =
-    send("GET", "/api/playback/prequeue/${segment(id)}/report")
+suspend fun ApiClient.releaseReportOptions(id: String, expectedContext: Long = ProfileDataContext.current): ReleaseReportOptions =
+    send("GET", "/api/playback/prequeue/${segment(id)}/report", preparationQuery(expectedContext), expectedContext = expectedContext)
 
-suspend fun ApiClient.submitReleaseAction(id: String, reporting: Boolean, body: JsonObject): ReleaseReportReply =
-    send("POST", "/api/playback/prequeue/${segment(id)}/${if (reporting) "report" else "retry"}", body = body, timeoutMs = 10_000)
+suspend fun ApiClient.submitReleaseAction(id: String, reporting: Boolean, body: JsonObject, expectedContext: Long = ProfileDataContext.current): ReleaseReportReply =
+    send("POST", "/api/playback/prequeue/${segment(id)}/${if (reporting) "report" else "retry"}", preparationQuery(expectedContext), body = body, timeoutMs = 10_000, expectedContext = expectedContext)
 
-suspend fun ApiClient.cancelReleaseAlternative(id: String) {
-    sendRaw("DELETE", "/api/playback/prequeue/${segment(id)}/retry", promptOnLock = false, timeoutMs = 5_000)
+suspend fun ApiClient.cancelReleaseAlternative(id: String, expectedContext: Long = ProfileDataContext.current) {
+    sendRaw("DELETE", "/api/playback/prequeue/${segment(id)}/retry", preparationQuery(expectedContext), promptOnLock = false, timeoutMs = 5_000, expectedContext = expectedContext)
 }
 
-suspend fun ApiClient.undoReleaseReport(id: String) {
-    sendRaw("DELETE", "/api/playback/bad-streams/${segment(id)}", mapOf("profileId" to profileId))
+suspend fun ApiClient.undoReleaseReport(id: String, expectedContext: Long = ProfileDataContext.current) {
+    sendRaw("DELETE", "/api/playback/bad-streams/${segment(id)}", preparationQuery(expectedContext), expectedContext = expectedContext)
 }

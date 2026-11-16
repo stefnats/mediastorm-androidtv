@@ -17,8 +17,12 @@ import kotlinx.serialization.json.JsonObject
 suspend fun ApiClient.startPrequeue(body: JsonObject, expectedContext: Long? = null): PrequeueStartResponse =
     send("POST", "/api/playback/prequeue", body = body, headers = ThroughputStore.headers(), expectedContext = expectedContext)
 
-suspend fun ApiClient.prequeueStatus(id: String, expectedContext: Long? = null): PrequeueStatus =
-    send("GET", "/api/playback/prequeue/${segment(id)}", expectedContext = expectedContext)
+/** Existing explicit selector protocol; the opaque ID never selects a replacement profile. */
+internal fun ApiClient.preparationQuery(expectedContext: Long, values: Map<String, String> = emptyMap()): Map<String, String> =
+    inContext(expectedContext) { values + ("profileId" to profileId) }
+
+suspend fun ApiClient.prequeueStatus(id: String, expectedContext: Long = ProfileDataContext.current): PrequeueStatus =
+    send("GET", "/api/playback/prequeue/${segment(id)}", preparationQuery(expectedContext), expectedContext = expectedContext)
 
 /** What the server stored for a progress report, its resume decision, and whether it wants the player off this source. */
 @Serializable

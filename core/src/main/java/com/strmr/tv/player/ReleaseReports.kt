@@ -41,18 +41,58 @@ interface ReleaseReportGateway {
     suspend fun undo(id: String)
 }
 
-class ServerReleaseReportGateway : ReleaseReportGateway {
-    private val profile = ApiClient.profileId
-    private val server = ApiClient.baseUrl
-    private val account = ApiClient.session?.accountId
-    private val context=com.strmr.tv.library.ProfileDataContext.current
-    override fun isCurrent() = context==com.strmr.tv.library.ProfileDataContext.current && profile == ApiClient.profileId && server == ApiClient.baseUrl && account == ApiClient.session?.accountId
-    private fun checkSession() = check(isCurrent()) { "The active profile or server changed. Reopen playback." }
-    override suspend fun options(id: String): ReleaseReportOptions { checkSession(); return ApiClient.releaseReportOptions(id) }
-    override suspend fun submit(id: String, reporting: Boolean, body: JsonObject): ReleaseReportReply { checkSession(); return ApiClient.submitReleaseAction(id, reporting, body) }
-    override suspend fun status(id: String): PrequeueStatus { checkSession(); return ApiClient.prequeueStatus(id) }
-    override suspend fun cancel(id: String) { if (isCurrent()) ApiClient.cancelReleaseAlternative(id) }
-    override suspend fun undo(id: String) { checkSession(); ApiClient.undoReleaseReport(id) }
+/** Transport boundary used by the actual gateway and deferred, isolated tests. */
+internal interface ReleaseReportRequests {
+    suspend fun options(id: String, expected: Long): ReleaseReportOptions
+    suspend fun submit(id: String, reporting: Boolean, body: JsonObject, expected: Long): ReleaseReportReply
+    suspend fun status(id: String, expected: Long): PrequeueStatus
+    suspend fun cancel(id: String, expected: Long)
+    suspend fun undo(id: String, expected: Long)
+}
+
+private object ApiReleaseReportRequests : ReleaseReportRequests {
+    override suspend fun options(id: String, expected: Long) = ApiClient.releaseReportOptions(id, expected)
+    override suspend fun submit(id: String, reporting: Boolean, body: JsonObject, expected: Long) = ApiClient.submitReleaseAction(id, reporting, body, expected)
+    override suspend fun status(id: String, expected: Long) = ApiClient.prequeueStatus(id, expected)
+    override suspend fun cancel(id: String, expected: Long) = ApiClient.cancelReleaseAlternative(id, expected)
+    override suspend fun undo(id: String, expected: Long) = ApiClient.undoReleaseReport(id, expected)
+}
+
+/** An original playback owner survives every await; cleanup never acquires replacement credentials. */
+class ServerReleaseReportGateway internal constructor(
+    private val owner: PlaybackSessionContext,
+    private val requests: ReleaseReportRequests,
+) : ReleaseReportGateway {
+    constructor(expected: Long = ProfileDataContext.current) : this(PlaybackSessionContext.capture(expected), ApiReleaseReportRequests)
+    override fun isCurrent() = owner.isCurrent()
+    override suspend fun options(id: String): ReleaseReportOptions {
+        owner.requireCurrent()
+        val value = requests.options(id, owner.epoch)
+        owner.requireCurrent()
+        return value
+    }
+    override suspend fun submit(id: String, reporting: Boolean, body: JsonObject): ReleaseReportReply {
+        owner.requireCurrent()
+        val value = requests.submit(id, reporting, body, owner.epoch)
+        owner.requireCurrent()
+        return value
+    }
+    override suspend fun status(id: String): PrequeueStatus {
+        owner.requireCurrent()
+        val value = requests.status(id, owner.epoch)
+        owner.requireCurrent()
+        return value
+    }
+    override suspend fun cancel(id: String) {
+        if (!isCurrent()) return
+        requests.cancel(id, owner.epoch)
+        owner.requireCurrent()
+    }
+    override suspend fun undo(id: String) {
+        owner.requireCurrent()
+        requests.undo(id, owner.epoch)
+        owner.requireCurrent()
+    }
 }
 
 enum class ReleaseResume(val label: String) {
