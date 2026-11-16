@@ -7,15 +7,15 @@ import com.strmr.tv.api.SourceResult
 import com.strmr.tv.player.ManualSourceTracks
 
 @Composable
-fun rememberSourceTracks(expectedContext: Long = com.strmr.tv.library.ProfileDataContext.current): SourceTracks {
+fun rememberSourceTracks(expectedContext: Long = com.strmr.tv.library.ProfileDataContext.current,ownerKey:Any?=null,onProbeChanged:(SourceResult)->Unit={},onProbeError:(SourceResult,Exception)->Unit={_,_->}): SourceTracks {
     val scope = rememberCoroutineScope()
-    return remember(expectedContext) { SourceTracks(scope,expectedContext) }
+    return remember(expectedContext,ownerKey) { SourceTracks(scope,expectedContext,onProbeChanged=onProbeChanged,onProbeError=onProbeError) }
 }
 
 /** The open result's panel ([SourceTracks]); Play hands the result and its tracks to [onPlay]. */
 @Composable
 fun SourceTracks.Panel(title: com.strmr.tv.api.DetailsTarget? = null, episode: com.strmr.tv.api.Episode? = null,
-    expectedContext: Long = com.strmr.tv.library.ProfileDataContext.current, onPlay: (SourceResult, ManualSourceTracks?) -> Unit) {
+    expectedContext: Long = com.strmr.tv.library.ProfileDataContext.current,actionCurrent:(SourceResult)->Boolean={true},onPanelDismiss:()->Unit={}, originCandidateVersion:String?=null, onPlay: (SourceResult, ManualSourceTracks?) -> Unit) {
     val result = openResult ?: return
     val snapshot = probeState(result)
     SourceTracksDialog(
@@ -25,10 +25,10 @@ fun SourceTracks.Panel(title: com.strmr.tv.api.DetailsTarget? = null, episode: c
         choice = choice(result),
         mediaFacts = com.strmr.tv.ui.rememberMediaFacts(expectedContext,
             evidence=(snapshot.probe as? com.strmr.tv.api.TrackProbe.Tracks)?.mediaEvidence,
-            target=title,episode=episode,originCandidateVersion=result.mediaEvidence?.let { it.candidateVersion ?: if(it.probed==null)it.sourceVersion else null }),
-        onChoice = { choose(result, it, snapshot) },
-        onRetry = { retry(result, snapshot) },
-        onPlay = { play(result,snapshot,onPlay) },
-        onDismiss = { close() },
+            target=title,episode=episode,originCandidateVersion=originCandidateVersion ?: result.mediaEvidence?.let { it.candidateVersion ?: if(it.probed==null)it.sourceVersion else null }),
+        onChoice = { if(actionCurrent(result))choose(result, it, snapshot) },
+        onRetry = { if(actionCurrent(result))retry(result, snapshot) },
+        onPlay = { if(actionCurrent(result))play(result,snapshot,onPlay) },
+        onDismiss = { close();onPanelDismiss() },
     )
 }

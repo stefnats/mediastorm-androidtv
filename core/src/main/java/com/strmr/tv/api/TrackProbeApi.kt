@@ -7,6 +7,7 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.JsonObject
 
 // Manual selection: probing one result's audio and subtitle tracks (the Expo app's long press).
 
@@ -73,12 +74,7 @@ suspend fun ApiClient.probeTracks(result: SourceResult, expectedContext: Long = 
     currentCoroutineContext().ensureActive()
     val profile = inContext(expectedContext) { profileId }
     if (result.serviceType.lowercase() == "debrid") {
-        val body = buildJsonObject {
-            put("result", result.raw)
-            put("quickOnly", false)
-            put("verifyUncached", true)
-            put("profileId", profile)
-        }
+        val body = trackProbeRequestBody(result,profile,debrid=true)
         val deadline = System.currentTimeMillis() + 120_000
         while (true) {
             val h = send<DebridTrackProbeHealth>("POST", "/api/debrid/cached", body = body, timeoutMs = 90_000, expectedContext = expectedContext)
@@ -92,13 +88,16 @@ suspend fun ApiClient.probeTracks(result: SourceResult, expectedContext: Long = 
             return TrackProbe.Tracks(h.audioTracks.orEmpty(), h.subtitleTracks.orEmpty(), h.mediaEvidence)
         }
     }
-    val body = buildJsonObject {
-        put("result", result.raw)
-        put("probeForTracks", true)
-        put("profileId", profile)
-    }
+    val body = trackProbeRequestBody(result,profile,debrid=false)
     val h = send<UsenetTrackProbeHealth>("POST", "/api/usenet/health", body = body, timeoutMs = 90_000, expectedContext = expectedContext)
     if (!h.healthy) return TrackProbe.Failed(if (h.status.isNotEmpty()) "Unhealthy (${h.status.replace('_', ' ')})" else "Unhealthy")
     h.trackProbeError?.ifEmpty { null }?.let { return TrackProbe.Failed(it) }
     return TrackProbe.Tracks(h.audioTracks.orEmpty(), h.subtitleTracks.orEmpty(), h.mediaEvidence)
+}
+
+/** Snapshot correlation is not an uploaded proof; the server resolves its own candidate before probing. */
+internal fun trackProbeRequestBody(result:SourceResult,profile:String,debrid:Boolean):JsonObject=buildJsonObject {
+    put("result",result.raw);put("profileId",profile)
+    if(debrid){put("quickOnly",false);put("verifyUncached",true)}else put("probeForTracks",true)
+    result.responseScope?.let {put("snapshotId",it);put("sourceIndex",result.index)}
 }

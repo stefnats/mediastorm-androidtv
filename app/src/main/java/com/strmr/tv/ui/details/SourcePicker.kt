@@ -23,7 +23,6 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
@@ -44,17 +43,12 @@ import androidx.tv.material3.ListItem
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.CancellationException
-import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.DetailsTarget
 import com.strmr.tv.api.Episode
 import com.strmr.tv.api.SourceHealth
 import com.strmr.tv.api.SourceResult
-import com.strmr.tv.api.searchSources
-import com.strmr.tv.api.sourceHealth
 import com.strmr.tv.library.LibraryVersion
 import com.strmr.tv.player.ManualSourceTracks
-import com.strmr.tv.player.SourceSwitchRules
 import com.strmr.tv.ui.Accent
 import com.strmr.tv.ui.BrandBackground
 import com.strmr.tv.ui.library.LibraryVersionItem
@@ -68,120 +62,68 @@ import com.strmr.tv.ui.library.LibraryVersionItem
  */
 @Composable
 fun SourcePicker(
-    title: DetailsTarget,
-    episode: Episode?,
-    onPick: (SourceResult, ManualSourceTracks?) -> Unit,
-    onDismiss: () -> Unit,
-    libraryVersions: List<LibraryVersion> = emptyList(),
-    onPickLibrary: (LibraryVersion) -> Unit = {},
+    title:DetailsTarget,episode:Episode?,onPick:(SourceResult,ManualSourceTracks?)->Unit,onDismiss:()->Unit,
+    libraryVersions:List<LibraryVersion> = emptyList(),onPickLibrary:(LibraryVersion)->Unit={},
 ) {
-    val expected = remember { com.strmr.tv.library.ProfileDataContext.current }
-    val tracks = rememberSourceTracks(expected)
-    androidx.compose.runtime.DisposableEffect(tracks) { onDispose { tracks.dispose() } }
-    LaunchedEffect(expected) {
-        com.strmr.tv.library.ProfileDataContext.changes.first { it != expected }
-        onDismiss()
+    val expected=remember {com.strmr.tv.library.ProfileDataContext.current}
+    val scope=androidx.compose.runtime.rememberCoroutineScope()
+    val target=com.strmr.tv.sources.SourceSearchTarget.from(title,episode)
+    val state=remember(expected,target,title.name,title.year,title.imdbId) {com.strmr.tv.sources.SourceSearchState(scope,title,episode,expected)}
+    val tracks=rememberSourceTracks(expected,state to state.sourceGeneration,state::probeChanged,state::probeFailed)
+    var manualIntent by remember(state,state.sourceGeneration) {mutableStateOf<com.strmr.tv.sources.SourceSearchState.ManualSelection?>(null)}
+    val closeTracks={tracks.close();state.endManual();manualIntent=null}
+    LaunchedEffect(state.requiresReload) {if(state.requiresReload)closeTracks()}
+    androidx.compose.runtime.DisposableEffect(state) {onDispose {state.dispose()}}
+    androidx.compose.runtime.DisposableEffect(tracks) {onDispose {tracks.dispose()}}
+    LaunchedEffect(state) {state.reload()}
+    LaunchedEffect(expected) {com.strmr.tv.library.ProfileDataContext.changes.first {it!=expected};onDismiss()}
+    val rows=state.rows
+    val actions=rows.associate {it.result to state.selection(it)}
+    LaunchedEffect(tracks,rows,state.viewId) {rows.forEach {tracks.reconcile(it.result,it.expectedFileVersion,state.viewId)}}
+    val pick={result:SourceResult,manual:ManualSourceTracks? -> actions[result]?.let {selection -> state.use(selection) {row ->onDismiss();onPick(row.result,manual)}};Unit}
+    val heading=episode?.let {"${title.name} · ${it.code}"} ?: title.name
+    val first=remember {FocusRequester()};val firstCopy=remember {FocusRequester()}
+    var focusPlaced by remember(state) {mutableStateOf(false)}
+    LaunchedEffect(libraryVersions.isNotEmpty(),rows.isNotEmpty()) {
+        if(focusPlaced)return@LaunchedEffect
+        val focus=if(libraryVersions.isNotEmpty())firstCopy else if(rows.isNotEmpty())first else return@LaunchedEffect
+        withFrameNanos {};focusPlaced=runCatching {focus.requestFocus()}.isSuccess
     }
-    var results by remember { mutableStateOf<List<SourceResult>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val health = remember { mutableStateMapOf<Int, SourceHealth>() }
-    val heading = episode?.let { "${title.name} · ${it.code}" } ?: title.name
-    val first = remember { FocusRequester() }
-    val firstCopy = remember { FocusRequester() }
-    // Focus starts on the first library copy, else the first result, whichever arrives first
-    // (the library lookup can finish after the picker opens); once placed it isn't moved again.
-    var focusPlaced by remember { mutableStateOf(false) }
-    LaunchedEffect(libraryVersions.isNotEmpty(), results.isNotEmpty()) {
-        if (focusPlaced) return@LaunchedEffect
-        val target = if (libraryVersions.isNotEmpty()) firstCopy else if (results.isNotEmpty()) first else return@LaunchedEffect
-        withFrameNanos { }
-        focusPlaced = runCatching { target.requestFocus() }.isSuccess
-    }
-
-    LaunchedEffect(Unit) {
-        val query = SourceSwitchRules.query(title, episode?.code)
-        try {
-            results = ApiClient.searchSources(query, title, episode?.numbering, expected)
-            results.forEach { r -> r.health?.let { health[r.index] = it } }
-        } catch (e: CancellationException) { throw e
-        } catch (_: Exception) {
-            error = "Sources could not be loaded. Try again."
-        }
-        loading = false
-        // Long-polls each pending check until it completes, applying results by index.
-        for (token in health.values.filter { it.state == "pending" }.mapNotNull { it.token }.toSet()) {
-            var complete = false
-            while (!complete) {
-                val snapshot = runCatching { ApiClient.sourceHealth(token, expected) }.getOrNull() ?: break
-                snapshot.results.forEach { health[it.index] = it.health }
-                complete = snapshot.complete
-            }
-        }
-        // Anything still pending (poll failed or token expired) stops spinning.
-        health.filterValues { it.state == "pending" }.keys.forEach { health[it] = SourceHealth("unknown") }
-    }
-
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        Box(Modifier.fillMaxSize().background(BrandBackground), contentAlignment = Alignment.TopCenter) {
-            LazyColumn(
-                Modifier.widthIn(max = 760.dp),
-                contentPadding = PaddingValues(vertical = 36.dp, horizontal = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                item {
-                    Column(Modifier.padding(bottom = 12.dp)) {
-                        Text(heading, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                        if (!loading && error == null && results.isNotEmpty()) {
-                            Text(if (results.size == 1) "1 source" else "${results.size} sources", color = Color.White.copy(alpha = 0.6f))
-                        }
-                    }
-                }
-                if (libraryVersions.isNotEmpty()) {
-                    item {
-                        Text(if (libraryVersions.size == 1) "In your libraries" else "${libraryVersions.size} in your libraries",
-                             color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.SemiBold)
-                    }
-                    items(libraryVersions, key = { "library:${it.id}" }) { version ->
-                        LibraryVersionItem(version, if (version == libraryVersions.first()) Modifier.focusRequester(firstCopy) else Modifier) {
-                            com.strmr.tv.ui.runInMediaContext(expected) { onDismiss(); onPickLibrary(version) }
-                        }
-                    }
-                    item {
-                        Text("Streams", color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.SemiBold,
-                             modifier = Modifier.padding(top = 18.dp))
-                    }
+    Dialog(onDismissRequest=onDismiss,properties=DialogProperties(usePlatformDefaultWidth=false,decorFitsSystemWindows=false)) {
+        Box(Modifier.fillMaxSize().background(BrandBackground),contentAlignment=Alignment.TopCenter) {
+            LazyColumn(Modifier.widthIn(max=760.dp),contentPadding=PaddingValues(vertical=36.dp,horizontal=24.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                item("heading") {Text(heading,style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.SemiBold,modifier=Modifier.padding(bottom=12.dp))}
+                if(state.supported)item("filters") {SourceFilterControls(state,onApply={closeTracks();state.apply()},onReload={closeTracks();state.reload()})}
+                if(libraryVersions.isNotEmpty()) {
+                    item("libraries") {Column {Text("In your libraries",color=Color.White.copy(alpha=0.6f),fontWeight=FontWeight.SemiBold);if(state.supported)Text("Library copies are manual choices and are not filtered.",color=Color.White.copy(alpha=0.6f))}}
+                    items(libraryVersions,key={"library:${it.id}"}) {version ->LibraryVersionItem(version,if(version==libraryVersions.first())Modifier.focusRequester(firstCopy)else Modifier) {state.manualLibrary {onDismiss();onPickLibrary(version)}}}
+                    item("streams") {Text("Streams",color=Color.White.copy(alpha=0.6f),fontWeight=FontWeight.SemiBold,modifier=Modifier.padding(top=18.dp))}
                 }
                 when {
-                    loading -> item {
-                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(Modifier.size(20.dp), color = Accent, strokeWidth = 2.dp)
-                            Text("Searching sources…", color = Color.White.copy(alpha = 0.6f))
-                        }
-                    }
-                    error != null -> item { Text(error!!, color = Color.White.copy(alpha = 0.6f)) }
-                    results.isEmpty() -> item { Text("No sources found", color = Color.White.copy(alpha = 0.6f)) }
-                    else -> items(results, key = { it.index }) { result ->
-                        SourceRow(
-                            result, health[result.index], tracks.hasChoice(result),
-                            com.strmr.tv.ui.rememberMediaFacts(expected,evidence=result.mediaEvidence,target=title,episode=episode),
-                            if (result == results.first()) Modifier.focusRequester(first) else Modifier,
-                            onLongClick = { tracks.open(result) },
-                        ) {
-                            com.strmr.tv.ui.runInMediaContext(expected) { onDismiss(); onPick(result, tracks.manualFor(result)) }
-                        }
+                    state.loading->item("loading") {Row(horizontalArrangement=Arrangement.spacedBy(14.dp),verticalAlignment=Alignment.CenterVertically) {CircularProgressIndicator(Modifier.size(20.dp),color=Accent,strokeWidth=2.dp);Text(if(state.supported)"Applying filters…" else "Searching sources…")}}
+                    state.error!=null->item("error") {Column {Text(state.error!!);androidx.tv.material3.OutlinedButton(onClick={closeTracks();state.retry()}) {Text(if(state.requiresReload)"Reload source list" else "Retry")}}}
+                    rows.isEmpty()->item("empty") {Text(if(state.supported && state.applied.active)"No matches in these retained search results." else "No sources found")}
+                    else->items(rows,key={"${state.sourceGeneration}:${it.key}"}) {row ->
+                        val action=actions[row.result]
+                        SourceRow(row.result,state.healthFor(row),tracks.hasChoice(row.result),
+                            com.strmr.tv.ui.rememberMediaFacts(expected,evidence=(if(state.metadataChanged)row.result.mediaEvidence else row.mediaEvidence ?: row.result.mediaEvidence),target=title,episode=episode,originCandidateVersion=row.candidateVersion),
+                            if(row===rows.first())Modifier.focusRequester(first)else Modifier,
+                            enabled=action!=null,filterLabel=com.strmr.tv.sources.SourceFilterMenus.rowLabel(row,state),
+                            onLongClick={action?.let {state.use(it){current->state.beginManual(current)?.let {intent->manualIntent=intent;tracks.reconcile(current.result,current.expectedFileVersion,state.viewId);tracks.open(current.result)}}}}) {action?.let {state.use(it){current->tracks.reconcile(current.result,current.expectedFileVersion,state.viewId);pick(current.result,tracks.manualFor(current.result))}}}
                     }
                 }
+                state.pageError?.let {message->item("page-error") {Column {Text(message);androidx.tv.material3.OutlinedButton(onClick={closeTracks();state.retry()}) {Text(if(state.expiredNow)"Apply filters again" else "Retry page")}}}}
+                if(state.hasMore)item("more") {androidx.tv.material3.OutlinedButton(onClick=state::loadMore,enabled=!state.loadingMore) {Text(if(state.loadingMore)"Loading…" else "Load more")}}
             }
         }
-        tracks.Panel(title, episode, expected) { result, manual ->
-            com.strmr.tv.ui.runInMediaContext(expected) { onDismiss(); onPick(result, manual) }
-        }
+        val intent=manualIntent
+        tracks.Panel(title,episode,expected,actionCurrent={result->intent?.let {it.result===result && state.acceptsManual(it)}==true},
+            onPanelDismiss={state.endManual();manualIntent=null},originCandidateVersion=intent?.let {owned->rows.firstOrNull {it.result===owned.result}?.candidateVersion},onPlay={result,manual->intent?.takeIf {it.result===result}?.let {state.useManual(it){owned->onDismiss();onPick(owned,manual)}}})
     }
 }
 
 @Composable
-private fun SourceRow(result: SourceResult, health: SourceHealth?, tracksChosen: Boolean, facts: com.strmr.tv.ui.MediaFactsPresentation, modifier: Modifier, onLongClick: () -> Unit, onClick: () -> Unit) {
+private fun SourceRow(result: SourceResult, health: SourceHealth?, tracksChosen: Boolean, facts: com.strmr.tv.ui.MediaFactsPresentation, modifier: Modifier,enabled:Boolean=true,filterLabel:String?=null, onLongClick: () -> Unit, onClick: () -> Unit) {
     val context = LocalContext.current
     val attrs = result.attributes
     // Release name: the first line of the scraper's raw title when present.
@@ -205,11 +147,13 @@ private fun SourceRow(result: SourceResult, health: SourceHealth?, tracksChosen:
     val focused by interaction.collectIsFocusedAsState()
     ListItem(
         selected = false,
+        enabled = enabled,
         onClick = onClick,
         onLongClick = onLongClick,
         overlineContent = claims?.let { { Text(it, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis) } },
         headlineContent = { MarqueeText(release, active = focused) },
         supportingContent = { Column {
+            filterLabel?.let {Text(it)}
             Text(details.joinToString("  ·  "), maxLines = 1, overflow = TextOverflow.Ellipsis)
             facts.compactFileMetadata?.let { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis) }
             facts.compactQualification?.let { Text(it) }

@@ -19,6 +19,8 @@ class SourceResult private constructor(
     /** Position in the server's response; source-health updates are keyed by it. */
     val index: Int,
     val title: String,
+    /** Server snapshot scope is separate from raw resolve data and per-page row positions. */
+    val responseScope:String?=null,
 ) {
     val mediaEvidence: MediaEvidence? = raw["mediaEvidence"]?.let(MediaEvidenceSerializer::parse)
     val id: String = raw.str("guid") ?: title
@@ -34,7 +36,7 @@ class SourceResult private constructor(
     }
 
     companion object {
-        fun from(raw: JsonObject, index: Int): SourceResult? = raw.str("title")?.let { SourceResult(raw, index, it) }
+        fun from(raw: JsonObject, index: Int,responseScope:String?=null): SourceResult? = raw.str("title")?.let { SourceResult(raw, index, it,responseScope) }
 
         private fun JsonObject.str(key: String) =
             runCatching { (get(key) as? JsonPrimitive)?.contentOrNull }.getOrNull()

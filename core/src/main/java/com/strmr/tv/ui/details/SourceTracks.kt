@@ -26,13 +26,16 @@ class SourceTracks(
         TrackDefaults(effective.audioLanguage,effective.subtitleLanguage,effective.subtitleMode,effective.allowedLanguages,effective.losslessAudio)
     },
     private val log: (String) -> Unit = { AppLog.i("ManualTracks",it) },
+    private val onProbeChanged:(SourceResult)->Unit={},
+    private val onProbeError:(SourceResult,Exception)->Unit={_,_->},
 ) {
-    private data class Key(val index: Int, val response: String)
-    private fun key(result: SourceResult) = Key(result.index,result.raw.toString())
+    private data class Key(val index: Int, val response: String,val scope:String?)
+    private fun key(result: SourceResult) = Key(result.index,result.raw.toString(),result.responseScope)
     private val probes = mutableStateMapOf<Key, ProbeState>()
     private val choices = mutableStateMapOf<Key, ManualTrackChoice>()
     private val tasks = mutableMapOf<Key, Job>()
     private val generations = mutableMapOf<Key, Long>()
+    private val expectedFiles=mutableMapOf<Key,Pair<String,String>>()
     private var opened by mutableStateOf<SourceResult?>(null)
     private var defaults by mutableStateOf<TrackDefaults?>(null)
     private var disposed = false
@@ -69,12 +72,30 @@ class SourceTracks(
             if (!current()) return@launch
             val loaded = try { readProbe(result,expected)
             } catch (error: CancellationException) { throw error
-            } catch (_: Exception) { TrackProbe.Failed("Track metadata could not be loaded. Try again.") }
+            } catch (error: Exception) {
+                if(current() && generations[key]==generation)onProbeError(result,error)
+                TrackProbe.Failed("Track metadata could not be loaded. Try again.")
+            }
             ensureActive()
             if (!current() || generations[key] != generation) return@launch
             log(if (loaded is TrackProbe.Tracks) "Explicit track metadata received" else "Explicit track metadata unavailable")
             probes[key] = ProbeState(loaded)
+            onProbeChanged(result)
         }
+    }
+
+    /** A new server-associated input file retires old track numbers without starting another probe. */
+    fun reconcile(result:SourceResult,expectedFileVersion:String?,viewId:String="legacy") {
+        if(!current() || expectedFileVersion==null)return
+        val key=key(result);val expectedFile=viewId to expectedFileVersion
+        if(expectedFiles[key]==expectedFile)return
+        expectedFiles[key]=expectedFile
+        val state=probes[key] ?: return
+        val tracks=state.probe as? TrackProbe.Tracks
+        if(tracks?.mediaEvidence?.takeIf {it.probed!=null && it.hasValidVersionIdentity()}?.sourceVersion==expectedFileVersion)return
+        generations[key]=(generations[key] ?: 0)+1
+        tasks.remove(key)?.cancel();probes.remove(key);choices.remove(key)
+        if(opened?.let(::key)==key)opened=null
     }
 
     fun manualFor(result: SourceResult): ManualSourceTracks? {
@@ -117,7 +138,7 @@ class SourceTracks(
         opened = null
         defaultsTask?.cancel()
         tasks.values.forEach { it.cancel() }
-        tasks.clear(); probes.clear(); choices.clear(); defaults = null
+        tasks.clear(); probes.clear(); choices.clear(); expectedFiles.clear(); defaults = null
         contextTask?.cancel()
     }
 }
