@@ -50,6 +50,7 @@ fun TracksSheet(
     choice: ManualTrackChoice,
     preselected: PreselectedTracks? = null,
     playLabel: String = "Play",
+    mediaFacts: com.strmr.tv.ui.MediaFactsPresentation? = null,
     onChoice: (ManualTrackChoice) -> Unit,
     onRetry: (() -> Unit)?,
     onPlay: () -> Unit,
@@ -75,6 +76,9 @@ fun TracksSheet(
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = loaded)) {
         LazyColumn(Modifier.fillMaxWidth().navigationBarsPadding()) {
             item { SheetHeader("Audio & Subtitles", release, null) }
+            mediaFacts?.sourceLines?.forEachIndexed { index, line ->
+                item(key = "media-fact-$index") { Message(line) }
+            }
             when {
                 probe == null -> item {
                     Row(Modifier.padding(24.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -85,7 +89,7 @@ fun TracksSheet(
                 probe is TrackProbe.Failed -> item {
                     Message("Couldn't load tracks: ${probe.reason}\nPlay uses the default tracks.")
                 }
-                !loaded -> item { Message("No track information available. Play uses the default tracks.") }
+                !loaded -> item { Message("Track selection is unavailable. Play uses the default tracks.") }
                 else -> {
                     if (audio.isNotEmpty()) {
                         section("Audio (${audio.size})")

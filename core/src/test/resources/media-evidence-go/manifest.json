@@ -1,0 +1,14 @@
+{
+  "evaluatedAt": "2026-11-16T00:06:08Z",
+  "files": {
+    "candidate-source.json": "SourceResult",
+    "debrid-probe.json": "DebridHealth",
+    "expired-unknown.json": "UsenetHealth",
+    "legacy-unknown.json": "UsenetHealth",
+    "probe-clipped.json": "UsenetHealth",
+    "ready-bound-episode.json": "PrequeueStatus",
+    "ready-source-only.json": "PrequeueStatus",
+    "title-original.json": "Title"
+  },
+  "version": 1
+}

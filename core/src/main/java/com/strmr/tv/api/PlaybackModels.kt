@@ -20,6 +20,7 @@ class SourceResult private constructor(
     val index: Int,
     val title: String,
 ) {
+    val mediaEvidence: MediaEvidence? = raw["mediaEvidence"]?.let(MediaEvidenceSerializer::parse)
     val id: String = raw.str("guid") ?: title
     val indexer: String = raw.str("indexer") ?: ""
     val sizeBytes: Long = runCatching { raw["sizeBytes"]?.jsonPrimitive?.longOrNull }.getOrNull() ?: 0
@@ -150,6 +151,7 @@ data class PrequeueStatus(
     val automaticLibrarySelection: Boolean = false,
     val libraryItemId: String? = null,
     val librarySourceType: String? = null,
+    val mediaEvidence: MediaEvidence? = null,
 ) {
     @Serializable
     data class TargetEpisode(

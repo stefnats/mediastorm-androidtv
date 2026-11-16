@@ -119,6 +119,8 @@ data class Title(
     /** Keep shelf context readable when the layout normally hides card text. */
     val forceTitleOverlay: Boolean = false,
     val sourceAvailability: SourceAvailability? = null,
+    /** Optional catalogue provenance; never an audio-track promise. */
+    val originalLanguageEvidence: OriginalLanguageEvidence? = null,
 ) {
     val isMovie: Boolean get() = mediaType == "movie"
 }

@@ -42,6 +42,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.strmr.mobile.ui.components.cardClicks
 import com.strmr.mobile.ui.library.LibraryVersionItem
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CancellationException
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.DetailsTarget
 import com.strmr.tv.api.Episode
@@ -72,24 +74,31 @@ fun SourcePicker(
     onDismiss: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val tracks = remember { SourceTracks(scope) }
+    val expected = remember { com.strmr.tv.library.ProfileDataContext.current }
+    val tracks = remember(expected) { SourceTracks(scope,expected) }
+    androidx.compose.runtime.DisposableEffect(tracks) { onDispose { tracks.dispose() } }
+    LaunchedEffect(expected) {
+        com.strmr.tv.library.ProfileDataContext.changes.first { it != expected }
+        onDismiss()
+    }
     var results by remember { mutableStateOf<List<SourceResult>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     val health = remember { mutableStateMapOf<Int, SourceHealth>() }
     LaunchedEffect(Unit) {
         try {
-            results = ApiClient.searchSources(SourceSwitchRules.query(title, episode?.code), title, episode?.numbering)
+            results = ApiClient.searchSources(SourceSwitchRules.query(title, episode?.code), title, episode?.numbering, expected)
             results.forEach { r -> r.health?.let { health[r.index] = it } }
-        } catch (e: Exception) {
-            error = e.message ?: "Search failed"
+        } catch (e: CancellationException) { throw e
+        } catch (_: Exception) {
+            error = "Sources could not be loaded. Try again."
         }
         loading = false
         // Long-polls each pending check until it completes, applying results by index.
         for (token in health.values.filter { it.state == "pending" }.mapNotNull { it.token }.toSet()) {
             var complete = false
             while (!complete) {
-                val snapshot = runCatching { ApiClient.sourceHealth(token) }.getOrNull() ?: break
+                val snapshot = runCatching { ApiClient.sourceHealth(token, expected) }.getOrNull() ?: break
                 snapshot.results.forEach { health[it.index] = it.health }
                 complete = snapshot.complete
             }
@@ -98,8 +107,7 @@ fun SourcePicker(
         health.filterValues { it.state == "pending" }.keys.forEach { health[it] = SourceHealth("unknown") }
     }
     val pick = { result: SourceResult, manual: ManualSourceTracks? ->
-        onDismiss()
-        onPick(result, manual)
+        com.strmr.tv.ui.runInMediaContext(expected) { onDismiss(); onPick(result, manual) }
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -118,8 +126,7 @@ fun SourcePicker(
                     section(if (libraryVersions.size == 1) "In Your Libraries" else "${libraryVersions.size} in Your Libraries")
                     items(libraryVersions, key = { "library:${it.id}" }) { version ->
                         LibraryVersionItem(version) {
-                            onDismiss()
-                            onPickLibrary(version)
+                            com.strmr.tv.ui.runInMediaContext(expected) { onDismiss(); onPickLibrary(version) }
                         }
                     }
                 }
@@ -134,7 +141,8 @@ fun SourcePicker(
                     error != null -> item { Text(error!!, Modifier.padding(24.dp), color = MaterialTheme.colorScheme.error) }
                     results.isEmpty() -> item { Text("No sources found", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     else -> items(results, key = { it.index }) { result ->
-                        SourceRow(result, health[result.index], tracks.hasChoice(result), onLongClick = { tracks.open(result) }) {
+                        SourceRow(result, health[result.index], tracks.hasChoice(result),
+                            com.strmr.tv.ui.rememberMediaFacts(expected,evidence=result.mediaEvidence,target=title,episode=episode), onLongClick = { tracks.open(result) }) {
                             pick(result, tracks.manualFor(result))
                         }
                     }
@@ -142,17 +150,17 @@ fun SourcePicker(
             }
         }
         tracks.openResult?.let { result ->
+            val snapshot = tracks.probeState(result)
             TracksSheet(
                 release = tracks.release(result),
-                state = tracks.probeState(result),
+                state = snapshot,
                 defaults = tracks.trackDefaults,
                 choice = tracks.choice(result),
-                onChoice = { tracks.choose(result, it) },
-                onRetry = { tracks.retry(result) },
-                onPlay = {
-                    tracks.close()
-                    pick(result, tracks.manualFor(result))
-                },
+                mediaFacts = com.strmr.tv.ui.rememberMediaFacts(expected,evidence=(snapshot.probe as? com.strmr.tv.api.TrackProbe.Tracks)?.mediaEvidence,
+                    target=title,episode=episode,originCandidateVersion=result.mediaEvidence?.let { it.candidateVersion ?: if(it.probed==null)it.sourceVersion else null }),
+                onChoice = { tracks.choose(result, it, snapshot) },
+                onRetry = { tracks.retry(result, snapshot) },
+                onPlay = { tracks.play(result,snapshot,pick) },
                 onDismiss = { tracks.close() },
             )
         }
@@ -167,22 +175,28 @@ private fun LazyListScope.section(title: String) = item(key = "section-$title") 
 }
 
 @Composable
-private fun SourceRow(result: SourceResult, health: SourceHealth?, tracksChosen: Boolean, onLongClick: () -> Unit, onClick: () -> Unit) {
+private fun SourceRow(result: SourceResult, health: SourceHealth?, tracksChosen: Boolean, facts: com.strmr.tv.ui.MediaFactsPresentation, onLongClick: () -> Unit, onClick: () -> Unit) {
     val context = LocalContext.current
     val attrs = result.attributes
     val badges = SourceRowText.badges(attrs)
     val size = result.sizeBytes.takeIf { it > 0 }?.let { Formatter.formatShortFileSize(context, it) }
-    val details = SourceRowText.details(attrs, size, result.serviceType, result.indexer, tracksChosen)
+    val details = SourceRowText.details(attrs - setOf("audio","channels","languages"), size, result.serviceType, result.indexer, tracksChosen)
+    val claims = facts.compactReleaseClaims ?: (badges + listOfNotNull(attrs["audio"],attrs["channels"],attrs["languages"]))
+        .filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }?.joinToString(" · ")?.let { "Release claims (unverified): $it" }
     ListItem(
-        overlineContent = if (badges.isNotEmpty()) { { Text(badges.joinToString("  ·  "), fontWeight = FontWeight.Bold) } } else null,
+        overlineContent = claims?.let { { Text(it, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis) } },
         headlineContent = { Text(SourceRowText.release(result.title, attrs), maxLines = 2, overflow = TextOverflow.Ellipsis) },
-        supportingContent = { Text(details.joinToString("  ·  "), maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        supportingContent = { androidx.compose.foundation.layout.Column {
+            Text(details.joinToString("  ·  "), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            facts.compactFileMetadata?.let { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+            facts.compactQualification?.let { Text(it) }
+        } },
         leadingContent = { HealthBadge(health) },
         modifier = Modifier.cardClicks(onClick, onLongClick),
     )
 }
 
-/** Debrid cache / usenet health: green when playable, red when not, a spinner while checking. */
+/** Debrid cache / Usenet health status, independent of media tags or playback success. */
 @Composable
 private fun HealthBadge(health: SourceHealth?) {
     when (SourceRowText.health(health?.state)) {

@@ -138,19 +138,18 @@ internal data class UserPlayback(
     val automaticLibrarySelectionSupported: Boolean = false,
 )
 
-suspend fun ApiClient.playbackSettings(): PlaybackSettings = coroutineScope {
-    val captured = ProfileDataContext.current
-    val path = profilePath
-    val profile = profileId
+suspend fun ApiClient.playbackSettings(expectedContext: Long = ProfileDataContext.current): PlaybackSettings = coroutineScope {
+    val captured = expectedContext
+    val (path, profile) = inContext(captured) { profilePath to profileId }
     val user = async {
         ProfileDataContext.requireCurrent(captured)
-        optionalProfileRead { send<UserPlayback>("GET", "$path/settings", promptOnLock = false, timeoutMs = 10_000) }
+        optionalProfileRead { send<UserPlayback>("GET", "$path/settings", promptOnLock = false, timeoutMs = 10_000, expectedContext = captured) }
     }
     val device = async {
         ProfileDataContext.requireCurrent(captured)
         optionalProfileRead {
             send<PlaybackFields>("GET", "/api/clients/${segment(Config.clientId)}/settings", mapOf("userId" to profile),
-                                 promptOnLock = false, timeoutMs = 10_000)
+                                 promptOnLock = false, timeoutMs = 10_000, expectedContext = captured)
         }
     }
     val (u, d) = user.await() to device.await()

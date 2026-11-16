@@ -67,6 +67,8 @@ fun PrequeueTracksPanel(state: PrequeueTracks, warm: WarmPrequeue?, onPlay: () -
         defaults = state.defaults(status),
         choice = state.choiceFor(status),
         preselected = state.preselected(status),
+        mediaFacts = com.strmr.tv.ui.rememberMediaFacts(state.model.dataContext,evidence=status.mediaEvidence,
+            target=state.model.target,episode=state.model.primaryEpisode),
         onChoice = { state.choose(status, it) },
         onRetry = {},
         onPlay = {

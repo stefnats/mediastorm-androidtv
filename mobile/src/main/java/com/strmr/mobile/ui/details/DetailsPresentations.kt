@@ -40,6 +40,8 @@ fun DetailsPresentations(state: DetailsPageState, warm: WarmPrequeue?, scope: Co
                 defaults = tracks.defaults(status),
                 choice = tracks.choiceFor(status),
                 preselected = tracks.preselected(status),
+                mediaFacts = com.strmr.tv.ui.rememberMediaFacts(model.dataContext,evidence=status.mediaEvidence,
+                    target=model.target,episode=state.activeEpisode),
                 playLabel = state.primary?.label ?: "Play",
                 onChoice = { tracks.choose(status, it) },
                 onRetry = null,

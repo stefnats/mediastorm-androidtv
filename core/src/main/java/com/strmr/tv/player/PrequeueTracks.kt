@@ -76,6 +76,7 @@ val PrequeueStatus.trackLists: TrackProbe.Tracks
             ProbedSubtitleTrack(if (it.absoluteIndex >= 0) it.absoluteIndex else it.index, it.language, it.codec,
                                 it.title.ifEmpty { null }, it.forced, it.isBitmap)
         },
+        mediaEvidence,
     )
 
 /**

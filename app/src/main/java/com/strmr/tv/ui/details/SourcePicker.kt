@@ -43,6 +43,8 @@ import androidx.tv.material3.Icon
 import androidx.tv.material3.ListItem
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CancellationException
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.DetailsTarget
 import com.strmr.tv.api.Episode
@@ -73,7 +75,13 @@ fun SourcePicker(
     libraryVersions: List<LibraryVersion> = emptyList(),
     onPickLibrary: (LibraryVersion) -> Unit = {},
 ) {
-    val tracks = rememberSourceTracks()
+    val expected = remember { com.strmr.tv.library.ProfileDataContext.current }
+    val tracks = rememberSourceTracks(expected)
+    androidx.compose.runtime.DisposableEffect(tracks) { onDispose { tracks.dispose() } }
+    LaunchedEffect(expected) {
+        com.strmr.tv.library.ProfileDataContext.changes.first { it != expected }
+        onDismiss()
+    }
     var results by remember { mutableStateOf<List<SourceResult>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -94,17 +102,18 @@ fun SourcePicker(
     LaunchedEffect(Unit) {
         val query = SourceSwitchRules.query(title, episode?.code)
         try {
-            results = ApiClient.searchSources(query, title, episode?.numbering)
+            results = ApiClient.searchSources(query, title, episode?.numbering, expected)
             results.forEach { r -> r.health?.let { health[r.index] = it } }
-        } catch (e: Exception) {
-            error = e.message
+        } catch (e: CancellationException) { throw e
+        } catch (_: Exception) {
+            error = "Sources could not be loaded. Try again."
         }
         loading = false
         // Long-polls each pending check until it completes, applying results by index.
         for (token in health.values.filter { it.state == "pending" }.mapNotNull { it.token }.toSet()) {
             var complete = false
             while (!complete) {
-                val snapshot = runCatching { ApiClient.sourceHealth(token) }.getOrNull() ?: break
+                val snapshot = runCatching { ApiClient.sourceHealth(token, expected) }.getOrNull() ?: break
                 snapshot.results.forEach { health[it.index] = it.health }
                 complete = snapshot.complete
             }
@@ -135,8 +144,7 @@ fun SourcePicker(
                     }
                     items(libraryVersions, key = { "library:${it.id}" }) { version ->
                         LibraryVersionItem(version, if (version == libraryVersions.first()) Modifier.focusRequester(firstCopy) else Modifier) {
-                            onDismiss()
-                            onPickLibrary(version)
+                            com.strmr.tv.ui.runInMediaContext(expected) { onDismiss(); onPickLibrary(version) }
                         }
                     }
                     item {
@@ -156,25 +164,24 @@ fun SourcePicker(
                     else -> items(results, key = { it.index }) { result ->
                         SourceRow(
                             result, health[result.index], tracks.hasChoice(result),
+                            com.strmr.tv.ui.rememberMediaFacts(expected,evidence=result.mediaEvidence,target=title,episode=episode),
                             if (result == results.first()) Modifier.focusRequester(first) else Modifier,
                             onLongClick = { tracks.open(result) },
                         ) {
-                            onDismiss()
-                            onPick(result, tracks.manualFor(result))
+                            com.strmr.tv.ui.runInMediaContext(expected) { onDismiss(); onPick(result, tracks.manualFor(result)) }
                         }
                     }
                 }
             }
         }
-        tracks.Panel { result, manual ->
-            onDismiss()
-            onPick(result, manual)
+        tracks.Panel(title, episode, expected) { result, manual ->
+            com.strmr.tv.ui.runInMediaContext(expected) { onDismiss(); onPick(result, manual) }
         }
     }
 }
 
 @Composable
-private fun SourceRow(result: SourceResult, health: SourceHealth?, tracksChosen: Boolean, modifier: Modifier, onLongClick: () -> Unit, onClick: () -> Unit) {
+private fun SourceRow(result: SourceResult, health: SourceHealth?, tracksChosen: Boolean, facts: com.strmr.tv.ui.MediaFactsPresentation, modifier: Modifier, onLongClick: () -> Unit, onClick: () -> Unit) {
     val context = LocalContext.current
     val attrs = result.attributes
     // Release name: the first line of the scraper's raw title when present.
@@ -190,27 +197,30 @@ private fun SourceRow(result: SourceResult, health: SourceHealth?, tracksChosen:
         if (result.sizeBytes > 0) add(Formatter.formatShortFileSize(context, result.sizeBytes))
         add(if (result.serviceType == "usenet") "Usenet" else attrs["tracker"] ?: result.indexer)
         attrs["seeders"]?.takeIf { it.isNotEmpty() && result.serviceType != "usenet" }?.let { add("$it seeders") }
-        attrs["audio"]?.takeIf { it.isNotEmpty() }?.let { add(it) }
-        attrs["channels"]?.takeIf { it.isNotEmpty() }?.let { add(it) }
-        attrs["languages"]?.takeIf { it.isNotEmpty() }?.let { add(it.replace(",", " ").replace("⚙", "").trim()) }
         if (tracksChosen) add("Tracks chosen")
     }.filter { it.isNotBlank() }
+    val claims = facts.compactReleaseClaims ?: (badges + listOfNotNull(attrs["audio"],attrs["channels"],attrs["languages"]))
+        .filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }?.joinToString(" · ")?.let { "Release claims (unverified): $it" }
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     ListItem(
         selected = false,
         onClick = onClick,
         onLongClick = onLongClick,
-        overlineContent = if (badges.isNotEmpty()) { { Text(badges.joinToString("  ·  "), fontWeight = FontWeight.Bold) } } else null,
+        overlineContent = claims?.let { { Text(it, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis) } },
         headlineContent = { MarqueeText(release, active = focused) },
-        supportingContent = { Text(details.joinToString("  ·  "), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        supportingContent = { Column {
+            Text(details.joinToString("  ·  "), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            facts.compactFileMetadata?.let { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+            facts.compactQualification?.let { Text(it) }
+        } },
         leadingContent = health?.let { { HealthBadge(it) } },
         modifier = modifier,
         interactionSource = interaction,
     )
 }
 
-/** Debrid cache / usenet health: green when playable, red when not, a spinner while checking. */
+/** Debrid cache / Usenet health status, independent of media tags or playback success. */
 @Composable
 private fun HealthBadge(health: SourceHealth) {
     when (health.state) {

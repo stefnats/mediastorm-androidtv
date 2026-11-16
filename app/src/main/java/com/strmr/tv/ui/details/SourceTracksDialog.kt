@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.tv.material3.Button
@@ -42,6 +43,7 @@ import com.strmr.tv.api.TrackProbe
 import com.strmr.tv.player.ManualTrackChoice
 import com.strmr.tv.player.ManualTracks
 import com.strmr.tv.ui.Accent
+import com.strmr.tv.ui.ExpandableText
 import com.strmr.tv.ui.ignoreHeldSelect
 
 /**
@@ -57,6 +59,7 @@ fun SourceTracksDialog(
     defaults: TrackDefaults?,
     choice: ManualTrackChoice,
     preselected: PreselectedTracks? = null,
+    mediaFacts: com.strmr.tv.ui.MediaFactsPresentation? = null,
     onChoice: (ManualTrackChoice) -> Unit,
     onRetry: () -> Unit,
     onPlay: () -> Unit,
@@ -90,6 +93,10 @@ fun SourceTracksDialog(
             ) {
                 Text("Track Selection", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 Text(release, color = Color.White.copy(alpha = 0.6f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                mediaFacts?.compactQualification?.let { Text(it, fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f)) }
+                mediaFacts?.sourceLines?.takeIf { it.isNotEmpty() }?.let { lines ->
+                    ExpandableText(lines.joinToString("\n"),title="Source metadata",maxLines=2,fontSize=12.sp)
+                }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     when {
                         state.probe == null -> Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -102,8 +109,9 @@ fun SourceTracksDialog(
                             Text((state.probe as TrackProbe.Failed).reason, color = Color.White.copy(alpha = 0.6f), maxLines = 3, overflow = TextOverflow.Ellipsis)
                             Text("Play uses the default tracks.", color = Color.White.copy(alpha = 0.6f))
                         }
-                        !loaded -> Text("No track information available. Play uses the default tracks.",
-                                        Modifier.padding(top = 16.dp), color = Color.White.copy(alpha = 0.7f))
+                        !loaded -> LazyColumn(contentPadding = PaddingValues(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            item { Text("Track selection is unavailable. Play uses the default tracks.", color = Color.White.copy(alpha = 0.7f)) }
+                        }
                         else -> LazyColumn(contentPadding = PaddingValues(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             if (audio.isNotEmpty()) {
                                 item { SectionTitle("Audio (${audio.size})") }

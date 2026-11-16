@@ -113,6 +113,8 @@ fun DetailsInfo(model: DetailsModel, error: String?) {
                 textAlign = if (compact) TextAlign.Center else TextAlign.Start,
             )
         }
+        val mediaFacts = com.strmr.tv.ui.rememberMediaFacts(model.dataContext, title = model.title, target = model.target)
+        Text(mediaFacts.catalog, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         model.title?.ratings?.takeIf { it.isNotEmpty() }?.let { RatingsRow(it) }
         (model.title?.overview ?: model.target.overview)?.takeIf { it.isNotBlank() }?.let { overview ->
             Text(

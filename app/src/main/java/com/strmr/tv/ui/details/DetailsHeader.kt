@@ -100,6 +100,8 @@ fun BoxScope.DetailsHeader(
             model.headerBadge?.let { BadgeLabel(it.text, it.symbol) }
             Text(model.metadataLine, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.7f))
         }
+        val mediaFacts = com.strmr.tv.ui.rememberMediaFacts(model.dataContext, title = model.title, target = model.target)
+        Text(mediaFacts.catalog, fontSize = 12.sp, color = Color.White.copy(alpha = 0.65f))
         model.title?.ratings?.takeIf { it.isNotEmpty() }?.let { RatingsRow(it) }
         (model.title?.overview ?: target.overview)?.let {
             // Cut off, it is focusable and opens whole over the page (Up from the actions reaches it).

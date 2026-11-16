@@ -4,99 +4,120 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import com.strmr.tv.api.ApiClient
-import com.strmr.tv.api.SourceResult
-import com.strmr.tv.api.TrackProbe
-import com.strmr.tv.api.playbackSettings
-import com.strmr.tv.api.probeTracks
+import com.strmr.tv.api.*
 import com.strmr.tv.app.AppLog
+import com.strmr.tv.library.ProfileDataContext
 import com.strmr.tv.player.EffectiveTracks
 import com.strmr.tv.player.ManualSourceTracks
 import com.strmr.tv.player.ManualTrackChoice
 import com.strmr.tv.player.TrackOverrides
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 
-/**
- * Manual selection's per-visit track state (the Expo app's `healthChecks` track details and
- * `trackOverrides`): each long-pressed result's probe, the tracks chosen for it, and which
- * result's panel is open. Results are keyed by their position in the search response.
- */
-class SourceTracks(private val scope: CoroutineScope) {
-    private val probes = mutableStateMapOf<Int, ProbeState>()
-    private val choices = mutableStateMapOf<Int, ManualTrackChoice>()
-    private var open by mutableStateOf<SourceResult?>(null)
+/** Per-visit explicit track probes, bound to the result response and its original identity. */
+class SourceTracks(
+    private val scope: CoroutineScope,
+    private val expected: Long = ProfileDataContext.current,
+    private val readProbe: suspend (SourceResult, Long) -> TrackProbe = { result, context -> ApiClient.probeTracks(result,context) },
+    private val readDefaults: suspend (Long) -> TrackDefaults = { context ->
+        val playback = ApiClient.playbackSettings(context)
+        val effective = EffectiveTracks.resolve(null,playback,TrackOverrides.audioLanguage,TrackOverrides.subtitleLanguage,
+            TrackOverrides.subtitleMode,TrackOverrides.losslessAudio)
+        TrackDefaults(effective.audioLanguage,effective.subtitleLanguage,effective.subtitleMode,effective.allowedLanguages,effective.losslessAudio)
+    },
+    private val log: (String) -> Unit = { AppLog.i("ManualTracks",it) },
+) {
+    private data class Key(val index: Int, val response: String)
+    private fun key(result: SourceResult) = Key(result.index,result.raw.toString())
+    private val probes = mutableStateMapOf<Key, ProbeState>()
+    private val choices = mutableStateMapOf<Key, ManualTrackChoice>()
+    private val tasks = mutableMapOf<Key, Job>()
+    private val generations = mutableMapOf<Key, Long>()
+    private var opened by mutableStateOf<SourceResult?>(null)
     private var defaults by mutableStateOf<TrackDefaults?>(null)
+    private var disposed = false
+    private var defaultsTask: Job? = null
+    private var contextTask: Job? = null
+    init { contextTask = scope.launch { ProfileDataContext.changes.first { it != expected }; dispose() } }
+    private fun current() = !disposed && ProfileDataContext.current == expected
 
-    fun hasChoice(result: SourceResult) = choices[result.index]?.isEmpty == false
+    fun hasChoice(result: SourceResult) = current() && choices[key(result)]?.isEmpty == false
 
-    /** Opens the result's panel, probing it unless an earlier probe this visit found its tracks. */
+    /** Only this existing explicit user action can start a track probe. */
     fun open(result: SourceResult) {
-        open = result
-        AppLog.i(TAG, "long press ${result.serviceType} \"${result.title}\"")
-        if (defaults == null) scope.launch {
-            val playback = runCatching { ApiClient.playbackSettings() }.getOrNull()
-            val effective = EffectiveTracks.resolve(null, playback, TrackOverrides.audioLanguage, TrackOverrides.subtitleLanguage,
-                                                    TrackOverrides.subtitleMode, TrackOverrides.losslessAudio)
-            defaults = TrackDefaults(effective.audioLanguage, effective.subtitleLanguage, effective.subtitleMode, effective.allowedLanguages,
-                                     effective.losslessAudio)
+        if (!current()) return
+        opened = result
+        if (defaults == null && defaultsTask?.isActive != true) defaultsTask = scope.launch {
+            if (!current()) return@launch
+            val loaded = try { readDefaults(expected) } catch (error: CancellationException) { throw error } catch (_: Exception) { null }
+            ensureActive()
+            if (current()) defaults = loaded
         }
-        val known = probes[result.index]
+        val known = probes[key(result)]
         if (known == null || known.probe is TrackProbe.Failed) probe(result)
     }
 
     private fun probe(result: SourceResult) {
-        probes[result.index] = ProbeState(null)
-        scope.launch {
-            val probe = try {
-                ApiClient.probeTracks(result)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                TrackProbe.Failed(e.message ?: "Request failed")
-            }
-            when (probe) {
-                is TrackProbe.Tracks -> AppLog.i(TAG, "probed \"${result.title}\": audio=${probe.audio.map { "${it.index}:${it.language}/${it.codec}" }} " +
-                    "subtitles=${probe.subtitles.map { "${it.index}:${it.language}/${it.codec}${if (it.forced) "/forced" else ""}" }}")
-                is TrackProbe.Failed -> AppLog.w(TAG, "probe failed for \"${result.title}\": ${probe.reason}")
-            }
-            probes[result.index] = ProbeState(probe)
+        if (!current()) return
+        val key = key(result)
+        tasks.remove(key)?.cancel()
+        val generation = (generations[key] ?: 0) + 1
+        generations[key] = generation
+        choices.remove(key)
+        probes[key] = ProbeState(null)
+        tasks[key] = scope.launch {
+            if (!current()) return@launch
+            val loaded = try { readProbe(result,expected)
+            } catch (error: CancellationException) { throw error
+            } catch (_: Exception) { TrackProbe.Failed("Track metadata could not be loaded. Try again.") }
+            ensureActive()
+            if (!current() || generations[key] != generation) return@launch
+            log(if (loaded is TrackProbe.Tracks) "Explicit track metadata received" else "Explicit track metadata unavailable")
+            probes[key] = ProbeState(loaded)
         }
     }
 
-    /** The hand-picked tracks for the result with the lists they number, or null to play as before. */
     fun manualFor(result: SourceResult): ManualSourceTracks? {
-        val choice = choices[result.index]?.takeIf { !it.isEmpty } ?: return null
-        val tracks = probes[result.index]?.probe as? TrackProbe.Tracks ?: return null
-        return ManualSourceTracks(choice, tracks.audio, tracks.subtitles)
+        if (!current()) return null
+        val choice = choices[key(result)]?.takeIf { !it.isEmpty } ?: return null
+        val tracks = probes[key(result)]?.probe as? TrackProbe.Tracks ?: return null
+        return ManualSourceTracks(choice,tracks.audio,tracks.subtitles)
     }
-
-    /** The result whose track panel is up, or null. */
-    val openResult: SourceResult? get() = open
-
-    /** The panel's release line: the scraper's raw title's first line, else the title. */
-    fun release(result: SourceResult): String =
-        (result.attributes["raw_title"] ?: result.title).lineSequence().firstOrNull() ?: result.title
-
-    fun probeState(result: SourceResult): ProbeState = probes[result.index] ?: ProbeState(null)
-
-    /** The profile's track defaults, once read (the panel preselects from them). */
-    val trackDefaults: TrackDefaults? get() = defaults
-
-    fun choice(result: SourceResult): ManualTrackChoice = choices[result.index] ?: ManualTrackChoice()
-
-    fun choose(result: SourceResult, choice: ManualTrackChoice) {
-        choices[result.index] = choice
+    val openResult: SourceResult? get() = opened.takeIf { current() }
+    fun release(result: SourceResult): String = (result.attributes["raw_title"] ?: result.title).lineSequence().firstOrNull() ?: result.title
+    fun probeState(result: SourceResult): ProbeState = if (current()) probes[key(result)] ?: ProbeState(null) else ProbeState(TrackProbe.Failed("Source context changed."))
+    val trackDefaults: TrackDefaults? get() = defaults.takeIf { current() }
+    fun choice(result: SourceResult): ManualTrackChoice = if (current()) choices[key(result)] ?: ManualTrackChoice() else ManualTrackChoice()
+    private fun accepts(result: SourceResult, snapshot: ProbeState): Boolean =
+        current() && opened?.let(::key) == key(result) && probes[key(result)] === snapshot
+    fun choose(result: SourceResult, choice: ManualTrackChoice, snapshot: ProbeState = probeState(result)) {
+        if (accepts(result,snapshot)) choices[key(result)] = choice
     }
-
-    fun retry(result: SourceResult) = probe(result)
-
+    fun retry(result: SourceResult, snapshot: ProbeState = probeState(result)) { if (accepts(result,snapshot)) probe(result) }
+    /** A loaded panel acts only on the exact response it displayed, including legacy probes. */
+    fun play(result: SourceResult, snapshot: ProbeState, action: (SourceResult, ManualSourceTracks?) -> Unit) {
+        if (!accepts(result,snapshot)) return
+        val manual = manualFor(result)
+        close()
+        action(result,manual)
+    }
     fun close() {
-        open = null
+        opened?.let { result ->
+            val key = key(result)
+            if (tasks[key]?.isActive == true) {
+                generations[key] = (generations[key] ?: 0) + 1
+                tasks.remove(key)?.cancel()
+                probes.remove(key)
+            }
+        }
+        opened = null
     }
-
-    private companion object {
-        const val TAG = "ManualTracks"
+    fun dispose() {
+        disposed = true
+        opened = null
+        defaultsTask?.cancel()
+        tasks.values.forEach { it.cancel() }
+        tasks.clear(); probes.clear(); choices.clear(); defaults = null
+        contextTask?.cancel()
     }
 }

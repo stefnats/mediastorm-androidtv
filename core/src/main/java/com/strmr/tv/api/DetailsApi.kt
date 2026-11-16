@@ -2,6 +2,7 @@ package com.strmr.tv.api
 
 import com.strmr.tv.adaptive.ThroughputStore
 import com.strmr.tv.app.Config
+import com.strmr.tv.library.ProfileDataContext
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -35,12 +36,13 @@ suspend fun ApiClient.detailsBundle(t: DetailsTarget, seasonType: String? = null
  * cache / usenet health (pending rows resolve via [sourceHealth]). Carries this route's
  * throughput estimate, as Expo's search does, so adaptive playback can cap the results.
  */
-suspend fun ApiClient.searchSources(query: String, title: DetailsTarget, numbering: EpisodeNumbering? = null): List<SourceResult> {
+suspend fun ApiClient.searchSources(query: String, title: DetailsTarget, numbering: EpisodeNumbering? = null, expectedContext: Long = ProfileDataContext.current): List<SourceResult> {
+    val profile = inContext(expectedContext) { profileId }
     val q = buildMap {
         put("q", query)
         put("titleId", title.titleId)
         put("mediaType", if (title.isMovie) "movie" else "series")
-        put("userId", profileId)
+        put("userId", profile)
         put("includeSourceHealth", "true")
         put("limit", "50") // server default is 5
         title.imdbId?.let { put("imdbId", it) }
@@ -51,7 +53,7 @@ suspend fun ApiClient.searchSources(query: String, title: DetailsTarget, numberi
             n.ordering?.takeIf { it.isNotEmpty() }?.let { put("episodeOrdering", it) }
         }
     }
-    val list = json.parseToJsonElement(sendRaw("GET", "/api/indexers/search", q, headers = ThroughputStore.headers())) as? JsonArray ?: return emptyList()
+    val list = json.parseToJsonElement(sendRaw("GET", "/api/indexers/search", q, headers = ThroughputStore.headers(), expectedContext = expectedContext)) as? JsonArray ?: return emptyList()
     return list.mapIndexedNotNull { i, e -> (e as? JsonObject)?.let { SourceResult.from(it, i) } }
 }
 
@@ -65,8 +67,8 @@ suspend fun ApiClient.setSeriesOrdering(tvdbId: Long, seasonType: String) {
 }
 
 /** Long-polls the pending source-health checks of one search. */
-suspend fun ApiClient.sourceHealth(token: String): SourceHealthSnapshot =
-    send("GET", "/api/indexers/source-health", mapOf("token" to token, "waitMs" to "20000"), timeoutMs = 30_000)
+suspend fun ApiClient.sourceHealth(token: String, expectedContext: Long = ProfileDataContext.current): SourceHealthSnapshot =
+    send("GET", "/api/indexers/source-health", mapOf("token" to token, "waitMs" to "20000"), timeoutMs = 30_000, expectedContext = expectedContext)
 
 /**
  * Resolves a manually chosen result to a stream path, waiting on the backend's queue when

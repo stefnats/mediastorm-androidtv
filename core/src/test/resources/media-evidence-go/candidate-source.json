@@ -1,0 +1,30 @@
+{
+  "mediaEvidence": {
+    "version": 1,
+    "sourceVersion": "candidate_v1_69b2847eb87d2542e2a676dbe9ba782ae6bacf3c61cae2f8e8d0d7a7731a875d",
+    "candidateVersion": "candidate_v1_69b2847eb87d2542e2a676dbe9ba782ae6bacf3c61cae2f8e8d0d7a7731a875d",
+    "candidate": {
+      "source": "release_metadata",
+      "observedAt": "2026-11-16T00:06:08Z",
+      "expiresAt": "2026-11-16T00:21:08Z",
+      "audioLanguages": [
+        "fra"
+      ],
+      "resolution": "2160p"
+    }
+  },
+  "title": "Synthetic candidate",
+  "indexer": "",
+  "guid": "synthetic-release",
+  "link": "",
+  "downloadUrl": "",
+  "sizeBytes": 0,
+  "publishDate": "0001-01-01T00:00:00Z",
+  "attributes": {
+    "languages": "fr",
+    "resolution": "2160p"
+  },
+  "serviceType": "debrid",
+  "filterStatus": "passed",
+  "totalScore": 0
+}

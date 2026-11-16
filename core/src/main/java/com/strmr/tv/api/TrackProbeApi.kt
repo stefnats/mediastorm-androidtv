@@ -1,5 +1,8 @@
 package com.strmr.tv.api
 
+import com.strmr.tv.library.ProfileDataContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
@@ -31,30 +34,32 @@ data class ProbedSubtitleTrack(
 
 /** One result's probed tracks, or why there are none. */
 sealed interface TrackProbe {
-    data class Tracks(val audio: List<ProbedAudioTrack>, val subtitles: List<ProbedSubtitleTrack>) : TrackProbe
+    data class Tracks(val audio: List<ProbedAudioTrack>, val subtitles: List<ProbedSubtitleTrack>, val mediaEvidence: MediaEvidence? = null) : TrackProbe
     data class Failed(val reason: String) : TrackProbe
 }
 
 /** `POST /api/usenet/health` with `probeForTracks`. */
 @Serializable
-private data class UsenetHealth(
+internal data class UsenetTrackProbeHealth(
     val healthy: Boolean = false,
     val status: String = "",
     val tracksProbed: Boolean = false,
     val audioTracks: List<ProbedAudioTrack>? = null,
     val subtitleTracks: List<ProbedSubtitleTrack>? = null,
     val trackProbeError: String? = null,
+    val mediaEvidence: MediaEvidence? = null,
 )
 
 /** `POST /api/debrid/cached` with `verifyUncached`. */
 @Serializable
-private data class DebridHealth(
+internal data class DebridTrackProbeHealth(
     val cached: Boolean = false,
     val status: String = "",
     val errorMessage: String? = null,
     val audioTracks: List<ProbedAudioTrack>? = null,
     val subtitleTracks: List<ProbedSubtitleTrack>? = null,
     val trackProbeError: String? = null,
+    val mediaEvidence: MediaEvidence? = null,
     val tracksLoading: Boolean = false,
 )
 
@@ -64,16 +69,19 @@ private data class DebridHealth(
  * server says `tracksLoading`), everything else through `/usenet/health` (`probeForTracks`).
  * An unhealthy / uncached release or a probe error is a [TrackProbe.Failed].
  */
-suspend fun ApiClient.probeTracks(result: SourceResult): TrackProbe {
+suspend fun ApiClient.probeTracks(result: SourceResult, expectedContext: Long = ProfileDataContext.current): TrackProbe {
+    currentCoroutineContext().ensureActive()
+    val profile = inContext(expectedContext) { profileId }
     if (result.serviceType.lowercase() == "debrid") {
         val body = buildJsonObject {
             put("result", result.raw)
             put("quickOnly", false)
             put("verifyUncached", true)
+            put("profileId", profile)
         }
         val deadline = System.currentTimeMillis() + 120_000
         while (true) {
-            val h = send<DebridHealth>("POST", "/api/debrid/cached", body = body, timeoutMs = 90_000)
+            val h = send<DebridTrackProbeHealth>("POST", "/api/debrid/cached", body = body, timeoutMs = 90_000, expectedContext = expectedContext)
             if (!h.cached) return TrackProbe.Failed(h.errorMessage?.ifEmpty { null } ?: "Not cached")
             if (h.tracksLoading && System.currentTimeMillis() < deadline) {
                 delay(2_000)
@@ -81,16 +89,16 @@ suspend fun ApiClient.probeTracks(result: SourceResult): TrackProbe {
             }
             h.trackProbeError?.ifEmpty { null }?.let { return TrackProbe.Failed(it) }
             if (h.tracksLoading) return TrackProbe.Failed("Timed out reading the tracks")
-            return TrackProbe.Tracks(h.audioTracks.orEmpty(), h.subtitleTracks.orEmpty())
+            return TrackProbe.Tracks(h.audioTracks.orEmpty(), h.subtitleTracks.orEmpty(), h.mediaEvidence)
         }
     }
     val body = buildJsonObject {
         put("result", result.raw)
         put("probeForTracks", true)
-        put("profileId", profileId)
+        put("profileId", profile)
     }
-    val h = send<UsenetHealth>("POST", "/api/usenet/health", body = body, timeoutMs = 90_000)
+    val h = send<UsenetTrackProbeHealth>("POST", "/api/usenet/health", body = body, timeoutMs = 90_000, expectedContext = expectedContext)
     if (!h.healthy) return TrackProbe.Failed(if (h.status.isNotEmpty()) "Unhealthy (${h.status.replace('_', ' ')})" else "Unhealthy")
     h.trackProbeError?.ifEmpty { null }?.let { return TrackProbe.Failed(it) }
-    return TrackProbe.Tracks(h.audioTracks.orEmpty(), h.subtitleTracks.orEmpty())
+    return TrackProbe.Tracks(h.audioTracks.orEmpty(), h.subtitleTracks.orEmpty(), h.mediaEvidence)
 }
