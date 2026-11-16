@@ -236,7 +236,7 @@ fun LiveScreen(pick: LivePick? = null, sharedStore: LiveStore? = null) {
         }
         Picker.MORE -> {
             // The last multiscreen on this device, for this profile.
-            val saved = remember { MultiscreenPrefs.saved(ApiClient.profileId) }
+            val saved = remember { MultiscreenPrefs.saved(com.strmr.tv.player.PlaybackSessionContext.capture(store.dataContext)) }
             ChoiceDialog(
                 title = "Live TV",
                 choices = listOfNotNull(
@@ -244,8 +244,8 @@ fun LiveScreen(pick: LivePick? = null, sharedStore: LiveStore? = null) {
                     DialogChoice(if (store.showHidden) "Hide Hidden Channels" else "Show Hidden Channels") { store.showHidden = !store.showHidden },
                     DialogChoice(if (store.epgEnabled == true) "Refresh Guide & Channels" else "Refresh Channels") { scope.launch { store.refresh() } },
                     DialogChoice("Recordings") { navigator.open(Page.Recordings) },
-                    saved?.let { DialogChoice("Resume multiscreen") { MultiscreenLauncher.resume(it) } },
-                    DialogChoice("Multiscreen") { MultiscreenLauncher.open() },
+                    saved?.let { DialogChoice("Resume multiscreen") { if (store.isContextCurrent) MultiscreenLauncher.resume(it, store.dataContext) } },
+                    DialogChoice("Multiscreen") { if (store.isContextCurrent) MultiscreenLauncher.open(expectedContext = store.dataContext) },
                     DialogChoice("Cancel") {},
                 ),
                 onDismiss = { picker = null },

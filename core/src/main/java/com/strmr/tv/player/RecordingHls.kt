@@ -18,6 +18,7 @@ internal class PlayerHlsLifecycle(
     private val titleId: String? = null,
     private val onDenied: (VodAccessDenial) -> Unit = {},
     private val stopServer: suspend (String, Long) -> Unit = { id, expected -> ApiClient.stopLiveSession(id, expected) },
+    private val strictStop: Boolean = false,
 ) {
     class Ticket internal constructor()
     class Stop internal constructor(val id: String, internal val ticket: Ticket)
@@ -41,7 +42,7 @@ internal class PlayerHlsLifecycle(
         // A later adopted use of the same ID owns it now; old cleanup cannot stop it.
         val replacement = assigned
         if (replacement?.first == receipt.id && replacement.second !== receipt.ticket) return
-        try { stopServer(receipt.id, owner.epoch) } catch (error: CancellationException) { throw error } catch (_: Exception) { }
+        try { stopServer(receipt.id, owner.epoch) } catch (error: CancellationException) { throw error } catch (error: Exception) { if (strictStop) throw error }
         if (known[receipt.id] === receipt.ticket) known.remove(receipt.id)
     }
     private fun failed(ticket: Ticket, attempt: VodAttempt?, error: Exception): Nothing {

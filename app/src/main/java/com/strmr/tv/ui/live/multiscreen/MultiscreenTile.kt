@@ -89,10 +89,13 @@ fun MultiscreenTile(
 @Composable
 private fun TileVideo(model: MultiscreenModel, index: Int, source: TileSource, audible: Boolean, onBuffering: (Boolean) -> Unit) {
     val context = LocalContext.current
-    val tile = remember(source) { TilePlayer(context, source.url) { model.session.fail(index, source) } }
+    if (!model.currentSource(index, source)) return
+    val tile = remember(source) { TilePlayer(context, source.url, model.ownership,
+        sourceCurrent = { model.currentSource(index, source) }, onDenied = { model.tileDenied(index, source, it) },
+        onFailed = { model.tileFailed(index, source) }) }
     DisposableEffect(tile) {
         onDispose {
-            model.streamInfo.remove(index)
+            if (model.session.state.value.slots.getOrNull(index)?.source === source) model.streamInfo.remove(index)
             tile.release()
         }
     }
@@ -100,7 +103,7 @@ private fun TileVideo(model: MultiscreenModel, index: Int, source: TileSource, a
     val buffering by tile.buffering.collectAsState()
     LaunchedEffect(buffering) { onBuffering(buffering) }
     val info by tile.info.collectAsState()
-    LaunchedEffect(info) { model.streamInfo[index] = info }
+    LaunchedEffect(info) { if (model.currentSource(index, source)) model.streamInfo[index] = info }
     AndroidView(
         factory = { c ->
             PlayerView(c).apply {

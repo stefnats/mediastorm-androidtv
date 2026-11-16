@@ -18,9 +18,28 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.strmr.tv.api.ApiClient
+import com.strmr.tv.api.VodAccessDenial
+import com.strmr.tv.library.ProfileDataContext
+import com.strmr.tv.player.PlaybackSessionContext
+import com.strmr.tv.player.VodMediaAccess
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import com.strmr.tv.api.mediaHeaders
 import com.strmr.tv.app.AppLog
 import kotlinx.coroutines.flow.MutableStateFlow
+
+/** Pure original-source boundary consumed by the actual tile and its network callbacks. */
+internal class TilePlaybackLifetime(private val owner: PlaybackSessionContext, private val sourceCurrent: () -> Boolean) {
+    @Volatile private var closed = false
+    val current get() = !closed && owner.isCurrent() && sourceCurrent()
+    fun check() { owner.requireCurrent(); if (!current) throw kotlinx.coroutines.CancellationException("Screen changed") }
+    fun use(action: () -> Unit): Boolean = owner.use { if (!current) false else { action(); true } }
+    fun close() { closed = true }
+    fun deny(reason: VodAccessDenial, action: (VodAccessDenial) -> Unit): Boolean = owner.use {
+        if (!current) false else { closed = true; action(reason); true }
+    }
+}
 
 /** What a tile's player reports about its stream, for the overlay. */
 data class TileStreamInfo(
@@ -57,7 +76,14 @@ private fun audioName(mime: String): String = when (mime) {
  * dropping to a software decoder that can't keep up ([DecoderLimits] caps the screens).
  */
 @OptIn(UnstableApi::class)
-class TilePlayer(context: Context, url: String, private val onFailed: () -> Unit) {
+class TilePlayer(context: Context, url: String, ownership: PlaybackSessionContext,
+    sourceCurrent: () -> Boolean, private val onDenied: (VodAccessDenial) -> Unit, private val onFailed: () -> Unit,
+) {
+    private val lifetime = TilePlaybackLifetime(ownership, sourceCurrent).also { it.check() }
+    private val scope = MainScope()
+    private val backendHeaders = ownership.use { ApiClient.mediaHeaders }
+    private val mediaAccess = VodMediaAccess(ownership.use { ApiClient.baseUrl }, enabled = false,
+        backendHeaders = backendHeaders, context = ownership.epoch, requireCurrent = lifetime::check, profileId = ownership.profileId)
     val player: ExoPlayer
     val info = MutableStateFlow(TileStreamInfo())
     val buffering = MutableStateFlow(true)
@@ -65,6 +91,7 @@ class TilePlayer(context: Context, url: String, private val onFailed: () -> Unit
 
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(state: Int) {
+            if (!lifetime.current) return
             buffering.value = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
             // A live session doesn't end: its source dropped.
             if (state == Player.STATE_ENDED) {
@@ -74,6 +101,7 @@ class TilePlayer(context: Context, url: String, private val onFailed: () -> Unit
         }
 
         override fun onTracksChanged(tracks: Tracks) {
+            if (!lifetime.current) return
             val video = tracks.selected(C.TRACK_TYPE_VIDEO)
             // A muted tile's audio is off, so its format comes from the first audio group.
             val audio = tracks.selected(C.TRACK_TYPE_AUDIO)
@@ -88,10 +116,16 @@ class TilePlayer(context: Context, url: String, private val onFailed: () -> Unit
         }
 
         override fun onVideoSizeChanged(size: VideoSize) {
+            if (!lifetime.current) return
             if (size.width > 0 && size.height > 0) info.value = info.value.copy(width = size.width, height = size.height)
         }
 
         override fun onPlayerError(e: PlaybackException) {
+            if (!lifetime.current) return
+            mediaAccess.denial(e)?.let { reason ->
+                lifetime.deny(reason) { player.stop(); onDenied(it) }
+                return
+            }
             // Behind the live window, or a source that paused long enough for the playlist to
             // look stuck (a provider hiccup the server's session rides out): rejoin the same
             // session at its live edge, a few times a minute, before showing the error.
@@ -101,7 +135,7 @@ class TilePlayer(context: Context, url: String, private val onFailed: () -> Unit
                 player.prepare()
                 return
             }
-            AppLog.e("Multiscreen", "tile playback error ${e.errorCodeName}: ${e.message}")
+            AppLog.e("Multiscreen", "tile playback error ${e.errorCodeName}")
             onFailed()
         }
     }
@@ -110,9 +144,11 @@ class TilePlayer(context: Context, url: String, private val onFailed: () -> Unit
         val renderers = DefaultRenderersFactory(context)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(false)
-        val dataSource = OkHttpDataSource.Factory(ApiClient.http).setDefaultRequestProperties(ApiClient.mediaHeaders)
+        lifetime.check()
+        val http = ApiClient.http.newBuilder().addInterceptor(mediaAccess.interceptor).addNetworkInterceptor(mediaAccess.requestInterceptor).build()
+        val dataSource = OkHttpDataSource.Factory(http).setDefaultRequestProperties(backendHeaders)
         player = ExoPlayer.Builder(context, renderers)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource).setLoadErrorHandlingPolicy(mediaAccess.loadPolicy))
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
                 false,
@@ -123,7 +159,13 @@ class TilePlayer(context: Context, url: String, private val onFailed: () -> Unit
         player.setMediaItem(MediaItem.Builder().setUri(url).setMimeType(MimeTypes.APPLICATION_M3U8).build())
         setAudible(false)
         player.playWhenReady = true
+        lifetime.check()
         player.prepare()
+        scope.launch {
+            ProfileDataContext.changes.collect {
+                if (!lifetime.current) { lifetime.close(); player.stop(); scope.cancel() }
+            }
+        }
     }
 
     private val rejoins = ArrayDeque<Long>()
@@ -139,7 +181,7 @@ class TilePlayer(context: Context, url: String, private val onFailed: () -> Unit
 
     /** Sound on (volume and audio track) for the screen being listened to, off for the rest. */
     fun setAudible(on: Boolean) {
-        if (audible == on) return
+        if (!lifetime.current || audible == on) return
         audible = on
         player.volume = if (on) 1f else 0f
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
@@ -147,6 +189,7 @@ class TilePlayer(context: Context, url: String, private val onFailed: () -> Unit
     }
 
     fun release() {
+        lifetime.close(); scope.cancel()
         player.removeListener(listener)
         player.release()
     }

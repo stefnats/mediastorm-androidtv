@@ -23,10 +23,15 @@ class MultiscreenActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val launch = MultiscreenLauncher.take(intent.getStringExtra(MultiscreenLauncher.LAUNCH_ID))
+        if (launch == null) {
+            android.widget.Toast.makeText(this, "Unable to open these screens. Reopen Multiscreen from Live TV.", android.widget.Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         requestAudioFocus()
-        val (handover, resume) = MultiscreenLauncher.take()
-        val m = MultiscreenModel(handover, resume, finish = { finish() })
+        val m = MultiscreenModel(launch, finish = { finish() })
         model = m
         setContent { StrmrTheme { MultiscreenScreen(m) } }
     }

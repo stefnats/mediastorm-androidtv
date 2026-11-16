@@ -2,6 +2,12 @@ package com.strmr.tv.live
 
 import android.content.Context
 import com.strmr.tv.app.App
+import com.strmr.tv.app.AppSession
+import com.strmr.tv.app.NetworkRoutes
+import com.strmr.tv.api.ApiClient
+import com.strmr.tv.player.PlaybackSessionContext
+import java.security.MessageDigest
+import okhttp3.HttpUrl
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -44,14 +50,49 @@ object MultiscreenMemory {
 object MultiscreenPrefs {
     private val prefs by lazy { App.context.getSharedPreferences("strmr.multiscreen", Context.MODE_PRIVATE) }
     private const val KEY_WARNING = "warningShown"
+    private val layouts by lazy { MultiscreenLayoutStorage(
+        read = { prefs.getString(it, null) }, write = { key, value -> prefs.edit().putString(key, value).apply() },
+    ) }
 
     /** The "More screens, higher load" warning has been shown on this device. */
     val warningShown: Boolean get() = prefs.getBoolean(KEY_WARNING, false)
 
     fun markWarningShown() = prefs.edit().putBoolean(KEY_WARNING, true).apply()
 
-    fun saved(profileId: String): SavedMultiscreen? = MultiscreenMemory.decode(prefs.getString("last.$profileId", null))
+    /** Legacy profile-only entries are retained but never adopted into the private namespace. */
+    fun saved(owner: PlaybackSessionContext): SavedMultiscreen? = owner.use {
+        layouts.saved(owner, currentKey(owner))
+    }
 
-    fun save(profileId: String, selection: SavedMultiscreen) =
-        prefs.edit().putString("last.$profileId", MultiscreenMemory.encode(selection)).apply()
+    fun save(owner: PlaybackSessionContext, selection: SavedMultiscreen) = owner.use {
+        layouts.save(owner, currentKey(owner), selection)
+        Unit
+    }
+
+    private fun currentKey(owner: PlaybackSessionContext): String? = multiscreenNamespace(
+        NetworkRoutes.savedServerUrl, ApiClient.session?.accountId, owner.profileId,
+        paired = AppSession.isRemote.value || NetworkRoutes.isHomeDirect.value || ApiClient.remoteCredential != null,
+    )
+}
+
+/** No transient route, credential or unknown account may become a saved-layout identity. */
+internal fun multiscreenNamespace(server: HttpUrl?, accountId: String?, profileId: String, paired: Boolean): String? {
+    if (paired || server == null || accountId.isNullOrBlank() || profileId.isBlank()) return null
+    if (listOf(accountId, profileId).any { it.length > 1024 || it.any(Char::isISOControl) }) return null
+    val configured = server.newBuilder().username("").password("").query(null).fragment(null).build().toString().trimEnd('/')
+    val fields = listOf(configured, accountId, profileId).joinToString("") { "${it.length}:$it" }
+    val hash = MessageDigest.getInstance("SHA-256").digest(fields.toByteArray()).joinToString("") { "%02x".format(it) }
+    return "last.v2.$hash"
+}
+
+/** The actual saved-layout reducer never reads or migrates a profile-only legacy key. */
+internal class MultiscreenLayoutStorage(private val read: (String) -> String?, private val write: (String, String) -> Unit) {
+    private fun valid(key: String?) = key?.takeIf { Regex("last\\.v2\\.[0-9a-f]{64}").matches(it) }
+    fun saved(owner: PlaybackSessionContext, key: String?): SavedMultiscreen? = owner.use {
+        valid(key)?.let { MultiscreenMemory.decode(read(it)) }
+    }
+    fun save(owner: PlaybackSessionContext, key: String?, selection: SavedMultiscreen) = owner.use {
+        valid(key)?.let { write(it, MultiscreenMemory.encode(selection)) }
+        Unit
+    }
 }

@@ -131,10 +131,11 @@ suspend fun ApiClient.epgEnabled(expectedContext: Long? = null): Boolean = try {
 suspend fun ApiClient.startEpgRefresh(): Boolean = runCatching { sendRaw("POST", "/api/live/epg/refresh") }.isSuccess
 
 /** Now / next for up to 50 EPG keys. */
-suspend fun ApiClient.epgNow(keys: List<String>): List<EpgNowPlaying> = send(
-    "POST", "/api/live/epg/now", mapOf("profileId" to profileId),
-    body = buildJsonObject { putJsonArray("channels") { keys.forEach { add(JsonPrimitive(it)) } } },
-)
+suspend fun ApiClient.epgNow(keys: List<String>, expectedContext: Long = ProfileDataContext.current): List<EpgNowPlaying> {
+    val query = inContext(expectedContext) { mapOf("profileId" to profileId) }
+    return send("POST", "/api/live/epg/now", query,
+        body = buildJsonObject { putJsonArray("channels") { keys.forEach { add(JsonPrimitive(it)) } } }, expectedContext = expectedContext)
+}
 
 /** Programmes overlapping `[now + startOffset, + hours]` for each key (every key answers, null when it has none). */
 suspend fun ApiClient.epgSchedule(keys: List<String>, startOffsetMinutes: Int, hours: Int, expectedContext: Long = ProfileDataContext.current): Map<String, List<EpgProgram>> {
@@ -278,13 +279,12 @@ data class LiveUsage(
 }
 
 /** The stream usage for `sourceId`'s provider (every source when null, empty or "all"). */
-suspend fun ApiClient.liveUsage(sourceId: String?): LiveUsage = send(
+suspend fun ApiClient.liveUsage(sourceId: String?, expectedContext: Long = ProfileDataContext.current): LiveUsage = send(
     "GET", "/api/live/usage",
-    buildMap {
+    inContext(expectedContext) { buildMap {
         put("profileId", profileId)
         sourceId?.trim()?.takeIf { it.isNotEmpty() && it != "all" }?.let { put("sourceId", it) }
-    },
-    promptOnLock = false, timeoutMs = 10_000,
+    } }, promptOnLock = false, timeoutMs = 10_000, expectedContext = expectedContext,
 )
 
 /** Exact backend HLS asset routing. A selector is correlation, never a content permission. */

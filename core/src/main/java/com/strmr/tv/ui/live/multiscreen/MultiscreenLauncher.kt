@@ -2,46 +2,61 @@ package com.strmr.tv.ui.live.multiscreen
 
 import android.content.Intent
 import com.strmr.tv.app.App
+import com.strmr.tv.library.ProfileDataContext
 import com.strmr.tv.live.LiveChannel
 import com.strmr.tv.live.LiveStream
 import com.strmr.tv.live.SavedMultiscreen
+import com.strmr.tv.player.PlaybackSessionContext
+import java.util.UUID
+import kotlinx.coroutines.CancellationException
 
-/**
- * The full-screen live player's channel, for the first screen. [stream] is the player's HLS
- * session, handed over as is (the multiscreen keeps and stops it, without a second provider
- * connection); null when the player was direct, so the first screen tunes the channel again.
- */
-data class MultiscreenHandover(val channel: LiveChannel, val stream: LiveStream?)
+/** Original player handover, not a server content permission. */
+class MultiscreenHandover(val channel: LiveChannel, val stream: LiveStream?, val ownership: PlaybackSessionContext)
 
-/**
- * Opens [MultiscreenActivity], from the Live tab (pick two channels, or [resume] the last
- * screens) or the live player ([MultiscreenHandover]).
- */
+/** Only an in-memory launch receipt can supply the original owner to an activity. */
+class MultiscreenLaunch internal constructor(
+    val ownership: PlaybackSessionContext, val handover: MultiscreenHandover?, val resume: SavedMultiscreen?,
+)
+
+/** Intent strings correlate with a private once-only object; they never mint playback authority. */
+internal class MultiscreenPending {
+    private val pending = mutableMapOf<String, MultiscreenLaunch>()
+    @Synchronized fun put(launch: MultiscreenLaunch): String {
+        launch.ownership.requireCurrent()
+        pending.clear()
+        return UUID.randomUUID().toString().also { pending[it] = launch }
+    }
+    @Synchronized fun take(id: String?): MultiscreenLaunch? {
+        val launch = id?.let { pending.remove(it) } ?: return null
+        return launch.takeIf { it.ownership.isCurrent() }
+    }
+}
+
 object MultiscreenLauncher {
-    /** What the activity starts with; taken once as it opens. */
-    @Volatile private var pending: MultiscreenHandover? = null
-    @Volatile private var pendingResume: SavedMultiscreen? = null
+    const val LAUNCH_ID = "multiscreenLaunch"
+    private val pending = MultiscreenPending()
 
-    fun open(handover: MultiscreenHandover? = null) {
-        pending = handover
-        pendingResume = null
-        start()
+    fun open(handover: MultiscreenHandover? = null, expectedContext: Long = ProfileDataContext.current) {
+        try {
+            val owner = handover?.ownership ?: PlaybackSessionContext.capture(expectedContext)
+            owner.requireCurrent()
+            if (owner.epoch != expectedContext) return
+            start(MultiscreenLaunch(owner, handover, null))
+        } catch (_: CancellationException) { }
     }
 
-    /** Reopens a saved multiscreen, without the picker. */
-    fun resume(saved: SavedMultiscreen) {
-        pending = null
-        pendingResume = saved
-        start()
+    fun resume(saved: SavedMultiscreen, expectedContext: Long = ProfileDataContext.current) {
+        try {
+            val owner = PlaybackSessionContext.capture(expectedContext)
+            start(MultiscreenLaunch(owner, null, saved))
+        } catch (_: CancellationException) { }
     }
 
-    private fun start() {
-        val activity = App.platform.multiscreenActivity ?: return
-        App.context.startActivity(Intent(App.context, activity).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    private fun start(launch: MultiscreenLaunch) = launch.ownership.use {
+        val activity = App.platform.multiscreenActivity ?: return@use
+        val id = pending.put(launch)
+        App.context.startActivity(Intent(App.context, activity).putExtra(LAUNCH_ID, id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
-    fun take(): Pair<MultiscreenHandover?, SavedMultiscreen?> = (pending to pendingResume).also {
-        pending = null
-        pendingResume = null
-    }
+    fun take(id: String?): MultiscreenLaunch? = pending.take(id)
 }

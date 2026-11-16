@@ -115,10 +115,10 @@ class PlayerActivity : ComponentActivity() {
     private fun addScreen(c: PlayerController) {
         // After Stremio failover, the stream now playing.
         val channel = c.liveRetune?.channel ?: c.session.liveChannel ?: return
-        if (handover != null) return
+        if (handover != null || !c.session.canOpenPlayer() || c.vodDenied.value != null) return
         val url = c.player.currentMediaItem?.localConfiguration?.uri?.toString()
         val sessionId = url?.let { c.liveRetune?.handOver() }
-        handover = MultiscreenHandover(channel, sessionId?.let { LiveStream(url, it) })
+        handover = MultiscreenHandover(channel, sessionId?.let { LiveStream(url, it) }, requireNotNull(c.session.ownership))
         finish()
     }
 
@@ -141,7 +141,7 @@ class PlayerActivity : ComponentActivity() {
         PlaybackCoordinator.playerOpen = false
         if (isFinishing) PlaybackCoordinator.playerClosed(saving)
         // After the release, so a direct stream's provider connection is closed first.
-        handover?.let { MultiscreenLauncher.open(it) }
+        handover?.takeIf { it.ownership.isCurrent() }?.let { MultiscreenLauncher.open(it, it.ownership.epoch) }
         handover = null
     }
 
