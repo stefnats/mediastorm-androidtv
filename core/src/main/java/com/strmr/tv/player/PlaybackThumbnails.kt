@@ -25,7 +25,9 @@ import kotlinx.coroutines.launch
  * source; on a WebDAV (usenet) path that waits until playback has run 15 s and isn't
  * buffering. Polls every 2 s while pending.
  */
-class PlaybackThumbnails(private val path: String, private val request: PlaybackRequest) {
+class PlaybackThumbnails(private val path:String,private val request:PlaybackRequest,private val ownership:PlaybackSessionContext,context:android.content.Context) {
+    private val imageAccess=com.strmr.tv.api.ThumbnailImageAccess.capture(ownership)
+    val images=ThumbnailImages(context,imageAccess)
     data class Thumbnail(val timeMs: Long, val url: String)
 
     /** Session facts the start request needs, re-read on every attempt. */
@@ -40,7 +42,8 @@ class PlaybackThumbnails(private val path: String, private val request: Playback
     fun start(scope: CoroutineScope, context: () -> Context) {
         if (job != null) return
         job = scope.launch {
-            if (!ApiClient.previewThumbnailsEnabled()) return@launch
+            ownership.requireCurrent()
+            if (!ApiClient.previewThumbnailsEnabled(ownership.epoch)) return@launch
             run(context)
         }
     }
@@ -48,6 +51,7 @@ class PlaybackThumbnails(private val path: String, private val request: Playback
     fun cancel() {
         job?.cancel()
         job = null
+        images.close()
     }
 
     /** The thumbnail at or just before `timeMs` (the frame a seek there lands near). */
@@ -79,7 +83,7 @@ class PlaybackThumbnails(private val path: String, private val request: Playback
 
         while (kotlinx.coroutines.currentCoroutineContext().isActive) {
             val status = try {
-                ApiClient.videoThumbnailsStatus(path)
+                ApiClient.videoThumbnailsStatus(path,ownership.epoch)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -87,6 +91,7 @@ class PlaybackThumbnails(private val path: String, private val request: Playback
                 delay(2_000)
                 continue
             }
+            ownership.requireCurrent()
             val count = status.thumbnails?.size ?: 0
             if (status.status != lastStatus) {
                 AppLog.i(TAG, "status ${status.status} count=$count")
@@ -107,7 +112,7 @@ class PlaybackThumbnails(private val path: String, private val request: Playback
                 val seekrOnly = !seekrRequested
                 if (seekrOnly) seekrRequested = true else generationRequested = true
                 try {
-                    val started = ApiClient.startVideoThumbnails(path, ctx.durationMs / 1000.0, options(ctx, seekrOnly))
+                    val started = ApiClient.startVideoThumbnails(path, ctx.durationMs / 1000.0, options(ctx, seekrOnly),ownership.epoch)
                     AppLog.i(TAG, "start (seekrOnly=$seekrOnly) -> ${started.status}")
                     if (started.status == "disabled") return
                 } catch (e: CancellationException) {
@@ -135,7 +140,7 @@ class PlaybackThumbnails(private val path: String, private val request: Playback
 
     private fun apply(items: List<VideoThumbnailStatus.Item>) {
         val next = items.mapNotNull { item ->
-            ApiClient.thumbnailImageUrl(item.url)?.let { Thumbnail((item.timeSec * 1000).toLong(), it) }
+            ApiClient.thumbnailImageUrl(item.url,imageAccess)?.let { Thumbnail((item.timeSec * 1000).toLong(), it) }
         }.sortedBy { it.timeMs }
         if (next != _thumbnails.value) _thumbnails.value = next
     }

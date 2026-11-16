@@ -154,7 +154,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
 
     /** Seek previews, for a resolved stream (not trailers, live or a downloaded file). */
     val thumbnails: PlaybackThumbnails? =
-        session.streamPath?.takeIf { !session.isLive && session.reportsProgress && !session.localFile }?.let { PlaybackThumbnails(it, request) }
+        session.streamPath?.takeIf { !session.isLive && session.reportsProgress && !session.localFile }?.let { PlaybackThumbnails(it, request,ownership,context) }
     /** The video surface, set by the player screen's PlayerView: credits detection reads frames from it. */
     var videoSurface: android.view.SurfaceView? = null
     /** A recording still recording, over its growing HLS session (set as the player is built). */

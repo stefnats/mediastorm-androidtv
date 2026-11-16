@@ -37,17 +37,14 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import coil.imageLoader
-import coil.request.ImageRequest
-import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.formatTimestamp
 import com.strmr.tv.api.mediaHeaders
 import com.strmr.tv.player.PlaybackThumbnails
+import com.strmr.tv.player.ThumbnailImages
 import com.strmr.tv.player.PlayerController
 import com.strmr.tv.player.ProgrammeTimeline
 import com.strmr.tv.player.Timeshift
@@ -97,7 +94,7 @@ fun SeekBar(
                         if (Timeshift.isAtLive(behind)) "LIVE" else "-" + formatTimestamp(behind / 1000.0)
                     } else formatTimestamp(t / 1000.0)
                     val thumb = if (thumbList.isEmpty()) null else thumbnails?.at(t)
-                    ScrubPreview(
+                    ScrubPreview(thumbnails?.images,
                         thumb?.url, label, thumbList.isNotEmpty(),
                         Modifier.wrapContentHeight(Alignment.Bottom, unbounded = true)
                             .offset(x = previewOffset(width, barFraction(t, duration)), y = (-4).dp),
@@ -182,17 +179,17 @@ private fun Label(text: String) {
 
 /** A frame of the target (or a time-only card when there are no thumbnails) and its time. */
 @Composable
-private fun ScrubPreview(url: String?, label: String, hasThumbnails: Boolean, modifier: Modifier) {
+private fun ScrubPreview(images:ThumbnailImages?,url: String?, label: String, hasThumbnails: Boolean, modifier: Modifier) {
     Column(modifier.width(PreviewWidth), horizontalAlignment = Alignment.CenterHorizontally) {
         if (hasThumbnails) {
             Box(
                 Modifier.width(PreviewWidth).aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp))
                     .background(Color(0xFF1C1C1E)).border(1.5.dp, Color.White, RoundedCornerShape(8.dp)),
             ) {
-                url?.let {
-                    AsyncImage(model = thumbnailRequest(it, LocalContext.current), contentDescription = null,
+                url?.let { raw ->images?.request(raw)?.let { model->
+                    AsyncImage(model = model,imageLoader=images.loader, contentDescription = null,
                                contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f))
-                }
+                }}
             }
         }
         Text(
@@ -206,20 +203,11 @@ private fun ScrubPreview(url: String?, label: String, hasThumbnails: Boolean, mo
 /** Warms the image cache with the thumbnails either side of the target, so a drag doesn't flicker. */
 @Composable
 private fun PrefetchNeighbours(thumbnails: PlaybackThumbnails, targetMs: Long) {
-    val context = LocalContext.current
     val key = thumbnails.at(targetMs)?.timeMs
     LaunchedEffect(key) {
-        for (t in thumbnails.around(targetMs)) context.imageLoader.enqueue(thumbnailRequest(t.url, context))
+        for (t in thumbnails.around(targetMs))thumbnails.images.request(t.url)?.let {thumbnails.images.loader.enqueue(it)}
     }
 }
-
-/** Thumbnails come from the server, with the app's credentials. */
-private fun thumbnailRequest(url: String, context: android.content.Context) = ImageRequest.Builder(context)
-    .data(url)
-    .apply { ApiClient.mediaHeaders.forEach { (k, v) -> addHeader(k, v) } }
-    .memoryCacheKey(url)
-    .diskCacheKey(url)
-    .build()
 
 /** Keeps the preview centred on the target, inside the bar's ends. */
 private fun previewOffset(width: Dp, fraction: Float): Dp =

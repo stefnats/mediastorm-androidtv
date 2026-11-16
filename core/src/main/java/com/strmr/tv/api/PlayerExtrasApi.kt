@@ -30,10 +30,10 @@ data class ThumbnailStartOptions(
     val dolbyVision: Boolean,
 )
 
-suspend fun ApiClient.videoThumbnailsStatus(path: String): VideoThumbnailStatus =
-    thumbnails("GET", "/api/video/thumbnails/status", "path=${segment(path)}")
+suspend fun ApiClient.videoThumbnailsStatus(path:String,expected:Long):VideoThumbnailStatus=
+    thumbnails("GET","/api/video/thumbnails/status",mapOf("path" to path),expected)
 
-suspend fun ApiClient.startVideoThumbnails(path: String, durationSec: Double, options: ThumbnailStartOptions): VideoThumbnailStatus {
+suspend fun ApiClient.startVideoThumbnails(path: String, durationSec: Double, options: ThumbnailStartOptions,expected:Long): VideoThumbnailStatus {
     val items = buildList {
         add("path" to path)
         add("duration" to "%.2f".format(java.util.Locale.ROOT, durationSec))
@@ -47,18 +47,16 @@ suspend fun ApiClient.startVideoThumbnails(path: String, durationSec: Double, op
         options.season?.let { add("season" to it.toString()) }
         options.episode?.let { add("episode" to it.toString()) }
     }
-    return thumbnails("POST", "/api/video/thumbnails/start", items.joinToString("&") { (k, v) -> "${segment(k)}=${segment(v)}" })
+    return thumbnails("POST","/api/video/thumbnails/start",items.toMap(),expected)
 }
 
-private suspend fun ApiClient.thumbnails(method: String, path: String, query: String): VideoThumbnailStatus =
-    json.decodeFromString(sendRaw(method, path, promptOnLock = false, timeoutMs = 60_000, encodedQuery = query))
-
-/** Absolute URL of a listed thumbnail (server-relative `/api/...`); auth rides in [mediaHeaders]. */
-fun ApiClient.thumbnailImageUrl(raw: String): String? {
-    if (raw.startsWith("http://") || raw.startsWith("https://")) return raw
-    val path = raw.substringBefore('?')
-    return if (path.startsWith("/")) url(path).toString() else null
+private suspend fun ApiClient.thumbnails(method:String,path:String,query:Map<String,String>,expected:Long):VideoThumbnailStatus {
+    val profile=inContext(expected){profileId}
+    return send(method,path,query+("profileId" to profile),promptOnLock=false,timeoutMs=60_000,expectedContext=expected)
 }
+
+/** A frame URL normalized by the original player image transport, preserving its query. */
+fun ApiClient.thumbnailImageUrl(raw:String,access:ThumbnailImageAccess):String?=access.image(raw)?.url
 
 @Serializable
 private data class ServerSettings(val playback: Playback? = null) {
@@ -70,9 +68,11 @@ private data class ServerSettings(val playback: Playback? = null) {
 }
 
 /** Whether the server admin turned seek-preview thumbnails on (`playback.thumbnails.enabled`). */
-suspend fun ApiClient.previewThumbnailsEnabled(): Boolean =
-    runCatching { send<ServerSettings>("GET", "/api/settings", promptOnLock = false, timeoutMs = 10_000) }
-        .getOrNull()?.playback?.thumbnails?.enabled ?: false
+suspend fun ApiClient.previewThumbnailsEnabled(expected:Long):Boolean {
+    val profile=inContext(expected){profileId}
+    return try {send<ServerSettings>("GET","/api/settings",mapOf("profileId" to profile),promptOnLock=false,timeoutMs=10_000,expectedContext=expected).playback?.thumbnails?.enabled ?: false}
+    catch(error:kotlinx.coroutines.CancellationException){throw error}catch(_:Exception){false}
+}
 
 /** One skippable range, in seconds. */
 @Serializable
