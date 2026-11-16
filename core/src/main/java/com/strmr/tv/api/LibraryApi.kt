@@ -5,6 +5,8 @@ import com.strmr.tv.home.BrowseEntry
 import com.strmr.tv.home.BrowseOptions
 import com.strmr.tv.home.BrowsePage
 import com.strmr.tv.home.BrowseSort
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 // The server's local, Plex and Jellyfin libraries. Every call names the profile: the server checks
 // it against each library's access list and a kids profile's rating caps.
@@ -19,25 +21,46 @@ suspend fun ApiClient.libraries(): List<LibraryInfo> =
  */
 suspend fun ApiClient.libraryGroups(
     libraryId: String, limit: Int, offset: Int = 0, sort: String? = null, ascending: Boolean = false,
-    letter: String? = null, mediaType: String? = null, search: String? = null, cards: Boolean = true,
+    letter: String? = null, mediaType: String? = null, search: String? = null, cards: Boolean = true, expectedContext: Long = ProfileDataContext.current,
 ): LibraryGroupPage {
-    val q = mutableMapOf("limit" to limit.toString(), "offset" to offset.toString(), "userId" to profileId)
-    if (sort != null) {
-        q["sort"] = sort
-        q["dir"] = if (ascending) "asc" else "desc"
+    val query = libraryGroupsQuery(expectedContext, limit, offset, sort, ascending, letter, mediaType, search, cards)
+    return send("GET", "/api/library/libraries/${segment(libraryId)}/groups", query, expectedContext = expectedContext)
+}
+
+/** Construct selectors while the same request owner still holds the API context lock. */
+internal fun ApiClient.libraryGroupsQuery(
+    expectedContext: Long, limit: Int, offset: Int, sort: String?, ascending: Boolean,
+    letter: String?, mediaType: String?, search: String?, cards: Boolean,
+): Map<String, String> = inContext(expectedContext) {
+    mutableMapOf("limit" to limit.toString(), "offset" to offset.toString(), "userId" to profileId).apply {
+        if (sort != null) {
+            put("sort", sort)
+            put("dir", if (ascending) "asc" else "desc")
+        }
+        letter?.let { put("alphabet", it) }
+        mediaType?.takeIf { it != "all" }?.let { put("mediaType", it) }
+        search?.takeIf { it.isNotEmpty() }?.let { put("query", it) }
+        if (cards) put("include", "cards")
     }
-    letter?.let { q["alphabet"] = it }
-    mediaType?.takeIf { it != "all" }?.let { q["mediaType"] = it }
-    search?.takeIf { it.isNotEmpty() }?.let { q["query"] = it }
-    if (cards) q["include"] = "cards"
-    return send("GET", "/api/library/libraries/${segment(libraryId)}/groups", q)
 }
 
 /**
  * A grid page of a library (`BrowseList.Library`). Default and Date Added are newest first for
  * every source (the server's own default is A–Z for Plex and Jellyfin).
  */
-suspend fun ApiClient.libraryPage(library: LibraryRef, options: BrowseOptions?, limit: Int, offset: Int): BrowsePage {
+suspend fun ApiClient.libraryPage(
+    library: LibraryRef, options: BrowseOptions?, limit: Int, offset: Int,
+    expectedContext: Long = ProfileDataContext.current,
+): BrowsePage = readLibraryPage(library, options, limit, offset, expectedContext) { id, count, start, sort, ascending, letter, expected ->
+    libraryGroups(id, count, start, sort, ascending, letter, expectedContext = expected)
+}
+
+internal suspend fun readLibraryPage(
+    library: LibraryRef, options: BrowseOptions?, limit: Int, offset: Int, expectedContext: Long,
+    readGroups: suspend (String, Int, Int, String, Boolean, String?, Long) -> LibraryGroupPage,
+): BrowsePage {
+    currentCoroutineContext().ensureActive()
+    ProfileDataContext.requireCurrent(expectedContext)
     val (sort, ascending) = when (options?.sort) {
         BrowseSort.NAME -> "name" to options.ascending
         BrowseSort.YEAR -> "year" to options.ascending
@@ -45,7 +68,9 @@ suspend fun ApiClient.libraryPage(library: LibraryRef, options: BrowseOptions?, 
         else -> "created" to false
     }
     val letter = options?.letter?.takeIf { options.sort == BrowseSort.NAME }
-    val page = libraryGroups(library.id, limit, offset, sort, ascending, letter)
+    val page = readGroups(library.id, limit, offset, sort, ascending, letter, expectedContext)
+    currentCoroutineContext().ensureActive()
+    ProfileDataContext.requireCurrent(expectedContext)
     return BrowsePage(page.groups.map { BrowseEntry.LibraryItemEntry(LibraryEntry(library, it)) }, page.total,
                       letters = page.alphabetBuckets.orEmpty())
 }

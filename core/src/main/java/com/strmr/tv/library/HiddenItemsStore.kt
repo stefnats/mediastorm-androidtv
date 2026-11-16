@@ -7,6 +7,8 @@ import androidx.compose.runtime.setValue
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.ApiError
 import com.strmr.tv.api.DetailsTarget
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import com.strmr.tv.app.AppLog
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
@@ -41,20 +43,63 @@ object HiddenItemsStore {
     var revision by mutableIntStateOf(0)
         private set
     private val refreshes = ProfileRefresh()
+    private var readSequence = 0L
 
-    suspend fun refresh() = refresh {
-        ApiClient.sendList<HiddenItem>("GET", "${ApiClient.profilePath}/hidden-items", promptOnLock = false)
+    suspend fun refresh(expectedContext: Long = ProfileDataContext.current) {
+        checkOwner(expectedContext)
+        refresh { readItems(expectedContext) }
+        checkOwner(expectedContext)
     }
 
-    internal suspend fun refresh(load: suspend () -> List<HiddenItem>) {
-        refreshes.run(load, success = { items = it; isLoaded = true },
-            failure = { AppLog.w("Hidden", "Could not load hidden titles") })
+    private suspend fun checkOwner(expectedContext: Long) {
+        currentCoroutineContext().ensureActive()
+        ProfileDataContext.requireCurrent(expectedContext)
+    }
+
+    private suspend fun readItems(expectedContext: Long): List<HiddenItem> {
+        val path = ApiClient.inContext(expectedContext) { "${ApiClient.profilePath}/hidden-items" }
+        return ApiClient.sendList("GET", path, promptOnLock = false, expectedContext = expectedContext)
+    }
+
+    /** A page consumes its own immutable response, never another refresh's singleton value. */
+    internal suspend fun pageItems(
+        expectedContext: Long,
+        load: suspend () -> List<HiddenItem> = { readItems(expectedContext) },
+    ): List<HiddenItem> {
+        checkOwner(expectedContext)
+        val sequence = ++readSequence
+        val snapshot = load().toList()
+        checkOwner(expectedContext)
+        if (sequence == readSequence) {
+            refreshes.reset()
+            items = snapshot
+            isLoaded = true
+        }
+        return snapshot
+    }
+
+    internal suspend fun refresh(
+        onFailure: (Exception) -> Unit = { legacyBackgroundRefreshFailure() },
+        load: suspend () -> List<HiddenItem>,
+    ) {
+        var sequence = 0L
+        refreshes.run(
+            load = { sequence = ++readSequence; load() },
+            success = { if (sequence == readSequence) { items = it; isLoaded = true } },
+            failure = onFailure,
+        )
+    }
+
+    /** Existing background consumers keep their logging-only failure policy; pages never use it. */
+    private fun legacyBackgroundRefreshFailure() {
+        AppLog.w("Hidden", "Could not load hidden titles")
     }
 
     /** Loads once (the first screen that filters asks). */
     suspend fun ensureLoaded() { if (!isLoaded) refresh() }
 
     fun reset() {
+        readSequence++
         refreshes.reset()
         items = emptyList()
         isLoaded = false

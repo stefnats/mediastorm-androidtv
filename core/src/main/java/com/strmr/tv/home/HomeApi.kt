@@ -2,6 +2,7 @@ package com.strmr.tv.home
 
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.ApiJson
+import com.strmr.tv.api.vodOptionalRead
 import com.strmr.tv.library.ProfileDataContext
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -110,15 +111,47 @@ suspend fun ApiClient.homeRevision(): String? =
  * [hideFromContinueWatching] are dropped server-side; the "Set Aside" custom list is
  * filtered here, as the other clients do.
  */
-suspend fun ApiClient.continueWatching(): List<ContinueWatchingItem> = coroutineScope {
-    val rows = async { sendList<ContinueWatchingItem>("GET", "$profilePath/history/continue") }
-    // None when the list is missing or unreadable, so a failure here never costs the row.
-    val aside = async {
-        runCatching { customLists().firstOrNull { it.isSetAside }?.let { customListItems(it.id) } }.getOrNull().orEmpty()
+suspend fun ApiClient.continueWatching(expectedContext: Long = ProfileDataContext.current): List<ContinueWatchingItem> =
+    readContinueWatching(
+        expectedContext,
+        rows = { expected ->
+            val path = inContext(expected) { "$profilePath/history/continue" }
+            sendList("GET", path, expectedContext = expected)
+        },
+        lists = { expected -> customLists(expected) },
+        items = { id, expected -> customListItems(id, expected) },
+    )
+
+/** Every child and follow-up belongs to the caller, including optional Set Aside reads. */
+internal suspend fun readContinueWatching(
+    expectedContext: Long,
+    rows: suspend (Long) -> List<ContinueWatchingItem>,
+    lists: suspend (Long) -> List<CustomList>,
+    items: suspend (String, Long) -> List<WatchlistItem>,
+): List<ContinueWatchingItem> = coroutineScope {
+    suspend fun checkOwner() {
+        currentCoroutineContext().ensureActive()
+        ProfileDataContext.requireCurrent(expectedContext)
     }
-    val items = rows.await()
-    val parked = aside.await()
-    if (parked.isEmpty()) items else items.filterNot { item -> parked.any { it.matches(item) } }
+    checkOwner()
+    val readingRows = async {
+        checkOwner()
+        rows(expectedContext).also { checkOwner() }
+    }
+    val readingAside = async {
+        checkOwner()
+        vodOptionalRead {
+            val list = lists(expectedContext).also { checkOwner() }.firstOrNull { it.isSetAside }
+            list?.let {
+                checkOwner()
+                items(it.id, expectedContext).also { checkOwner() }
+            }.orEmpty()
+        }.orEmpty().also { checkOwner() }
+    }
+    val watching = readingRows.await()
+    val parked = readingAside.await()
+    checkOwner()
+    if (parked.isEmpty()) watching else watching.filterNot { item -> parked.any { it.matches(item) } }
 }
 
 /** Drops a title from Continue Watching until it is played again. */
@@ -181,22 +214,26 @@ suspend fun ApiClient.browsePage(
 ): BrowsePage {
     currentCoroutineContext().ensureActive()
     ProfileDataContext.requireCurrent(expectedContext)
-    if (list is BrowseList.Library) return libraryPage(list.library, options, limit, offset)
-    if (list is BrowseList.Service && list.lists.size > 1) return mergedServicePage(list, limit, offset, extra, options)
+    if (list is BrowseList.Library) return libraryPage(list.library, options, limit, offset, expectedContext)
+    if (list is BrowseList.Service && list.lists.size > 1) return mergedServicePage(list, limit, offset, extra, options, expectedContext)
     // Continue Watching's own shape: the whole feed, paged here.
     if (list == BrowseList.ContinueWatching) {
         // Opened from a Home view: only that view's kind, as its row shows.
         val filter = extra["homeView"]?.let { HomeViews.filter(it, HomeViewStore.views) } ?: HomeMediaFilter.ALL
-        val all = continueWatching().filter { matchesHomeView(if (it.nextEpisode != null) "series" else "movie", filter) }
+        val all = continueWatching(expectedContext).filter { matchesHomeView(if (it.nextEpisode != null) "series" else "movie", filter) }
+        currentCoroutineContext().ensureActive()
+        ProfileDataContext.requireCurrent(expectedContext)
         return BrowsePage(all.drop(offset).take(limit).map { BrowseEntry.WatchingEntry(it) }, all.size)
     }
     // Hidden titles come from the profile's hidden items, newest first.
     if (list == BrowseList.Hidden) {
-        com.strmr.tv.library.HiddenItemsStore.refresh()
-        val all = com.strmr.tv.library.HiddenItemsStore.items.reversed().map {
+        val snapshot = com.strmr.tv.library.HiddenItemsStore.pageItems(expectedContext)
+        val all = snapshot.reversed().map {
             WatchlistItem(it.id, if (it.isMovie) "movie" else "series", it.name, year = it.year, posterUrl = it.posterUrl,
                           backdropUrl = it.backdropUrl, externalIds = it.externalIds)
         }
+        currentCoroutineContext().ensureActive()
+        ProfileDataContext.requireCurrent(expectedContext)
         return BrowsePage(all.drop(offset).take(limit).map { BrowseEntry.ItemEntry(it) }, all.size)
     }
     val query = inContext(expectedContext) { browseQuery(list, limit, offset, extra, options, phase) }
