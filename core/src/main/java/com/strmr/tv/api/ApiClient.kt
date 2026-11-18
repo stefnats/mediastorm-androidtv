@@ -258,21 +258,42 @@ object ApiClient {
         expectedContext: Long? = null,
         retryTransport: Boolean = true,
     ): String {
+        return sendOwnedRaw(method, path, query, body, authorized, promptOnLock, timeoutMs, encodedQuery, headers, expectedContext, retryTransport).text
+    }
+
+    /** Only the explicit saved-feed GET opts into actual transport time/body bounds. */
+    internal suspend fun sendObservedRaw(path: String, query: Map<String, String>, expectedContext: Long): ObservedRawResponse =
+        sendOwnedRaw("GET", path, query, expectedContext = expectedContext, observeResponse = true)
+
+    private suspend fun sendOwnedRaw(
+        method: String, path: String, query: Map<String, String> = emptyMap(), body: JsonElement? = null,
+        authorized: Boolean = true, promptOnLock: Boolean = true, timeoutMs: Long = 30_000,
+        encodedQuery: String? = null, headers: Map<String, String> = emptyMap(), expectedContext: Long? = null,
+        retryTransport: Boolean = true, observeResponse: Boolean = false,
+    ): ObservedRawResponse {
         val context = requestContexts.capture(expectedContext)
-        if (method == "GET") SportsFixtures.response(path)?.let { context.check(); return it }
+        if (observeResponse) context.use { require(method == "GET" && expectedContext != null && path == "$profilePath/display-list" && query["source"] == "continue-watching-cached") }
+        if (method == "GET") SportsFixtures.response(path)?.let {
+            context.check()
+            if (observeResponse) throw ObservedResponseUnavailable()
+            return ObservedRawResponse(it, null)
+        }
         val prepared = context.use {
-            Prepared(method, url(path, query, encodedQuery), body?.toString(), timeoutMs, context, retryTransport).apply {
+            Prepared(method, url(path, query, encodedQuery), body?.toString(), timeoutMs, context, retryTransport, observeResponse).apply {
                 this.headers.putAll(headers)
                 this.headers["X-Client-ID"] = Config.clientId
                 remoteCredential?.let { this.headers["X-Remote-Access-Credential"] = it }
             }
         }
-        if (!authorized) return perform(prepared)
+        fun accepted(text: String): ObservedRawResponse = context.use {
+            ObservedRawResponse(text, if (observeResponse) prepared.observation ?: throw ObservedResponseUnavailable() else null)
+        }
+        if (!authorized) return accepted(perform(prepared))
 
         val named = profileIds(path, query, body as? JsonObject)
         context.use { applyUnlocks(prepared, named) }
         try {
-            return performAuthorized(prepared)
+            return accepted(performAuthorized(prepared))
         } catch (e: ApiError) {
             context.check()
             if (!e.isProfileLocked) throw e
@@ -280,12 +301,13 @@ object ApiClient {
             val prompt = context.use { unlocks.remove(locked); onProfileLocked }
             if (!promptOnLock || prompt == null || !prompt(locked, requireNotNull(context.profileEpoch))) { context.check(); throw e }
             context.use { applyUnlocks(prepared, if (locked in named) named else named + locked) }
-            return performAuthorized(prepared)
+            return accepted(performAuthorized(prepared))
         }
     }
 
     /** A request retains the identity under which its URL and headers were prepared. */
-    private class Prepared(val method: String, var url: HttpUrl, val body: String?, val timeoutMs: Long, val context: RequestContext.Scope, val retryTransport: Boolean = true) {
+    private class Prepared(val method: String, var url: HttpUrl, val body: String?, val timeoutMs: Long, val context: RequestContext.Scope, val retryTransport: Boolean = true, val observeResponse: Boolean = false) {
+        var observation: ObservedResponseClock? = null
         val headers = mutableMapOf<String, String>()
     }
 
@@ -328,6 +350,7 @@ object ApiClient {
 
     private suspend fun perform(req: Prepared, recoverConnection: Boolean = true): String {
         req.context.check()
+        req.observation = null
         val request = Request.Builder().url(req.url).apply {
             req.headers.forEach { (k, v) -> header(k, v) }
             val body = req.body?.toRequestBody(jsonType)
@@ -348,9 +371,12 @@ object ApiClient {
             },
             onFailure = { error -> if (recoverConnection) onTransportFailure?.invoke(error) },
         ).execute {
-            (if (req.retryTransport) http else nonReplayingHttp).newCall(request).apply { timeout().timeout(req.timeoutMs, TimeUnit.MILLISECONDS) }.await()
+            (if (req.retryTransport) http else nonReplayingHttp).newCall(request).apply { timeout().timeout(req.timeoutMs, TimeUnit.MILLISECONDS) }.await(req.observeResponse)
         }
         if (!response.isSuccessful) throw ApiError.Http(HttpFailure(response.code, response.text, response.retryAfter))
+        req.context.use {
+            if (req.observeResponse) req.observation = response.observedClock(req.url)
+        }
         return response.text
     }
 
@@ -426,18 +452,29 @@ object ApiClient {
 /** A finished response, its body already read off the main thread. */
 class HttpResult(val code: Int, val text: String, val retryAfter: String?) {
     val isSuccessful get() = code in 200..299
+    internal var observation: NetworkResponseObservation? = null
+    internal fun observedClock(expectedUrl: HttpUrl): ObservedResponseClock {
+        if (!isSuccessful) throw ObservedResponseUnavailable()
+        return observation?.clock(expectedUrl) ?: throw ObservedResponseUnavailable()
+    }
 }
 
 /**
  * Runs the call on OkHttp's dispatcher and reads the body there; cancelling the coroutine
  * cancels the call.
  */
-suspend fun Call.await(): HttpResult = suspendCancellableCoroutine { cont ->
+suspend fun Call.await(observeResponse: Boolean = false): HttpResult = suspendCancellableCoroutine { cont ->
+    val started = if (observeResponse) System.nanoTime() else 0L
     enqueue(object : Callback {
         override fun onResponse(call: Call, response: Response) {
             val result = try {
-                response.use { HttpResult(it.code, it.body?.string() ?: "", it.header("Retry-After")) }
-            } catch (e: IOException) {
+                response.use {
+                    val text = if (observeResponse) boundedObservedBody(it) else it.body?.string() ?: ""
+                    HttpResult(it.code, text, it.header("Retry-After")).apply {
+                        if (observeResponse && isSuccessful) observation = NetworkResponseObservation(it.request.url, it.headers.values("Date"), started, System.nanoTime())
+                    }
+                }
+            } catch (e: Exception) {
                 cont.resumeWithException(e)
                 return
             }
@@ -446,4 +483,48 @@ suspend fun Call.await(): HttpResult = suspendCancellableCoroutine { cont ->
         override fun onFailure(call: Call, e: IOException) = cont.resumeWithException(e)
     })
     cont.invokeOnCancellation { runCatching { cancel() } }
+}
+
+/** Presentation freshness only; never an auth, PIN, file or playback capability. */
+internal class ObservedResponseUnavailable : IOException("Saved observation time unavailable")
+internal data class ObservedRawResponse(val text: String, val clock: ObservedResponseClock?)
+internal class NetworkResponseObservation(private val url: HttpUrl, private val dates: List<String>, private val started: Long, private val received: Long) {
+    fun clock(expected: HttpUrl): ObservedResponseClock {
+        if (url != expected || dates.size != 1 || received < started) throw ObservedResponseUnavailable()
+        val raw = dates.single()
+        val formatter = java.time.format.DateTimeFormatter.ofPattern("EEE, dd MMM uuuu HH:mm:ss 'GMT'", java.util.Locale.US).withResolverStyle(java.time.format.ResolverStyle.STRICT)
+        val date = try { java.time.LocalDateTime.parse(raw, formatter) } catch (_: Exception) { throw ObservedResponseUnavailable() }
+        if (formatter.format(date) != raw) throw ObservedResponseUnavailable()
+        val rtt = (received - started) / 1_000_000L + 1L
+        if (rtt !in 1..120_000L) throw ObservedResponseUnavailable()
+        val serverDate = date.toInstant(java.time.ZoneOffset.UTC).toEpochMilli()
+        return ObservedResponseClock(serverDate + 1000L + rtt, received, serverDate)
+    }
+    override fun toString() = "NetworkResponseObservation(opaque)"
+}
+class ObservedResponseClock internal constructor(private val upperAtReceipt: Long, private val received: Long, private val serverDate: Long) {
+    fun upperMillis(now: Long = System.nanoTime()): Long {
+        if (now < received) throw ObservedResponseUnavailable()
+        return upperAtReceipt + (now - received) / 1_000_000L
+    }
+    fun remainingMillis(expires: Long): Long = expires - upperMillis()
+    /** Absolute monotone deadline from the actual receipt anchor, never adoption time. */
+    internal fun deadlineNanos(expires: Long): Long {
+        val budget = expires - upperAtReceipt
+        if (budget <= 0 || budget > 600_000L) throw ObservedResponseUnavailable()
+        return received + budget * 1_000_000L
+    }
+    internal fun predates(previous: ObservedResponseClock): Boolean = serverDate < previous.serverDate
+    override fun toString() = "ObservedResponseClock(presentation)"
+}
+private fun boundedObservedBody(response: Response): String {
+    val source = response.body?.source() ?: throw ObservedResponseUnavailable()
+    val buffer = okio.Buffer()
+    val limit = 4L * 1024 * 1024
+    while (buffer.size <= limit) {
+        val count = source.read(buffer, minOf(8192L, limit + 1L - buffer.size))
+        if (count == -1L) break
+    }
+    if (buffer.size > limit) throw ObservedResponseUnavailable()
+    return java.nio.charset.StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT).onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(buffer.readByteArray())).toString()
 }

@@ -15,8 +15,25 @@ import kotlinx.coroutines.ensureActive
 // it against each library's access list and a kids profile's rating caps.
 
 /** `GET /api/library/libraries`: the libraries this profile may browse. */
-suspend fun ApiClient.libraries(): List<LibraryInfo> =
-    sendList("GET", "/api/library/libraries", mapOf("profileId" to profileId))
+suspend fun ApiClient.libraries(expectedContext: Long = ProfileDataContext.current, strict: Boolean = false): List<LibraryInfo> {
+    val query = librariesQuery(expectedContext)
+    if (!strict) return sendList("GET", "/api/library/libraries", query, expectedContext = expectedContext)
+    val raw = sendRaw("GET", "/api/library/libraries", query, expectedContext = expectedContext)
+    currentCoroutineContext().ensureActive(); ProfileDataContext.requireCurrent(expectedContext)
+    return decodeOwnedLibraries(raw)
+}
+internal fun ApiClient.librariesQuery(expected: Long): Map<String, String> = inContext(expected) { mapOf("profileId" to profileId) }
+internal fun decodeOwnedLibraries(raw: String): List<LibraryInfo> {
+    val rows = ApiJson.parseToJsonElement(raw) as? JsonArray ?: error("Invalid library response")
+    return rows.map { value ->
+        val row = value as? JsonObject ?: error("Invalid library row")
+        for (key in listOf("id", "name")) {
+            val text = (row[key] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: error("Invalid library identity")
+            require(text.isNotBlank())
+        }
+        ApiJson.decodeFromJsonElement<LibraryInfo>(row)
+    }
+}
 
 /**
  * One page of a library's titles, sorted and filtered by the server. `cards` asks for the light

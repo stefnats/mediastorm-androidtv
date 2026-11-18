@@ -55,12 +55,23 @@ fun BrowseActions(model: ListGridModel) {
     val active = selected()
     val operations = remember(model, active) { CustomListOperations(model.dataContext, selected = selected) }
     DisposableEffect(operations) { onDispose { operations.close() } }
+    var savedFeedMenu by remember(model) { mutableStateOf(false) }
     var sorting by remember { mutableStateOf(false) }
     var managing by remember(operations) { mutableStateOf(false) }
     var renaming by remember(operations) { mutableStateOf(false) }
     var deleting by remember(operations) { mutableStateOf(false) }
     val list = model.list
 
+    if (list == BrowseList.ContinueWatching) Box {
+        IconButton(onClick = { if (selected()) savedFeedMenu = true }) { Icon(Icons.Filled.MoreVert, "More") }
+        DropdownMenu(expanded = savedFeedMenu, onDismissRequest = { savedFeedMenu = false }) {
+            DropdownMenuItem(text = { Text("Browse saved Continue Watching") }, onClick = {
+                val accepted = model.openSavedWatching(requireNotNull(scope.coroutineContext[kotlinx.coroutines.Job]), selected)
+                savedFeedMenu = false
+                if (accepted != null) com.strmr.tv.api.ApiClient.inContext(model.dataContext) { navigator.openList(accepted) }
+            })
+        }
+    }
     if (list.offersRandom) {
         IconButton(onClick = {
             model.pickRandom { link ->
@@ -75,7 +86,7 @@ fun BrowseActions(model: ListGridModel) {
             else Icon(Icons.Filled.Casino, "Random")
         }
     }
-    if (list.sorts.isNotEmpty() && (list != BrowseList.Hidden && list != BrowseList.LovedStored || model.originalLanguageFilterSupported)) {
+    if (list.sorts.isNotEmpty() && (list != BrowseList.Hidden && list != BrowseList.LovedStored && list !is BrowseList.CollectionCached && list !is BrowseList.ContinueWatchingCached || model.originalLanguageFilterSupported)) {
         Box {
             IconButton(onClick = { sorting = true }) { Icon(Icons.AutoMirrored.Filled.Sort, "Sort") }
             DropdownMenu(expanded = sorting, onDismissRequest = { sorting = false }) {

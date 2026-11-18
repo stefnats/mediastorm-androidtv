@@ -15,12 +15,47 @@ sealed class BrowseList {
     data class Custom(val id: String, val name: String) : BrowseList()
     data object Watchlist : BrowseList()
     data object ContinueWatching : BrowseList()
+    /** Explicit saved-feed page; acceptance captures the old page before navigation hides it. */
+    class ContinueWatchingCached private constructor(val originalContext: Long) : BrowseList() {
+        private var originalPool: Triple<String,String,String>? = null
+        private var deadline = Long.MAX_VALUE
+        private var lastClock: com.strmr.tv.api.ObservedResponseClock? = null
+        @Synchronized internal fun live(): Boolean = originalPool == null || System.nanoTime() < deadline
+        /** The entry, including replacement page models, retains its first observation. */
+        @Synchronized internal fun accept(observation: CachedWatchingObservation): Long {
+            val tuple = Triple(observation.id, observation.observedAt, observation.expiresAt)
+            val remaining = observation.clock.remainingMillis(observation.expiresMillis)
+            if (!live() || originalPool?.let { it != tuple } == true || lastClock?.let { observation.clock.predates(it) } == true ||
+                remaining <= 0 || remaining > 600_000L || observation.observedMillis > observation.clock.upperMillis() || observation.expiresMillis-observation.observedMillis > 600_000L) throw ManagementPageFailure()
+            val boundedDeadline = minOf(deadline, observation.clock.deadlineNanos(observation.expiresMillis))
+            if (System.nanoTime() >= boundedDeadline) throw ManagementPageFailure()
+            deadline = boundedDeadline
+            if (originalPool == null) originalPool = tuple
+            lastClock = observation.clock
+            return deadline
+        }
+        companion object {
+            fun open(expected: Long, producer: kotlinx.coroutines.Job, selected: () -> Boolean): ContinueWatchingCached? = try {
+                com.strmr.tv.api.ApiClient.inContext(expected) { if (!producer.isActive || !selected()) null else ContinueWatchingCached(expected) }
+            } catch (_: kotlinx.coroutines.CancellationException) { null }
+        }
+    }
     /** Titles hidden from this profile ([com.strmr.tv.library.HiddenItemsStore]), where they can be unhidden. */
     data object Hidden : BrowseList()
     /** Titles the server keeps resolved until they are removed. */
     data object PermanentPrequeue : BrowseList()
     /** Complete visible saved Love ratings, separate from the existing enriched Loved view. */
     data object LovedStored : BrowseList()
+    /** Explicit cache-only collection browse. The entry epoch is correlation, not permission. */
+    class CollectionCached private constructor(val id: Int, val name: String, val originalContext: Long) : BrowseList() {
+        companion object {
+            fun open(ref: com.strmr.tv.api.CollectionRef, expected: Long, producer: kotlinx.coroutines.Job, selected: () -> Boolean): CollectionCached? = try {
+                com.strmr.tv.api.ApiClient.inContext(expected) {
+                    if (ref.id <= 0 || !producer.isActive || !selected()) null else CollectionCached(ref.id, ref.name, expected)
+                }
+            } catch (_: kotlinx.coroutines.CancellationException) { null }
+        }
+    }
     /** Movies and shows together when the kind is null. */
     data class TopTen(val kind: BrowseKind? = null) : BrowseList()
     data class Trending(val kind: BrowseKind) : BrowseList()
@@ -55,9 +90,11 @@ sealed class BrowseList {
             is Custom -> name
             Watchlist -> "Watchlist"
             ContinueWatching -> "Continue Watching"
+            is ContinueWatchingCached -> "Saved Continue Watching"
             Hidden -> "Hidden"
             PermanentPrequeue -> "Permanent Prequeue"
             LovedStored -> "Saved Love Ratings"
+            is CollectionCached -> name
             is TopTen -> when (kind) { null -> "Top 10 Today"; BrowseKind.MOVIES -> "Top 10 Movies"; BrowseKind.SHOWS -> "Top 10 Shows" }
             is Trending -> if (kind == BrowseKind.MOVIES) "Trending Movies" else "Trending Shows"
             PopularOnServer -> "Popular on This Server"
@@ -102,9 +139,11 @@ sealed class BrowseList {
             is Custom -> mapOf("source" to "custom-list", "listId" to id)
             Watchlist -> mapOf("source" to "watchlist")
             ContinueWatching -> mapOf("source" to "continue-watching")
+            is ContinueWatchingCached -> mapOf("source" to "continue-watching-cached")
             Hidden -> mapOf("source" to "hidden")
             PermanentPrequeue -> mapOf("source" to "permanent-prequeue")
             LovedStored -> mapOf("source" to "loved-stored")
+            is CollectionCached -> mapOf("source" to "collection-cached", "collectionId" to id.toString())
             is TopTen -> mapOf("source" to "top-ten") + (kind?.let { mapOf("mediaType" to it.mediaType) } ?: emptyMap())
             is Trending -> mapOf("source" to "trending", "mediaType" to kind.mediaType)
             PopularOnServer -> mapOf("source" to "popular-on-server")
@@ -183,6 +222,7 @@ data class WatchlistItem(
 sealed interface BrowseEntry {
     data class TitleEntry(val title: Title, val storedLove: StoredLoveRow? = null) : BrowseEntry
     data class ItemEntry(val item: WatchlistItem) : BrowseEntry
+    data class CachedWatchingEntry(val item: CachedWatchingItem) : BrowseEntry
     data class WatchingEntry(val item: com.strmr.tv.api.ContinueWatchingItem) : BrowseEntry
     data class LibraryItemEntry(val entry: LibraryEntry) : BrowseEntry
 }
@@ -194,6 +234,8 @@ data class StoredLoveRow(val rank: Int, val updatedAt: String)
 data class BrowsePage(val entries: List<BrowseEntry>, val total: Int, val genres: List<String> = emptyList(), val letters: List<String> = emptyList(),
     /** Explicit support for complete stored-list filtering before server pagination. */
     val originalLanguageFilterSupported: Boolean = false,
+    val collection: CachedCollectionObservation? = null,
+    val watching: CachedWatchingObservation? = null,
 ) {
     /**
      * The list's size once [fetched] items have been read, this page's included. Servers return
@@ -209,4 +251,20 @@ data class BrowsePage(val entries: List<BrowseEntry>, val total: Int, val genres
 data class CustomList(val id: String, val name: String, val itemCount: Int? = null) {
     /** The reserved "Set Aside" list: titles parked out of Continue Watching. */
     val isSetAside: Boolean get() = name.trim().equals("Set Aside", ignoreCase = true)
+}
+
+/** Provider collection-pool observation only; neither an immutable language view nor a grant. */
+data class CachedCollectionObservation(val id: Int, val name: String, val metadataLanguage: String, val observedAt: String, val expiresAt: String) {
+    val observedMillis: Long get() = java.time.OffsetDateTime.parse(observedAt).toInstant().toEpochMilli()
+    val expiresMillis: Long get() = java.time.OffsetDateTime.parse(expiresAt).toInstant().toEpochMilli()
+}
+
+/** Exact saved history coordinates; none of these fields is a mutation receipt. */
+data class CachedWatchingNumbering(val seriesId: String, val ordering: String?)
+data class CachedWatchingEpisode(val seasonNumber: Int, val episodeNumber: Int, val absoluteEpisodeNumber: Int?, val episodeId: String?, val itemId: String?, val tvdbId: String?, val title: String?, val airDate: String?, val airDateTimeUTC: String?, val numbering: CachedWatchingNumbering?)
+data class CachedWatchingItem(val seriesId: String, val seriesTitle: String, val mediaType: String, val year: Int?, val externalIds: Map<String,String>, val updatedAt: String, val nextEpisode: CachedWatchingEpisode?, val lastWatched: CachedWatchingEpisode?, val resume: com.strmr.tv.api.ResumeState?, val percentWatched: Double?, val resumePercent: Double?)
+data class CachedWatchingObservation(val id: String, val observedAt: String, val expiresAt: String, val clock: com.strmr.tv.api.ObservedResponseClock) {
+    val observedMillis get() = java.time.OffsetDateTime.parse(observedAt).toInstant().toEpochMilli()
+    val expiresMillis get() = java.time.OffsetDateTime.parse(expiresAt).toInstant().toEpochMilli()
+    fun samePool(other: CachedWatchingObservation) = id == other.id && observedAt == other.observedAt && expiresAt == other.expiresAt
 }

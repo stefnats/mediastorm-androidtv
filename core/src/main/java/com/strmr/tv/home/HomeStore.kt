@@ -345,7 +345,7 @@ class HomeStore internal constructor(
         // The home screen's rows follow the All view's load (and its Continue Watching fetch).
         if (view == HomeViews.ALL) {
             check(gen)
-            access.homeLoaded(launcherItems, settings.hideWatched)
+            access.homeLoaded(launcherItems, settings.hideWatched, dataContext)
         }
         // Nothing to show at all: the page shows the error instead of a column of failed rows.
         loadError = if (slots.none { it is HomeSlot.Shelf }) failure?.vodDenial?.message ?: failure?.let { "Unable to load Home rows. Try again." } else null
@@ -475,7 +475,7 @@ internal interface HomeStoreAccess {
     fun ordered(plan: List<PlannedShelf>): List<PlannedShelf>
     fun hiddenShelf(id: String): Boolean
     fun log(warning: Boolean, message: String)
-    fun homeLoaded(items: List<ContinueWatchingItem>?, hideWatched: Boolean)
+    fun homeLoaded(items: List<ContinueWatchingItem>?, hideWatched: Boolean, expected: Long)
 }
 
 private object ServerHomeStoreAccess : HomeStoreAccess {
@@ -495,5 +495,5 @@ private object ServerHomeStoreAccess : HomeStoreAccess {
     override fun ordered(plan: List<PlannedShelf>) = HomeLayoutStore.ordered(plan) { it.id }
     override fun hiddenShelf(id: String) = HomeLayoutStore.isHidden(id)
     override fun log(warning: Boolean, message: String) { if (warning) AppLog.w("Home", message) else AppLog.i("Home", message) }
-    override fun homeLoaded(items: List<ContinueWatchingItem>?, hideWatched: Boolean) = com.strmr.tv.launcher.LauncherSync.homeLoaded(items, hideWatched)
+    override fun homeLoaded(items: List<ContinueWatchingItem>?, hideWatched: Boolean, expected: Long) = com.strmr.tv.launcher.LauncherSync.homeLoaded(items, hideWatched, expected)
 }

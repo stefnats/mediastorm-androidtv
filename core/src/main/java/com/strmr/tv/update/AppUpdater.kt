@@ -68,7 +68,7 @@ object AppUpdater {
     /** From App.onCreate: clears downloads of builds now installed, starts the periodic check. */
     fun start() {
         dir.listFiles()?.filter { (it.nameWithoutExtension.toIntOrNull() ?: 0) <= AppBuild.VERSION_CODE }?.forEach { it.delete() }
-        AppForeground.onLeft = ::onLeftApp
+        AppForeground.onLeft(this, ::onLeftApp)
         if (AppBuild.DEBUG || loop != null) return
         loop = scope.launch {
             while (isActive) {

@@ -4,7 +4,7 @@ import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.ApiError
 import com.strmr.tv.api.DetailsTarget
 import com.strmr.tv.library.ProfileDataContext
-import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -68,6 +68,8 @@ class TitleRatingEditor(
     private val gateway: TitleRatingGateway,
     initialRating: TitleRatingReply? = null,
     private val receiptReloadHint: String? = null,
+    private val parent: Job? = null,
+    private val selectionCurrent: () -> Boolean = { true },
     private val onSaved: () -> Unit = TitleRatingChanges::saved,
 ) {
     private val _state = MutableStateFlow(TitleRatingState())
@@ -75,8 +77,24 @@ class TitleRatingEditor(
     private var deliveredInitial = initialRating
     private var closed = false
     private var busy = false
-    fun isCurrent() = !closed && gateway.isCurrent()
-    fun close() { closed = true }
+    private val jobs = mutableSetOf<Job>()
+    fun isCurrent() = !closed && parent?.isActive != false && selectionCurrent() && gateway.isCurrent()
+    fun close() {
+        closed = true
+        jobs.toList().forEach { it.cancel() }
+    }
+    /** Register real producer children, including under a NonCancellable caller. */
+    private suspend fun <T> owned(action: suspend () -> T): T = coroutineScope {
+        currentCoroutineContext().ensureActive()
+        checkCurrent()
+        val child = async(context = parent ?: requireNotNull(currentCoroutineContext()[Job]), start = CoroutineStart.LAZY) {
+            currentCoroutineContext().ensureActive()
+            checkCurrent()
+            action().also { currentCoroutineContext().ensureActive(); checkCurrent() }
+        }
+        jobs += child
+        try { child.start(); child.await() } finally { jobs -= child; child.cancel() }
+    }
     private fun checkCurrent() { if (!isCurrent()) throw CancellationException("Rating context changed") }
 
     suspend fun load() {
@@ -86,7 +104,7 @@ class TitleRatingEditor(
         busy = true
         _state.value = TitleRatingState()
         try {
-            val reply = deliveredInitial?.also { deliveredInitial = null } ?: gateway.read(target)
+            val reply = deliveredInitial?.also { deliveredInitial = null } ?: owned { gateway.read(target) }
             checkCurrent()
             _state.value = TitleRatingState(rating = PersonalRating.from(reply.rating), loading = false)
         } catch (error: CancellationException) { throw error
@@ -105,7 +123,7 @@ class TitleRatingEditor(
         val previous = _state.value.rating
         _state.value = TitleRatingState(rating = previous, loading = false, saving = true)
         try {
-            val reply = gateway.write(target, value)
+            val reply = owned { gateway.write(target, value) }
             checkCurrent()
             check(PersonalRating.from(reply.rating) == value) { "Unexpected personal rating" }
             _state.value = TitleRatingState(rating = value, loading = false)

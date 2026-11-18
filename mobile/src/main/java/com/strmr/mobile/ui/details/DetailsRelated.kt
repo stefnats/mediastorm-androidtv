@@ -55,8 +55,17 @@ import com.strmr.tv.ui.details.DetailsModel
  * More Like This and Cast, opening details or a person page. A kids profile's cards don't open
  * anything, as on the TV and iPhone apps.
  */
-fun LazyListScope.relatedRows(model: DetailsModel) {
+fun LazyListScope.relatedRows(model: DetailsModel, currentRoute: () -> Boolean = { true }) {
     model.title?.collection?.let { collection ->
+        item(key = "collection-browse") {
+            val navigator = LocalNavigator.current
+            val producer = requireNotNull(rememberCoroutineScope().coroutineContext[Job])
+            if (opensRelated()) androidx.compose.material3.TextButton(onClick = {
+                com.strmr.tv.home.BrowseList.CollectionCached.open(collection, model.dataContext, producer) {
+                    currentRoute() && model.title?.collection === collection && model.vodDenial == null
+                }?.let { navigator.push(Route.Grid(it)) }
+            }, modifier = Modifier.padding(horizontal = 16.dp)) { Text("Browse collection by original language") }
+        }
         if (model.collectionMovies.isNotEmpty()) item(key = "collection") { PosterRow("Part of ${collection.name}", model.collectionMovies, model.dataContext) }
     }
     if (model.similar.isNotEmpty()) item(key = "similar") { PosterRow("More Like This", model.similar.take(20), model.dataContext) }

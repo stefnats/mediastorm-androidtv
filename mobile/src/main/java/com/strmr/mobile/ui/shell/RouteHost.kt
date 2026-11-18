@@ -66,7 +66,7 @@ fun RouteScreen(route: Route) {
         is Route.SportsCompetition -> SportsCompetitionScreen(route.sport, route.league)
         Route.SportsPreferences -> SportsPreferencesScreen()
         is Route.SettingsPage -> SettingsPageScreen(route.key, route.title)
-        is Route.RecordingDetail -> RecordingDetailScreen(route.id)
+        is Route.RecordingDetail -> RecordingDetailScreen(route.id, currentRoute)
         Route.RecordingRules -> RecordingRulesScreen()
         Route.Reminders -> com.strmr.mobile.ui.reminders.RemindersScreen()
     }

@@ -1,6 +1,12 @@
 package com.strmr.tv.ui.details
 
 import com.strmr.tv.app.AppSession
+import androidx.compose.runtime.DisposableEffect
+import com.strmr.tv.library.CustomListOperation
+import com.strmr.tv.library.CustomListSelectionKey
+import com.strmr.tv.library.TitleListAction
+import com.strmr.tv.library.TitleListOrigin
+import kotlinx.coroutines.Job
 import com.strmr.tv.ui.reminders.ReminderTarget
 import com.strmr.tv.ui.reminders.reminderChoices
 import com.strmr.tv.ui.reminders.remindersAllowed
@@ -97,7 +103,8 @@ fun EpisodesSection(
     onChooseVersion: (Episode) -> Unit,
     onToggleWatched: (Episode, Boolean) -> Unit,
     modifier: Modifier = Modifier,
-    onSourcePreference: (Episode) -> Unit = {},
+    currentPage: () -> Boolean = { true },
+    onSourcePreference: (Episode, CustomListOperation, TitleListOrigin) -> Unit = { _, _, _ -> },
     onReminder: (Episode) -> Unit = {},
 ) {
     val reminderProfile by AppSession.profile.collectAsState()
@@ -106,6 +113,13 @@ fun EpisodesSection(
     var menuFor by remember { mutableStateOf<Episode?>(null) }
     menuFor?.let { ep ->
         val desired = !model.isWatched(ep)
+        val preferenceOrigin = remember(model, CustomListSelectionKey(ep)) {
+            TitleListOrigin(model.target, model.dataContext, requireNotNull(scope.coroutineContext[Job])) {
+                currentPage() && model.seasons.any { season -> season.episodes.any { it === ep } }
+            }
+        }
+        DisposableEffect(preferenceOrigin) { onDispose { preferenceOrigin.close() } }
+        val dismissMenu = { preferenceOrigin.close(); menuFor = null }
         ChoiceDialog(
             title = "${ep.code} · ${ep.name}",
             message = rememberSourceHint(menuSource)?.description(),
@@ -113,12 +127,19 @@ fun EpisodesSection(
                 DialogChoice("Check sources again") { launchSourceRecheck(scope, model.target, ep) }.takeIf { menuSource != null && ep.numbering != null },
                 DialogChoice("Choose Version") { onChooseVersion(ep) }.takeIf { model.libraryVersions(ep).isNotEmpty() },
                 DialogChoice("Choose Source") { onChooseSource(ep) },
-                DialogChoice("Automatic source preference…") { onSourcePreference(ep) }.takeIf { contentLocalScopes(model.target, episode=ep).isNotEmpty() },
+                DialogChoice("Automatic source preference…", TitleListAction(preferenceOrigin, scope) { operation -> onSourcePreference(ep, operation, preferenceOrigin) }).takeIf { contentLocalScopes(model.target, episode=ep).isNotEmpty() },
                 DialogChoice("Remind me…") { onReminder(ep) }.takeIf { remindersAllowed(reminderProfile) && reminderChoices(ReminderTarget(model.target,ep)).isNotEmpty() },
                 DialogChoice(if (desired) "Mark as Watched" else "Mark as Unwatched") { onToggleWatched(ep, desired) },
                 DialogChoice("Cancel") {},
-            ),
-            onDismiss = { menuFor = null },
+            ).map { choice -> DialogChoice(choice.label) {
+                if (menuFor === ep) {
+                    val action = choice.action
+                    if (action is TitleListAction) action.accept()?.let { action.commit(it, dismissMenu) }
+                    else { dismissMenu(); action() }
+                }
+            } },
+            dismissOnChoice = false,
+            onDismiss = dismissMenu,
         )
     }
     val seasons = model.visibleSeasons

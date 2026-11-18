@@ -2,6 +2,7 @@ package com.strmr.tv.ui.details
 
 import kotlinx.coroutines.Job
 import com.strmr.tv.library.TitleListOrigin
+import com.strmr.tv.library.TitleListAction
 import com.strmr.tv.app.AppSession
 import com.strmr.tv.ui.reminders.ReminderTarget
 import com.strmr.tv.ui.reminders.ReminderDialog
@@ -113,7 +114,7 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
     var more by remember(model,actionGeneration) { mutableStateOf(false) }
     var customizingButtons by remember { mutableStateOf(false) }
     var episodeOrder by remember { mutableStateOf(false) }
-    var localPreferenceScopes by remember { mutableStateOf<List<ContentLocalScope>?>(null) }
+    var localPreferenceRequest by remember(model, actionGeneration) { mutableStateOf<ContentLocalRequest?>(null) }
     var reminderTarget by remember { mutableStateOf<ReminderTarget?>(null) }
     val navigator = com.strmr.tv.ui.LocalNavigator.current
     val actions = com.strmr.tv.library.TitleActions.changes
@@ -243,12 +244,18 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
                                 scope.launch { watchedOperations.run(operation) { model.applyWatchForUi(selection) } }
                             } }
                         },
-                        onSourcePreference = { ep -> localPreferenceScopes = contentLocalScopes(target, episode = ep).takeIf { it.isNotEmpty() } },
+                        currentPage = currentPage,
+                        onSourcePreference = { ep, operation, origin ->
+                            ContentLocalRequest.capture(target, contentLocalScopes(target, episode = ep), operation, origin, { localPreferenceRequest }) {
+                                currentPage() && model.accessGeneration == actionGeneration && model.target === target &&
+                                    model.seasons.any { season -> season.episodes.any { it === ep } }
+                            }?.let { localPreferenceRequest = it }
+                        },
                         onReminder = { ep -> reminderTarget = ReminderTarget(target,ep) },
                         modifier = Modifier.padding(top = 24.dp),
                     )
                 }
-                RelatedRows(model, Modifier.padding(top = 24.dp, bottom = 48.dp))
+                RelatedRows(model, Modifier.padding(top = 24.dp, bottom = 48.dp), currentPage)
             }
         }
         }
@@ -269,14 +276,22 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
             DialogChoice("Episode Order: ${model.currentOrdering?.name ?: "Default"}…") { episodeOrder = true }
         } else null
         DetailsMoreMenu(target, listOrigin, scope, moved, order, onCustomize = { customizingButtons = true }, onHidden = { if (currentPage()) navigator.close() }, onDismiss = { more = false },
-            sourcePreference = contentLocalScopes(target, model.currentSeason).takeIf { it.isNotEmpty() }?.let { targets ->
-                DialogChoice("Automatic source preference…") { localPreferenceScopes = targets }
+            sourcePreference = model.currentSeason.let { season ->
+                contentLocalScopes(target, season).takeIf { it.isNotEmpty() }?.let { targets ->
+                    DialogChoice("Automatic source preference…", TitleListAction(listOrigin, scope) { operation ->
+                        ContentLocalRequest.capture(target, targets, operation, listOrigin, { localPreferenceRequest }) {
+                            currentPage() && model.accessGeneration == actionGeneration && model.target === target && model.currentSeason === season
+                        }?.let { localPreferenceRequest = it }
+                    })
+                }
             }, reminder = ReminderTarget(target).takeIf { remindersAllowed(reminderProfile) && reminderChoices(it).isNotEmpty() }?.let { value ->
                 DialogChoice("Remind me…") { reminderTarget = value }
             })
     }
-    localPreferenceScopes?.let { targets ->
-        ContentLocalPreferenceDialog(targets, expectedContext = model.dataContext, onSaved = { model.sourcePreferenceChanged(); prequeueTracks.clear() }, onDismiss = { localPreferenceScopes = null })
+    localPreferenceRequest?.let { request ->
+        ContentLocalPreferenceDialog(request,
+            onSaved = { request.publishIfSelected({ localPreferenceRequest }) { model.sourcePreferenceChanged(); prequeueTracks.clear() } },
+            onDismiss = { request.dismissIfSelected({ localPreferenceRequest }) { localPreferenceRequest = null } })
     }
     reminderTarget?.let { value -> ReminderDialog(value,model.dataContext,reloadTitle={model.reloadForReminder()},onDismiss={reminderTarget=null}) }
     if (episodeOrder) EpisodeOrderDialog(model, scope, onDismiss = { episodeOrder = false })

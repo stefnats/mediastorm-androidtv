@@ -22,7 +22,7 @@ fun titleSourceKey(title: TitleSourceCoordinate): String = "${title.mediaType}|$
 
 /** Episode, library and action cards never inherit a general series check. */
 fun HomeCard.titleSourceCoordinate(): TitleSourceCoordinate? {
-    if (reloadStoredRating != null) return null
+    if (reloadStoredRating != null || cacheOnlyBrowseEntry) return null
     val value = target ?: return null
     if (episode != null || value.fromLibrary || value.titleId.isBlank()) return null
     return TitleSourceCoordinate(value.titleId, if (value.isMovie) "movie" else "series")

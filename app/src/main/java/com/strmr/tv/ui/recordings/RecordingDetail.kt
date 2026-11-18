@@ -69,6 +69,7 @@ fun RecordingDetail(
     modifier: Modifier = Modifier,
     plan: RecordingPlanItem? = null,
     onPlayPart:(Recording,RecordingPart)->Unit={_,_->},
+    timingState: com.strmr.tv.ui.recordings.RecordingsState? = null,
 ) {
     val originalContext=remember {ProfileDataContext.current}
     Column(
@@ -119,6 +120,20 @@ fun RecordingDetail(
                 Text(RecordingCaptureRules.endLabel(part,r),color=Muted)
                 if(RecordingCaptureRules.closed(part) && !RecordingCaptureRules.playable(r,part))Text("Playback is unavailable for this part.",color=Muted)
                 OutlinedButton(onClick={onPlayPart(r,part)},enabled=!busy && RecordingCaptureRules.playable(r,part)) {Text("Play part ${part.index} from start")}
+                timingState?.let { state ->
+                    val timingAction = state.timingAction(r, part)
+                    state.timing(part)?.let { value ->
+                        Text(value.label(), color = Muted)
+                        value.observationLabel()?.let { Text(it, color = Muted) }
+                    }
+                    state.timingError(part)?.let { Text(it, color = RecordingRed) }
+                    if (state.timingBusy == part.index) Text("Reading timing information…", color = Muted)
+                    if (timingAction != null) {
+                        OutlinedButton(onClick = { state.readTiming(timingAction, false) }, enabled = !busy && state.timingBusy == null) { Text("Read saved timing") }
+                        OutlinedButton(onClick = { state.readTiming(timingAction, true) }, enabled = !busy && state.timingBusy == null) { Text("Inspect container duration") }
+                        Text("An inspection measures this closed part only. Estimates do not combine the parts or gaps.", color = Muted)
+                    }
+                }
             }}
         }
     }

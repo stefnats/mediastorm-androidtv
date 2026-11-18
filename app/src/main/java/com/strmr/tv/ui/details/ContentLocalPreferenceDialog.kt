@@ -12,14 +12,16 @@ import com.strmr.tv.ui.ChoiceDialog
 import com.strmr.tv.ui.DialogChoice
 
 @Composable
-fun ContentLocalPreferenceDialog(targets: List<ContentLocalScope>, expectedContext: Long, onSaved: () -> Unit, onDismiss: () -> Unit) {
+fun ContentLocalPreferenceDialog(request: com.strmr.tv.ui.details.ContentLocalRequest, onSaved: () -> Unit, onDismiss: () -> Unit) {
     val scope=rememberCoroutineScope()
-    val editor=remember(targets,expectedContext) { ContentLocalPreferences(scope,targets,expectedContext,onSaved) }
+    val editor=remember(request) { ContentLocalPreferences(scope,request,onSaved) }
     val state by editor.state.collectAsState()
+    val current = request.isCurrent()
+    LaunchedEffect(editor, current) { if (!current) editor.close() }
     LaunchedEffect(editor) { editor.load() }
-    LaunchedEffect(state.closed) { if (state.closed) onDismiss() }
+    LaunchedEffect(editor, state.closed) { if (state.closed) onDismiss() }
     DisposableEffect(editor) { onDispose { editor.close() } }
-    if (state.closed) return
+    if (state.closed || !current) return
     val detail=when {
         state.saving -> "Saving ${state.selected.label}..."
         state.loading -> "Loading source preferences..."

@@ -1,0 +1,6 @@
+{
+  "source": "mediastorm-continue-watching-cached-20261116/artifacts/contracts",
+  "manifestSha256": "77de7f4511edbac91279991a0a34a034c168a5bd34d7bab86cdd4f1272099c17",
+  "producerSha256": "79310504257b17f1876fc977749981a126377d0636eb50458dfdb0bf4e9c5f17",
+  "scope": "Exact Go HTTP response bytes. Does not demonstrate Android authenticated send or live provider access."
+}

@@ -88,6 +88,7 @@ data class HomeCard(
     /** Row context for the Unhide menu only; never playback or mutation authority. */
     val hiddenManagementEntry: Boolean = false,
     /** Explicit stored-row Rate action; original page receipt, not a backend edit grant. */
+    val cacheOnlyBrowseEntry: Boolean = false,
     val reloadStoredRating: (suspend (DetailsTarget, com.strmr.tv.library.CustomListOperation) -> Unit)? = null,
 ) {
     val target: DetailsTarget? get() = (link as? HomeLink.Details)?.target
@@ -150,6 +151,19 @@ data class HomeCard(
             )
         }
 
+        /** A presentation-only row: no inferred work kind, artwork, source or write receipt. */
+        fun from(item: CachedWatchingItem): HomeCard {
+            val episode = item.nextEpisode
+            return HomeCard(
+                id = item.seriesId,
+                link = HomeLink.Details(DetailsTarget(item.seriesId, item.seriesTitle, item.mediaType == "movie", item.year, item.externalIds["tmdb"], item.externalIds["imdb"], item.externalIds["tvdb"])),
+                title = item.seriesTitle,
+                subtitle = episode?.let { com.strmr.tv.api.episodeCode(it.seasonNumber, it.episodeNumber) + (it.title?.let { name -> " · $name" } ?: "") } ?: kindLine(item.year, item.mediaType == "movie"),
+                progress = item.resume?.let { if (it.eligible) it.fraction else 0f } ?: (((if (item.mediaType == "movie") item.percentWatched else item.resumePercent) ?: 0.0) / 100.0).toFloat(),
+                cacheOnlyBrowseEntry = true,
+            )
+        }
+
         fun from(item: WatchlistItem) = HomeCard(
             id = item.id,
             link = HomeLink.Details(
@@ -200,6 +214,7 @@ data class HomeCard(
             is BrowseEntry.TitleEntry -> from(entry.title)
             is BrowseEntry.ItemEntry -> from(entry.item)
             is BrowseEntry.WatchingEntry -> from(entry.item)
+            is BrowseEntry.CachedWatchingEntry -> from(entry.item)
             is BrowseEntry.LibraryItemEntry -> from(entry.entry)
         }
 

@@ -8,6 +8,10 @@ import com.strmr.tv.library.CustomListsStore
 import com.strmr.tv.library.ListsTabStore
 import com.strmr.tv.library.ProfileDataContext
 import com.strmr.tv.library.WatchlistStore
+import kotlinx.coroutines.async
+import kotlinx.coroutines.ensureActive
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
@@ -35,12 +39,47 @@ object PersonalArea {
 }
 
 /** Profile-local reads only; existing stores share and isolate their requests. */
-suspend fun refreshPersonalArea() {
-    val context = ProfileDataContext.current
+suspend fun refreshPersonalArea(context: Long = ProfileDataContext.current) {
+    ProfileDataContext.requireCurrent(context)
     coroutineScope {
-        launch { ProfileDataContext.requireCurrent(context); WatchlistStore.refresh() }
-        launch { ProfileDataContext.requireCurrent(context); CustomListsStore.refresh() }
-        launch { ProfileDataContext.requireCurrent(context); ListsTabStore.refresh() }
+        launch { ProfileDataContext.requireCurrent(context); WatchlistStore.refresh(expectedContext = context) }
+        launch { ProfileDataContext.requireCurrent(context); CustomListsStore.refresh(expectedContext = context) }
+        launch { ProfileDataContext.requireCurrent(context); ListsTabStore.refresh(context) }
     }
     ProfileDataContext.requireCurrent(context)
+}
+
+/** The real personal/list refresh button lifetime, before deferred effects or clicks. */
+class ProfileListRefresh(val context: Long, private val producer: kotlinx.coroutines.Job) {
+    private var closed = false
+    private var generation = 0L
+    private var job: kotlinx.coroutines.Job? = null
+    private var busy by androidx.compose.runtime.mutableStateOf(false)
+    private var failure by androidx.compose.runtime.mutableStateOf(false)
+    val isCurrent get() = !closed && producer.isActive && context == ProfileDataContext.current
+    val refreshing get() = isCurrent && busy
+    val failed get() = isCurrent && failure
+    fun close() { closed = true; generation++; job?.cancel(); job = null }
+    suspend fun refresh(read: suspend (Long) -> Unit): Unit = kotlinx.coroutines.coroutineScope {
+        if (!isCurrent || busy) return@coroutineScope
+        val ticket = ++generation
+        fun current() = isCurrent && ticket == generation
+        busy = true
+        val pending = async(producer, start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            try {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (!current()) throw kotlinx.coroutines.CancellationException("List refresh changed")
+                read(context)
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (current()) failure = false
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { if (current()) failure = true }
+            finally { if (current()) busy = false }
+        }
+        job = pending
+        try { pending.start(); pending.await() } finally {
+            pending.cancel()
+            if (job === pending) { job = null; if (current()) busy = false }
+        }
+    }
 }

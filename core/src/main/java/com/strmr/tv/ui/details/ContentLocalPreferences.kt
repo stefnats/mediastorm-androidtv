@@ -14,6 +14,7 @@ import com.strmr.tv.library.ProfileDataContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -93,7 +94,54 @@ data class ContentLocalEditorState(
     val closed: Boolean = false,
 )
 
-/** Owned by one dialog and identity generation. No successful write can retarget a new profile. */
+/** One accepted original request; scope signatures are correlation, never playback permission. */
+class ContentLocalRequest private constructor(
+    val target: DetailsTarget,
+    scopes: List<ContentLocalScope>,
+    private val owner: com.strmr.tv.player.PlaybackSessionContext,
+    internal val parent: Job,
+    private val selected: () -> Boolean,
+    private val currentRequest: () -> ContentLocalRequest?,
+) {
+    val scopes = scopes.toList()
+    val context get() = owner.epoch
+    private var closed = false
+    fun isCurrent() = !closed && parent.isActive && owner.isCurrent() && selected() && currentRequest() === this
+    fun close() { closed = true }
+    internal fun publish(action: () -> Unit): Boolean {
+        if (!isCurrent()) return false
+        return owner.use { if (!isCurrent()) false else { action(); true } }
+    }
+    fun publishIfSelected(current: () -> ContentLocalRequest?, action: () -> Unit): Boolean {
+        if (current() !== this) return false
+        return publish { if (current() === this) action() }
+    }
+    /** Retired original prompts may clear themselves, never a replacement request. */
+    fun dismissIfSelected(current: () -> ContentLocalRequest?, action: () -> Unit): Boolean {
+        if (current() !== this) return false
+        close()
+        action()
+        return true
+    }
+    companion object {
+        fun capture(
+            target: DetailsTarget,
+            scopes: List<ContentLocalScope>,
+            operation: com.strmr.tv.library.CustomListOperation,
+            origin: com.strmr.tv.library.TitleListOrigin,
+            currentRequest: () -> ContentLocalRequest?,
+            selected: () -> Boolean,
+        ): ContentLocalRequest? {
+            operation.requireTarget(target)
+            if (scopes.isEmpty() || currentRequest() != null || origin.target !== target ||
+                origin.context != operation.owner.epoch || !origin.selectionCurrent() || !selected()) return null
+            return ContentLocalRequest(target, scopes, operation.owner, origin.parent,
+                { origin.selectionCurrent() && selected() }, currentRequest)
+        }
+    }
+}
+
+/** Owned by one original dialog request. No successful write can retarget a new page/profile. */
 class ContentLocalPreferences internal constructor(
     private val scope: CoroutineScope,
     targets: List<ContentLocalScope>,
@@ -102,69 +150,97 @@ class ContentLocalPreferences internal constructor(
     private val write: suspend (ContentLocalScope, Boolean?, Long) -> ContentLocalPreference,
     private val onSaved: () -> Unit,
     private val expected: Long = contexts.value,
+    private val request: ContentLocalRequest? = null,
 ) {
-    constructor(scope: CoroutineScope, targets: List<ContentLocalScope>, expectedContext: Long, onSaved: () -> Unit) : this(scope, targets, ProfileDataContext.changes,
+    constructor(scope: CoroutineScope, request: ContentLocalRequest, onSaved: () -> Unit) : this(
+        scope, request.scopes, ProfileDataContext.changes,
         { target, context -> ApiClient.contentLocalPreference(target.id, context) },
-        { target, value, context -> ApiClient.saveContentLocalPreference(target.id, target.contentType, value, context) }, onSaved, expectedContext)
+        { target, value, context -> ApiClient.saveContentLocalPreference(target.id, target.contentType, value, context) },
+        onSaved, request.context, request,
+    )
     private val stateValue = MutableStateFlow(ContentLocalEditorState(targets.toList(), targets.first()))
     val state: StateFlow<ContentLocalEditorState> = stateValue
     private var task: Job? = null
     private var changed: Job? = null
     init { changed = scope.launch { contexts.first { it != expected }; close() } }
-    private fun current() = !stateValue.value.closed && contexts.value == expected
+    private fun current() = !stateValue.value.closed && contexts.value == expected &&
+        scope.coroutineContext[Job]?.isActive != false && request?.isCurrent() != false
+    private fun checkCurrent() {
+        if (!current()) throw CancellationException("Source preference selection changed")
+    }
+    private fun publish(action: () -> Unit) {
+        if (!current()) return
+        if (request == null) action() else request.publish(action)
+    }
+    private fun launch(action: suspend () -> Unit): Job =
+        scope.launch(request?.parent ?: requireNotNull(scope.coroutineContext[Job])) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            checkCurrent()
+            action()
+        }
 
     fun load() {
         if (!current() || task?.isActive == true) return
-        stateValue.value = stateValue.value.copy(loading=true,error=null)
-        task = scope.launch {
+        publish { stateValue.value = stateValue.value.copy(loading = true, error = null) }
+        task = launch {
             try {
                 val values = mutableMapOf<String, Boolean?>()
                 for (target in stateValue.value.scopes) {
+                    checkCurrent()
                     val preference = read(target, expected)
-                    if (!current()) return@launch
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    checkCurrent()
                     if (!preference.localSourcePreferenceSupported) {
-                        stateValue.value=stateValue.value.copy(loading=false,supported=false,error="Update the server to use title source preferences.")
+                        publish { stateValue.value = stateValue.value.copy(loading = false, supported = false, error = "Update the server to use title source preferences.") }
                         return@launch
                     }
-                    values[target.id]=preference.preferLocalFiles
+                    values[target.id] = preference.preferLocalFiles
                 }
-                if (current()) stateValue.value=stateValue.value.copy(loading=false,supported=true,values=values)
+                publish { stateValue.value = stateValue.value.copy(loading = false, supported = true, values = values) }
             } catch (e: CancellationException) { throw e
             } catch (_: Exception) {
-                if (current()) stateValue.value=stateValue.value.copy(loading=false,supported=false,error="Source preferences could not be loaded. Try again.")
+                publish { stateValue.value = stateValue.value.copy(loading = false, supported = false, error = "Source preferences could not be loaded. Try again.") }
             }
         }
     }
 
     fun select(target: ContentLocalScope) {
-        if (current() && !stateValue.value.saving && target in stateValue.value.scopes) stateValue.value=stateValue.value.copy(selected=target,error=null)
+        if (current() && !stateValue.value.saving && stateValue.value.scopes.any { it === target }) {
+            publish { stateValue.value = stateValue.value.copy(selected = target, error = null) }
+        }
     }
 
     fun choose(choice: LocalSourceChoice) {
-        val before=stateValue.value
+        val before = stateValue.value
         if (!current() || before.loading || before.saving || !before.supported || before.selected.id !in before.values) return
-        val selected=before.selected
-        stateValue.value=before.copy(saving=true,error=null)
-        task=scope.launch {
+        val selected = before.selected
+        publish { stateValue.value = before.copy(saving = true, error = null) }
+        task = launch {
             try {
-                val saved=write(selected,choice.preference,expected)
-                if (!current()) return@launch
+                checkCurrent()
+                val saved = write(selected, choice.preference, expected)
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                checkCurrent()
                 if (!saved.localSourcePreferenceSupported || saved.preferLocalFiles != choice.preference) {
-                    stateValue.value=stateValue.value.copy(saving=false,supported=false,error="The server did not confirm this source preference.")
+                    publish { stateValue.value = stateValue.value.copy(saving = false, supported = false, error = "The server did not confirm this source preference.") }
                     return@launch
                 }
-                stateValue.value=stateValue.value.copy(saving=false,values=stateValue.value.values+(selected.id to saved.preferLocalFiles))
-                onSaved()
+                publish {
+                    stateValue.value = stateValue.value.copy(saving = false, values = stateValue.value.values + (selected.id to saved.preferLocalFiles))
+                    onSaved()
+                }
                 close()
             } catch (e: CancellationException) { throw e
             } catch (_: Exception) {
-                if (current()) stateValue.value=stateValue.value.copy(saving=false,supported=false,error="The source preference could not be saved. Reload before trying again.")
+                publish { stateValue.value = stateValue.value.copy(saving = false, supported = false, error = "The source preference could not be saved. Reload before trying again.") }
             }
         }
     }
 
     fun close() {
-        stateValue.value=stateValue.value.copy(closed=true,saving=false)
-        task?.cancel();changed?.cancel()
+        stateValue.value = stateValue.value.copy(closed = true, saving = false)
+        request?.close()
+        task?.cancel()
+        changed?.cancel()
     }
 }

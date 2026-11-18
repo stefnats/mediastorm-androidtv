@@ -1,0 +1,5 @@
+{
+  "count": 5,
+  "producer": "TestRecordingPartTimingActualHTTPWire",
+  "scope": "actual synthetic HTTP/guarded service/FFprobe FD; injected auth, no login/provider claim"
+}

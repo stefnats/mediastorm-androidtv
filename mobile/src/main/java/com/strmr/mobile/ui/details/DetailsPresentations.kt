@@ -19,8 +19,10 @@ import kotlinx.coroutines.CoroutineScope
 fun DetailsPresentations(state: DetailsPageState, warm: WarmPrequeue?, scope: CoroutineScope, extras: DetailsActionContext, currentRoute: () -> Boolean, onHidden: () -> Unit) {
     val model = state.model
     state.reminderTarget?.let { target -> com.strmr.mobile.ui.reminders.ReminderDialog(target,model.dataContext,reloadTitle={model.reloadForReminder()},onDismiss={state.reminderTarget=null}) }
-    state.localPreferenceScopes?.let { targets ->
-        ContentLocalPreferenceDialog(targets, expectedContext = model.dataContext, onSaved = { model.sourcePreferenceChanged(); state.prequeueTracks.clear() }, onDismiss = { state.localPreferenceScopes = null })
+    state.localPreferenceRequest?.let { request ->
+        ContentLocalPreferenceDialog(request,
+            onSaved = { request.publishIfSelected({ state.localPreferenceRequest }) { model.sourcePreferenceChanged(); state.prequeueTracks.clear() } },
+            onDismiss = { request.dismissIfSelected({ state.localPreferenceRequest }) { state.localPreferenceRequest = null } })
     }
     if (state.more) DetailsMoreSheet(state, warm, scope, extras, currentRoute, onHidden)
     state.episodeMenu?.let { EpisodeMenuSheet(state, it, scope, extras, currentRoute) }

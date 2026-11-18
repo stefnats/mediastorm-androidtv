@@ -133,7 +133,7 @@ fun PageStack(content: @Composable () -> Unit) {
                     Page.RowOrder -> RowOrderSettings()
                     Page.TabOrder -> TabOrderSettings()
                     Page.SubtitleStyle -> SubtitleSettings()
-                    Page.Recordings -> RecordingsScreen(asPage = true)
+                    Page.Recordings -> RecordingsScreen(asPage = true, currentPage = { stack.lastOrNull() === page })
                     Page.Reminders -> com.strmr.tv.ui.reminders.RemindersScreen()
                     is Page.SportsGame -> SportsGameScreen(page.id)
                     is Page.SportsRace -> SportsRaceScreen(page.weekendId, page.sessionId)

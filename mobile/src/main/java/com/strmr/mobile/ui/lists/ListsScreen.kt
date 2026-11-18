@@ -43,6 +43,10 @@ import com.strmr.tv.ui.lists.TileSpec
 import com.strmr.tv.ui.lists.hubs
 import com.strmr.tv.ui.lists.personalTiles
 import com.strmr.tv.ui.lists.seeds
+import com.strmr.tv.ui.lists.ProfileListRefresh
+import androidx.compose.runtime.DisposableEffect
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
@@ -60,16 +64,21 @@ fun ListsScreen(asPage: Boolean) {
     val listContext by ProfileDataContext.changes.collectAsState()
     var naming by remember(listContext) { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
-    var refreshing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    suspend fun refresh() {
-        val lists = scope.async { runCatching { CustomListsStore.refresh() } }
-        val hidden = scope.async { runCatching { HiddenItemsStore.refresh() } }
-        val tab = scope.async { runCatching { ListsTabStore.refresh() } }
-        lists.await(); hidden.await(); tab.await()
+    val originalContext = listContext
+    val producer = requireNotNull(scope.coroutineContext[Job])
+    val refreshState = remember(originalContext, producer) { ProfileListRefresh(originalContext, producer) }
+    DisposableEffect(refreshState) { onDispose { refreshState.close() } }
+    val refreshing = refreshState.refreshing
+    suspend fun refresh() = refreshState.refresh { expected ->
+        coroutineScope {
+            val lists = async { CustomListsStore.refresh(expected) }
+            val hidden = async { HiddenItemsStore.refresh(expected) }
+            val tab = async { ListsTabStore.refresh(expected) }
+            lists.await(); hidden.await(); tab.await()
+        }
     }
-    // On every visit: lists made or changed elsewhere show up.
-    LaunchedEffect(Unit) { refresh() }
+    LaunchedEffect(originalContext) { refresh() }
 
     val continueWatching = ListsTabStore.continueWatching
     val loadedShelves = ListsTabStore.shelves
@@ -104,7 +113,7 @@ fun ListsScreen(asPage: Boolean) {
     ) { padding ->
         PullToRefreshBox(
             isRefreshing = refreshing,
-            onRefresh = { refreshing = true; scope.launch { refresh(); refreshing = false } },
+            onRefresh = { scope.launch { refresh() } },
             modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
             LazyColumn(
@@ -112,6 +121,9 @@ fun ListsScreen(asPage: Boolean) {
                 contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
+                if (refreshState.failed || ListsTabStore.loadError != null) item("load-error") {
+                    Text(ListsTabStore.loadError ?: "Could not refresh your lists. Try again.", modifier = Modifier.padding(horizontal = 16.dp))
+                }
                 item("for-you") { TileRow("For You", personalTiles(continueWatching, lists?.firstOrNull { it.isSetAside }, hiddenCount, hiddenShown)) }
                 if (lists != null) item("yours") {
                     TileRow("Your Lists", lists.filterNot { it.isSetAside }.map { TileSpec(BrowseList.Custom(it.id, it.name), count = it.itemCount) }) {

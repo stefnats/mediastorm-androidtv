@@ -44,13 +44,14 @@ fun ListsScreen() {
     // null is All: both kinds' rows.
     var kind by rememberSaveable { mutableStateOf<BrowseKind?>(null) }
     val listContext by ProfileDataContext.changes.collectAsState()
+    val originalContext = listContext
     var naming by remember(listContext) { mutableStateOf(false) }
     var choosingKind by remember { mutableStateOf(false) }
     // On every visit: lists made or changed elsewhere show up. Everything here is loaded with
     // the shell, so the rows draw at once and only update in place.
-    LaunchedEffect(Unit) { CustomListsStore.refresh() }
-    LaunchedEffect(Unit) { HiddenItemsStore.refresh() }
-    LaunchedEffect(Unit) { ListsTabStore.refresh() }
+    LaunchedEffect(originalContext) { CustomListsStore.refresh(originalContext) }
+    LaunchedEffect(originalContext) { HiddenItemsStore.refresh(originalContext) }
+    LaunchedEffect(originalContext) { ListsTabStore.refresh(originalContext) }
     val continueWatching = ListsTabStore.continueWatching
     val loadedShelves = ListsTabStore.shelves
     val shelves = loadedShelves.orEmpty()
@@ -67,6 +68,7 @@ fun ListsScreen() {
         contentPadding = PaddingValues(top = 12.dp, bottom = 40.dp),
         verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
+        ListsTabStore.loadError?.let { message -> item("load-error") { Text(message, modifier = Modifier.padding(horizontal = ContentMargin)) } }
         item("for-you") { TileRow("For You", personalTiles(continueWatching, lists?.firstOrNull { it.isSetAside }, hiddenCount, hiddenShown)) }
         if (lists != null) item("yours") {
             TileRow("Your Lists", lists.filterNot { it.isSetAside }.map { TileSpec(BrowseList.Custom(it.id, it.name), count = it.itemCount) }) {

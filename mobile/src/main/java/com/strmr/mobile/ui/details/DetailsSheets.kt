@@ -45,12 +45,12 @@ import com.strmr.mobile.ui.components.ActionSheet
 import com.strmr.mobile.ui.components.SheetAction
 import com.strmr.mobile.ui.components.SheetHeader
 import com.strmr.tv.ui.details.contentLocalScopes
-import com.strmr.tv.api.ApiClient
+import com.strmr.tv.ui.details.ContentLocalRequest
 import com.strmr.tv.api.Episode
-import com.strmr.tv.home.continueWatching
+import com.strmr.tv.home.DetailsMenuSnapshot
+import com.strmr.tv.home.loadDetailsMenuSnapshot
 import com.strmr.tv.library.CustomListsStore
 import com.strmr.tv.library.HiddenItemsStore
-import com.strmr.tv.library.SetAsideStore
 import com.strmr.tv.library.TitleActions
 import com.strmr.tv.player.WarmPrequeue
 import com.strmr.tv.ui.AppIcons
@@ -71,17 +71,23 @@ fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: Corout
     val target = model.target
     val listOrigin = remember(model, state) { TitleListOrigin(target, model.dataContext, requireNotNull(scope.coroutineContext[Job]), currentRoute) }
     DisposableEffect(listOrigin) { onDispose { listOrigin.close() } }
-    val rate = com.strmr.tv.ui.rememberRatingAction(target)
-    var inContinueWatching by remember { mutableStateOf(false) }
+    val rate = com.strmr.tv.ui.rememberRatingAction(target, listOrigin, scope)
+    var membership by remember(listOrigin) { mutableStateOf(DetailsMenuSnapshot()) }
     LaunchedEffect(listOrigin) {
-        SetAsideStore.refresh(listOrigin.context)
-        inContinueWatching = runCatching { ApiClient.continueWatching() }.getOrNull().orEmpty().any { it.isTitle(target) }
+        loadDetailsMenuSnapshot(target, listOrigin) { snapshot -> membership = snapshot }
     }
     val actions = buildList {
         if(remindersAllowed(reminderProfile) && reminderChoices(ReminderTarget(target)).isNotEmpty()) add(SheetAction("Remind me…", Icons.Outlined.Star) {state.reminderTarget=ReminderTarget(target)})
-        if (!target.fromLibrary) add(SheetAction("Rate for this profile…", Icons.Outlined.Star) { rate() })
-        contentLocalScopes(target, model.currentSeason).takeIf { it.isNotEmpty() }?.let { targets ->
-            add(SheetAction("Automatic source preference…", Icons.Outlined.Storage) { state.localPreferenceScopes = targets })
+        if (!target.fromLibrary) add(SheetAction("Rate for this profile…", Icons.Outlined.Star, action = rate))
+        model.currentSeason.let { season ->
+            contentLocalScopes(target, season).takeIf { it.isNotEmpty() }?.let { targets ->
+                val generation = model.accessGeneration
+                add(SheetAction("Automatic source preference…", Icons.Outlined.Storage, action = TitleListAction(listOrigin, scope) { operation ->
+                    ContentLocalRequest.capture(target, targets, operation, listOrigin, { state.localPreferenceRequest }) {
+                        currentRoute() && state.playbackCurrent && model.accessGeneration == generation && model.target === target && model.currentSeason === season
+                    }?.let { state.localPreferenceRequest = it }
+                }))
+            }
         }
         if (state.prequeueTracks.visible(warm)?.tracks != null) add(SheetAction("Audio & Subtitles", AppIcons.Waveform) { state.prequeueTracks.open = true })
         if (target.isMovie || state.activeEpisode != null) add(SheetAction("Choose Source", Icons.Outlined.Search) { state.sourcesFor = EpisodeTarget(state.activeEpisode) })
@@ -91,11 +97,11 @@ fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: Corout
         DetailsExtras.providers.forEach { addAll(it.moreActions(extras)) }
         add(SheetAction("Add to List…", Icons.AutoMirrored.Outlined.PlaylistAdd, action = TitleListAction(listOrigin, scope) { CustomListsStore.openPicking(target, it) }))
         if (!target.isMovie && model.seasons.isNotEmpty()) add(SheetAction("Watch State…", Icons.Outlined.Checklist) { state.watchState = true })
-        if (inContinueWatching) {
+        if (membership.inContinueWatching) {
             add(SheetAction("Set Aside", Icons.Outlined.PauseCircle, action = TitleListAction(listOrigin, scope) { TitleActions.setAside(target, it) }))
             add(SheetAction("Remove from Continue Watching", Icons.Outlined.RemoveCircleOutline, action = TitleListAction(listOrigin, scope) { TitleActions.hideFromContinueWatching(target, it) }))
         }
-        if (SetAsideStore.contains(target)) {
+        if (membership.inSetAside) {
             add(SheetAction("Remove from Set Aside", Icons.Outlined.PauseCircle, action = TitleListAction(listOrigin, scope) { TitleActions.removeFromSetAside(target, it) }))
         }
         if (model.offersOrderings) {
@@ -107,7 +113,12 @@ fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: Corout
             add(SheetAction("Hide from This Profile", Icons.Outlined.VisibilityOff, destructive = true, action = TitleListAction(listOrigin, scope) { if (TitleActions.hide(target, it)) it.publish(onHidden) }))
         }
     }
-    ActionSheet({ listOrigin.dismiss { state.more = false } }, header = { SheetHeader(target.name, model.metadataLine, target.posterUrl) }, actions = actions)
+    ActionSheet({ listOrigin.dismiss { state.more = false } }, header = {
+        Column {
+            SheetHeader(target.name, model.metadataLine, target.posterUrl)
+            membership.notice?.let { Text(it, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) }
+        }
+    }, actions = actions)
 }
 
 /**
@@ -130,8 +141,14 @@ fun EpisodeMenuSheet(state: DetailsPageState, episode: Episode, scope: Coroutine
         if (model.libraryVersions(episode).isNotEmpty()) add(SheetAction("Choose Version", Icons.Outlined.Storage) { state.versionsFor = EpisodeTarget(episode) })
         add(SheetAction("Choose Source", Icons.Outlined.Search) { state.sourcesFor = EpisodeTarget(episode) })
         if(remindersAllowed(reminderProfile) && reminderChoices(ReminderTarget(model.target,episode)).isNotEmpty()) add(SheetAction("Remind me…", Icons.Outlined.Star) {state.reminderTarget=ReminderTarget(model.target,episode)})
-        contentLocalScopes(model.target, episode=episode).takeIf { it.isNotEmpty() }?.let { targets ->
-            add(SheetAction("Automatic source preference…", Icons.Outlined.Storage) { state.localPreferenceScopes = targets })
+        contentLocalScopes(model.target, episode = episode).takeIf { it.isNotEmpty() }?.let { targets ->
+            val generation = model.accessGeneration
+            add(SheetAction("Automatic source preference…", Icons.Outlined.Storage, action = TitleListAction(watchedOrigin, scope) { operation ->
+                ContentLocalRequest.capture(model.target, targets, operation, watchedOrigin, { state.localPreferenceRequest }) {
+                    currentRoute() && state.playbackCurrent && model.accessGeneration == generation &&
+                        model.seasons.any { season -> season.episodes.any { it === episode } }
+                }?.let { state.localPreferenceRequest = it }
+            }))
         }
         if (sourceHint != null && episode.numbering != null) add(SheetAction("Check sources again", Icons.Outlined.Refresh) { launchSourceRecheck(scope, model.target, episode) })
         DetailsExtras.providers.forEach { addAll(it.episodeActions(extras, episode)) }

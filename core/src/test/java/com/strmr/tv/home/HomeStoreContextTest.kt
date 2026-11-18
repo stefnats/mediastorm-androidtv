@@ -36,7 +36,7 @@ class HomeStoreContextTest {
         override fun hiddenShelf(id: String) = false
         override fun layoutIdentity(): Any = Unit
         override fun log(warning: Boolean, message: String) { }
-        override fun homeLoaded(items: List<ContinueWatchingItem>?, hideWatched: Boolean) { launches++ }
+        override fun homeLoaded(items: List<ContinueWatchingItem>?, hideWatched: Boolean, expected: Long) { launches++ }
     }
     private suspend fun canceled(read: suspend () -> Unit) { try { read(); fail("Retired operation survived") } catch (_: CancellationException) { } }
     @Test fun `normal actual store publishes settings rows layout and guarded home handoff`() = runTest {

@@ -121,7 +121,7 @@ fun DetailsScreen(target: DetailsTarget, autoplay: Boolean, prewarmOnOpen: Boole
                     item(key = "loading") { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
                 }
             }
-            relatedRows(model)
+            relatedRows(model, currentRoute)
         }
         // The first item is the whole header (art, text, buttons): the bar turns solid once the
         // art has mostly scrolled under it, not when the header has gone.

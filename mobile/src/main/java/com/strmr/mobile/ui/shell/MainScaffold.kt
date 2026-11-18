@@ -56,7 +56,9 @@ fun MainScaffold() {
 
     LaunchedEffect(Unit) { MenuTabs.refresh(ApiClient.profileId) }
     LaunchedEffect(Unit) { WatchlistStore.refresh() }
-    LaunchedEffect(Unit) { ListsTabStore.refresh() }
+    val tabEpoch by com.strmr.tv.library.ProfileDataContext.changes.collectAsState()
+    val originalTabEpoch = tabEpoch
+    LaunchedEffect(originalTabEpoch) { ListsTabStore.refresh(originalTabEpoch) }
     LaunchedEffect(Unit) { runCatching { CustomListsStore.refresh() } }
     LaunchedEffect(Unit) { runCatching { BadgeSettings.refresh() } }
     // A hidden section (menu changed) falls back to Home.

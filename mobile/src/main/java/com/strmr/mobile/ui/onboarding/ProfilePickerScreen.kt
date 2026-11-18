@@ -99,7 +99,7 @@ fun ProfilePickerScreen() {
                 }
                 ListItem(
                     headlineContent = { Text("Use this profile automatically") },
-                    supportingContent = { Text("Open it at launch without asking") },
+                    supportingContent = { Text("Open PIN-free profiles at launch. Protected profiles still ask for their PIN.") },
                     trailingContent = {
                         Switch(checked = automatic, onCheckedChange = {
                             automatic = it

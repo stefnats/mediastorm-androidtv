@@ -35,17 +35,21 @@ class ListGridModel(
     val list: BrowseList,
     query: Map<String, String>,
     private val scope: CoroutineScope,
-    val dataContext: Long = ProfileDataContext.current,
+    val dataContext: Long = (list as? BrowseList.CollectionCached)?.originalContext ?: (list as? BrowseList.ContinueWatchingCached)?.originalContext ?: ProfileDataContext.current,
     private val readPage: (suspend (BrowseList, Int, Int, Map<String, String>, BrowseOptions, Long) -> BrowsePage)? = null,
     private val randomOffset: (Int) -> Int = { (0 until it).random() },
     private val clientIdentity: () -> String = { Config.clientId },
     private val ratingGateway: (Long) -> TitleRatingGateway = { expected -> ApiClient.inContext(expected) { ServerTitleRatingGateway() } },
     private val openRating: (TitleRatingEditor) -> Unit = TitleRatingPrompt::open,
     private val pageSize: Int = PAGE,
+    private val clockMillis: () -> Long = System::currentTimeMillis,
+    private val pageSelected: () -> Boolean = { true },
 ) {
     private val query = query.toMap()
     private val storedClient = if (list == BrowseList.LovedStored) ApiClient.inContext(dataContext) { clientIdentity() } else null
     val isCurrent get() = dataContext == ProfileDataContext.current &&
+        (list !is BrowseList.CollectionCached && list !is BrowseList.ContinueWatchingCached || scope.coroutineContext[Job]?.isActive == true) &&
+        (list !is BrowseList.ContinueWatchingCached || pageSelected()) &&
         (storedClient == null || storedClient == clientIdentity() && scope.coroutineContext[Job]?.isActive != false)
     private var generation = 0L
     private var selection by mutableLongStateOf(0)
@@ -63,7 +67,7 @@ class ListGridModel(
         get() = partState
         set(value) { if (isCurrent && value != partState) { partState = value; selection++; invalidateRows() } }
     private var publishedRatingVersion by mutableLongStateOf(TitleRatingChanges.generation.value)
-    private fun rowsCurrent() = list != BrowseList.LovedStored || publishedRatingVersion == TitleRatingChanges.generation.value
+    private fun rowsCurrent() = (list != BrowseList.LovedStored || publishedRatingVersion == TitleRatingChanges.generation.value) && (list !is BrowseList.ContinueWatchingCached || watchingLive())
     private var entryState by mutableStateOf<List<BrowseEntry>>(emptyList())
     var entries: List<BrowseEntry>
         get() = if (isCurrent && rowsCurrent()) entryState else emptyList()
@@ -75,6 +79,13 @@ class ListGridModel(
         private set(value) { totalState = value }
     var genres by mutableStateOf<List<String>>(emptyList()); private set
     var letters by mutableStateOf<List<String>>(emptyList()); private set
+    var collectionObservation by mutableStateOf<CachedCollectionObservation?>(null); private set
+    var watchingObservation by mutableStateOf<CachedWatchingObservation?>(null); private set
+    private var watchingExpiry: Job? = null
+    private fun watchingLive() = (list as? BrowseList.ContinueWatchingCached)?.live() != false
+    fun openSavedWatching(producer: Job, selected: () -> Boolean): BrowseList.ContinueWatchingCached? =
+        if (list != BrowseList.ContinueWatching || !isCurrent) null else BrowseList.ContinueWatchingCached.open(dataContext, producer, selected)
+
     private var languageSupport by mutableStateOf(false)
     private var hiddenLegacyMode: Boolean? = null
     val originalLanguageFilterSupported get() = isCurrent && shown.originalLanguageEligible && languageSupport
@@ -101,11 +112,12 @@ class ListGridModel(
             val requested = capture()
             return entries.mapIndexed { i, entry ->
                 val card = HomeCard.from(entry).let { if (ranked) it.ranked(i + 1) else if (list == BrowseList.Hidden) it.copy(hiddenManagementEntry = true) else it }
-                if (list == BrowseList.LovedStored && entry is BrowseEntry.TitleEntry && entry.storedLove != null) {
+                if (list is BrowseList.CollectionCached || list is BrowseList.ContinueWatchingCached) card.copy(cacheOnlyBrowseEntry = true)
+                else if (list == BrowseList.LovedStored && entry is BrowseEntry.TitleEntry && entry.storedLove != null) {
                     card.copy(reloadStoredRating = { target, operation -> refreshStoredRating(requested, entry, card, target, operation) })
                 } else card
             }
-                .filter { list == BrowseList.Hidden || list == BrowseList.LovedStored || it.target?.let(HiddenItemsStore::isHidden) != true }
+                .filter { list == BrowseList.Hidden || list == BrowseList.LovedStored || list is BrowseList.CollectionCached || list is BrowseList.ContinueWatchingCached || it.target?.let(HiddenItemsStore::isHidden) != true }
         }
 
     init {
@@ -118,13 +130,28 @@ class ListGridModel(
             }
         }
     }
+    fun pageSelectionChanged(selected: Boolean) {
+        if (list is BrowseList.ContinueWatchingCached && !selected) {
+            selection++; invalidateRows(); loadError = "Saved page changed. Reload this view."
+        }
+    }
     private fun invalidateRows() {
         pageReads.toList().forEach { it.cancel() }
+        watchingExpiry?.cancel(); watchingExpiry = null; watchingObservation = null
         generation++; randomGeneration++; picking = false
         entries = emptyList(); fetched = 0; total = null; loadError = null; blockedGeneration = null
-        loading = null; loadingFor = null; hiddenLegacyMode = null
+        loading = null; loadingFor = null; hiddenLegacyMode = null; collectionObservation = null
     }
-    private class Read(val key: Any, val generation: Long, val list: BrowseList, val options: BrowseOptions, val ratingVersion: Long?)
+    private class Read(
+        val key: Any,
+        val generation: Long,
+        val list: BrowseList,
+        val options: BrowseOptions,
+        val ratingVersion: Long?,
+    ) {
+        val seenCollectionIDs = mutableSetOf<String>()
+        val seenWatchingIDs = mutableSetOf<String>()
+    }
     private fun capture() = Read(reloadKey, generation, shown, options.copy(genres = options.genres.toSet(), originalLanguages = options.originalLanguages.toSet()), if (list == BrowseList.LovedStored) TitleRatingChanges.generation.value else null)
     private fun current(read: Read) = isCurrent && read.generation == generation && read.key == reloadKey && (read.ratingVersion == null || read.ratingVersion == TitleRatingChanges.generation.value)
     private suspend fun read(read: Read, limit: Int, offset: Int, extra: Map<String, String> = query): BrowsePage = coroutineScope {
@@ -135,10 +162,38 @@ class ListGridModel(
     private suspend fun readPageOwned(read: Read, limit: Int, offset: Int, extra: Map<String, String>): BrowsePage {
         currentCoroutineContext().ensureActive(); ProfileDataContext.requireCurrent(dataContext)
         if (!current(read)) throw CancellationException("List selection changed")
+        if (read.list is BrowseList.ContinueWatchingCached && !watchingLive()) throw ManagementPageFailure()
+        if (read.list is BrowseList.CollectionCached && collectionObservation?.let { it.expiresMillis <= clockMillis() } == true) throw ManagementPageFailure()
         val page = readPage?.invoke(read.list, limit, offset, extra, read.options, dataContext)
             ?: ApiClient.browsePage(read.list, limit, offset, extra, options = read.options, expectedContext = dataContext, hiddenLegacyMode = hiddenLegacyMode)
         currentCoroutineContext().ensureActive(); ProfileDataContext.requireCurrent(dataContext)
         if (!current(read)) throw CancellationException("List selection changed")
+        if (read.list is BrowseList.CollectionCached) {
+            val observed = page.collection ?: throw ManagementPageFailure()
+            if (!page.originalLanguageFilterSupported || observed.id != read.list.id || observed.expiresMillis <= clockMillis() || observed.observedMillis > clockMillis() ||
+                collectionObservation?.let { it != observed } == true || fetched > 0 && total != null && total != page.total) throw ManagementPageFailure()
+            val incoming = page.entries.map { HomeCard.from(it).id }
+            if (incoming.distinct().size != incoming.size || incoming.any { it in read.seenCollectionIDs }) throw ManagementPageFailure()
+            read.seenCollectionIDs.addAll(incoming)
+            collectionObservation = observed
+        }
+        if (read.list is BrowseList.ContinueWatchingCached) {
+            val observed = page.watching ?: throw ManagementPageFailure()
+            val remaining = observed.clock.remainingMillis(observed.expiresMillis)
+            if (!page.originalLanguageFilterSupported || remaining <= 0 || remaining > 600_000L || observed.observedMillis > observed.clock.upperMillis() || page.total !in 0..4096 ||
+                fetched > 0 && total != page.total || page.entries.any { it !is BrowseEntry.CachedWatchingEntry } ||
+                page.entries.size != (if (limit == 0) maxOf(0,page.total-offset) else minOf(limit,maxOf(0,page.total-offset)))) throw ManagementPageFailure()
+            val incoming = page.entries.map { (it as BrowseEntry.CachedWatchingEntry).item.let { row -> "${row.mediaType}|${row.seriesId}" } }
+            if (incoming.distinct().size != incoming.size || incoming.any { it in read.seenWatchingIDs }) throw ManagementPageFailure()
+            read.seenWatchingIDs.addAll(incoming)
+            val deadline = read.list.accept(observed)
+            watchingObservation = observed
+            watchingExpiry?.cancel()
+            watchingExpiry = scope.launch {
+                kotlinx.coroutines.delay(maxOf(1L,(deadline-System.nanoTime())/1_000_000L+1L))
+                if (isCurrent && !watchingLive()) { invalidateRows(); loadError = "Saved feed expired. Return to Continue Watching to update it." }
+            }
+        }
         if ((read.list == BrowseList.LovedStored || read.list.originalLanguageEligible && read.options.originalLanguageActive) && !page.originalLanguageFilterSupported) throw LanguageFilterUnavailable()
         if (read.list == BrowseList.Hidden) {
             val mode = !page.originalLanguageFilterSupported
@@ -150,10 +205,12 @@ class ListGridModel(
     private class LanguageFilterUnavailable : Exception("This server cannot apply the original language filter. Clear the filter or reload this list.")
     private fun failed(read: Read, error: Exception) {
         if (!current(read)) return
-        if (error is LanguageFilterUnavailable || error is ManagementPageFailure || read.list == BrowseList.Hidden || read.list == BrowseList.LovedStored) {
+        if (error is LanguageFilterUnavailable || error is ManagementPageFailure || read.list == BrowseList.Hidden || read.list == BrowseList.LovedStored || read.list is BrowseList.CollectionCached || read.list is BrowseList.ContinueWatchingCached) {
             // Preserve selected intent and its clear controls; never replace it with an unfiltered page.
             entries = emptyList(); fetched = 0; total = null; blockedGeneration = generation
-            loadError = error.vodDenial?.message ?: if (error is LanguageFilterUnavailable || error is ManagementPageFailure) error.message else "Unable to load this management view. Reload the list."
+            if (read.list is BrowseList.CollectionCached) collectionObservation = null
+            if (read.list is BrowseList.ContinueWatchingCached) { watchingObservation = null; watchingExpiry?.cancel() }
+            loadError = error.vodDenial?.message ?: if (read.list is BrowseList.ContinueWatchingCached) "Saved feed unavailable. Return to Continue Watching to update it." else if (read.list is BrowseList.CollectionCached) "Saved collection unavailable. Return to details to update it." else if (error is LanguageFilterUnavailable || error is ManagementPageFailure) error.message else "Unable to load this management view. Reload the list."
         } else if (entries.isEmpty()) loadError = error.vodDenial?.message ?: "Unable to load this list. Try again."
     }
 
@@ -166,6 +223,8 @@ class ListGridModel(
     suspend fun loadPage() {
         if (!isCurrent || blockedGeneration == generation || loading != null || total?.let { fetched >= it } == true) return
         val requested = capture(); loading = requested; loadingFor = requested.key
+        if (list is BrowseList.CollectionCached) requested.seenCollectionIDs.addAll(entries.map { HomeCard.from(it).id })
+        if (list is BrowseList.ContinueWatchingCached) requested.seenWatchingIDs.addAll(entries.map { (it as BrowseEntry.CachedWatchingEntry).item.let { row -> "${row.mediaType}|${row.seriesId}" } })
         try {
             val offset = fetched
             val quick = requested.list.quickPageQuery
@@ -200,6 +259,7 @@ class ListGridModel(
         }
     }
     suspend fun rereadLoaded() {
+        if (list is BrowseList.ContinueWatchingCached) return
         if (!isCurrent || loading != null || total == null || blockedGeneration == generation) return
         generation++; randomGeneration++; picking = false
         val requested = capture(); val wanted = fetched
@@ -273,7 +333,7 @@ class ListGridModel(
         }
     }
     fun pickRandom(open: (HomeLink) -> Unit) {
-        if (!isCurrent || picking || blockedGeneration == generation || loading != null) return
+        if (!isCurrent || list is BrowseList.ContinueWatchingCached && !watchingLive() || picking || blockedGeneration == generation || loading != null) return
         val count = total ?: fetched
         if (count <= 0) return
         val requested = capture(); val cached = entries.toList(); val countRead = fetched; val token = ++randomGeneration
@@ -284,7 +344,7 @@ class ListGridModel(
                 repeat(6) {
                     val offset = randomOffset(count).coerceIn(0, count - 1)
                     val entry = if (offset < cached.size && countRead == cached.size) cached[offset] else read(requested, 1, offset).entries.firstOrNull() ?: return@launch
-                    if (!current(requested) || token != randomGeneration) return@launch
+                    if (!current(requested) || token != randomGeneration || list is BrowseList.ContinueWatchingCached && !watchingLive()) return@launch
                     val link = HomeCard.from(entry).link
                     if (link is HomeLink.Details || link is HomeLink.Library && link.entry.group.isShow) return@launch open(link)
                 }

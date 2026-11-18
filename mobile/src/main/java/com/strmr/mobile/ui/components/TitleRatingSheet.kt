@@ -21,7 +21,7 @@ fun TitleRatingSheet() {
     val editor = currentRatingEditor() ?: return
     val state by editor.state.collectAsState()
     val scope = rememberCoroutineScope()
-    ModalBottomSheet(onDismissRequest = TitleRatingPrompt::dismiss) {
+    ModalBottomSheet(onDismissRequest = { TitleRatingPrompt.dismiss(editor) }) {
         Column(Modifier.fillMaxWidth().selectableGroup().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
             Text(editor.target.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp))
             Text("Your rating for this profile", modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
@@ -35,7 +35,7 @@ fun TitleRatingSheet() {
                     modifier = Modifier.selectable(selected = rating == state.rating, enabled = !state.saving, role = Role.RadioButton) { scope.launch { editor.save(rating) } },
                 )
             }
-            TextButton(onClick = TitleRatingPrompt::dismiss, modifier = Modifier.padding(horizontal = 16.dp)) { Text("Done") }
+            TextButton(onClick = { TitleRatingPrompt.dismiss(editor) }, modifier = Modifier.padding(horizontal = 16.dp)) { Text("Done") }
         }
     }
 }

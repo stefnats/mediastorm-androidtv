@@ -72,10 +72,14 @@ val RecordingRed = Color(0xFFFF453A)
  */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun RecordingsScreen(asPage: Boolean = false) {
+fun RecordingsScreen(asPage: Boolean = false, currentPage: (() -> Boolean)? = null) {
     val scope = rememberCoroutineScope()
     val context by ProfileDataContext.changes.collectAsState()
-    val state = remember(context) { RecordingsState(scope,context) }
+    val navigator = com.strmr.tv.ui.LocalNavigator.current
+    val pageCurrent = currentPage ?: { !navigator.isCovered }
+    val state = remember(context) { RecordingsState(scope, context, pageCurrent = pageCurrent) }
+    val activePage = pageCurrent()
+    LaunchedEffect(state, activePage) { if (!activePage) state.retireTiming() }
     DisposableEffect(state) {onDispose {state.dispose()}}
     val actionsFocus = remember { FocusRequester() }
     val firstFilter = remember { FocusRequester() }
@@ -154,7 +158,7 @@ fun RecordingsScreen(asPage: Boolean = false) {
                 }
                 val partActions=selected.capture?.parts.orEmpty().associate {it.index to state.partAction(selected,it)}
                 RecordingDetail(
-                    plan = state.planFor(selected.id),
+                    plan = state.planFor(selected.id), timingState = state,
                     r = selected, rule = state.ruleFor(selected), busy = state.busyId == selected.id, actionsFocus = actionsFocus,
                     onPlay = { state.play(it) },
                     onPlayPart = {_,part -> partActions[part.index]?.let(state::playPart)},

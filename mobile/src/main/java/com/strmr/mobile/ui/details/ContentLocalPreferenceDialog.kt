@@ -19,14 +19,16 @@ import com.strmr.tv.ui.details.ContentLocalPreferences
 import com.strmr.tv.ui.details.ContentLocalScope
 
 @Composable
-fun ContentLocalPreferenceDialog(targets: List<ContentLocalScope>, expectedContext: Long, onSaved: () -> Unit, onDismiss: () -> Unit) {
+fun ContentLocalPreferenceDialog(request: com.strmr.tv.ui.details.ContentLocalRequest, onSaved: () -> Unit, onDismiss: () -> Unit) {
     val scope=rememberCoroutineScope()
-    val editor=remember(targets,expectedContext) { ContentLocalPreferences(scope,targets,expectedContext,onSaved) }
+    val editor=remember(request) { ContentLocalPreferences(scope,request,onSaved) }
     val state by editor.state.collectAsState()
+    val current = request.isCurrent()
+    LaunchedEffect(editor, current) { if (!current) editor.close() }
     LaunchedEffect(editor) { editor.load() }
-    LaunchedEffect(state.closed) { if (state.closed) onDismiss() }
+    LaunchedEffect(editor, state.closed) { if (state.closed) onDismiss() }
     DisposableEffect(editor) { onDispose { editor.close() } }
-    if (state.closed) return
+    if (state.closed || !current) return
     AlertDialog(
         onDismissRequest=editor::close,
         title={ Text("Automatic source preference") },

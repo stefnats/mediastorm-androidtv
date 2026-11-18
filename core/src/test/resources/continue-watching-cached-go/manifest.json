@@ -1,0 +1,22 @@
+{
+  "coldMovieCallsDuringBrowse": 0,
+  "coldSeriesCallsDuringBrowse": 0,
+  "defaultTransportCalls": 0,
+  "evaluatedAt": "2026-11-16T23:43:45.578345859Z",
+  "normalRows": 702,
+  "producer": "TestCachedWatchingActualNormalProducerHTTPAndWire",
+  "scope": "Actual local HTTP handlers, normal history service producer and real original-language cache getter; synthetic persisted progress/metadata port/sidecars, injected authenticated account context; no login/SQL/provider/Android execution.",
+  "seedAt": "2026-11-16T23:43:45.271218398Z",
+  "sha256": {
+    "continuation.json": "aa0845365458f19bb7b397dacd3072e1dbf25f83509c08c414c5947c353d7254",
+    "empty.json": "8b2458c6a2d4da86edc84427a0e3c02791adcd0c1dbd10e3c855f2212e3551f2",
+    "late-selected.json": "b2352e140d17bda12bd97bd77774ab0b05fa34ece7c2ebb9ce3ec43aeae42142",
+    "missing.json": "ebb5754f63f7af15988600d4af64a6b63f8143fc2279785eb69ca832f307fa52",
+    "or-unknown.json": "d449d0d1c81029460ded5ac516ba82b06ce14799f608b0a40f1bb2bf69170461",
+    "random-pool.json": "f0a587d0d50c25f723c30b86f17c564648a4c8f9f0e9204f24cede6d26c55a00",
+    "rare.json": "2671a9cc5c7344b0d107b413bc705b0e90ccf1dc90e1d8d0bb984320f5041d16",
+    "show-episode.json": "10a3ee0d7579316a9fd61e2af39a0b05274123ac9d90ed919145ae0e27e98ea7",
+    "unfiltered.json": "be3e6a774b162fba975f08f5d795d5e629a3b59a42e3aac30a083635b625643e",
+    "unknown-only.json": "b242ee26b527774f1c0b98b6f745ae5b4853ebae160b4fbc9e65429e543c0572"
+  }
+}

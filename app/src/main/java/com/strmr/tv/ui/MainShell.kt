@@ -96,7 +96,9 @@ fun MainShell() {
     val home = remember { HomeState(scope) }
     LaunchedEffect(Unit) { MenuTabs.refresh(ApiClient.profileId) }
     LaunchedEffect(Unit) { WatchlistStore.refresh() }
-    LaunchedEffect(Unit) { ListsTabStore.refresh() }
+    val tabEpoch by com.strmr.tv.library.ProfileDataContext.changes.collectAsState()
+    val originalTabEpoch = tabEpoch
+    LaunchedEffect(originalTabEpoch) { ListsTabStore.refresh(originalTabEpoch) }
     // A home screen row's link (now, or held from a cold start, sign-in or the profile picker).
     val navigator = LocalNavigator.current
     val link by DeepLinkRouter.pending.collectAsState()

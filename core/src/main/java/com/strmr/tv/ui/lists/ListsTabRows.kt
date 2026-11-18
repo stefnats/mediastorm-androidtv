@@ -110,6 +110,7 @@ object BrowsePreviews {
         is BrowseEntry.TitleEntry -> (e.title.textPoster ?: e.title.poster)?.url
         is BrowseEntry.ItemEntry -> e.item.textPosterUrl ?: e.item.posterUrl
         is BrowseEntry.WatchingEntry -> e.item.textPosterUrl ?: e.item.posterUrl
+        is BrowseEntry.CachedWatchingEntry -> null
         is BrowseEntry.LibraryItemEntry -> e.entry.group.posterUrl
     }
 
@@ -117,6 +118,7 @@ object BrowsePreviews {
         is BrowseEntry.TitleEntry -> e.title.backdrop?.url
         is BrowseEntry.ItemEntry -> e.item.backdropUrl
         is BrowseEntry.WatchingEntry -> e.item.backdropUrl
+        is BrowseEntry.CachedWatchingEntry -> null
         is BrowseEntry.LibraryItemEntry -> e.entry.group.backdropUrl
     }
 }

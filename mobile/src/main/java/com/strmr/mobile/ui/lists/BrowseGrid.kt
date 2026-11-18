@@ -61,7 +61,13 @@ import kotlinx.coroutines.launch
 @Composable
 fun BrowseGridPage(list: BrowseList, query: Map<String, String>, showBack: Boolean, large: Boolean = false) {
     val scope = rememberCoroutineScope()
-    val model = remember(list, query) { ListGridModel(list, query, scope) }
+    val navigator = com.strmr.mobile.ui.shell.LocalNavigator.current
+    val originalSection = remember(list) { navigator.section }
+    val originalPage = remember(list) { navigator.current.lastOrNull() }
+    val selected = { navigator.section == originalSection && navigator.current.lastOrNull() === originalPage }
+    val model = remember(list, query) { ListGridModel(list, query, scope, pageSelected = selected) }
+    val active = selected()
+    LaunchedEffect(model, active) { model.pageSelectionChanged(active) }
     val gridState = rememberLazyGridState()
     var refreshing by remember { mutableStateOf(false) }
 
@@ -99,7 +105,7 @@ fun BrowseGridPage(list: BrowseList, query: Map<String, String>, showBack: Boole
             onRefresh = {
                 refreshing = true
                 scope.launch {
-                    if (model.total == null) model.reload() else model.rereadLoaded()
+                    if (model.total == null || list is BrowseList.ContinueWatchingCached) model.reload() else model.rereadLoaded()
                     refreshing = false
                 }
             },
@@ -131,6 +137,8 @@ private fun BrowseGrid(model: ListGridModel, gridState: LazyGridState, retry: ()
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                if (list is BrowseList.ContinueWatchingCached) Text("Saved feed observation · No automatic update", style = MaterialTheme.typography.bodySmall)
+                if (list is BrowseList.CollectionCached) Text("Saved collection data · Original-language filters", style = MaterialTheme.typography.bodySmall)
                 if (list == BrowseList.LovedStored) Text("All visible saved Love ratings, with original-language filters. Loved Titles also shows artwork and watched status.", style = MaterialTheme.typography.bodySmall)
                 if (list.hasChips()) BrowseFilterChips(model, Modifier.bleed(16.dp))
                 if (list.indexesLetters && model.options.sort == BrowseSort.NAME && model.letters.isNotEmpty()) {

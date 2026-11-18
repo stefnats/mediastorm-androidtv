@@ -41,7 +41,7 @@ class MobileApplication : Application(), ImageLoaderFactory {
             com.strmr.tv.adaptive.AdaptiveThroughput.scheduleIdle("foreground-idle")
             ConnectionManager.foregrounded()
         }
-        AppForeground.onLeft = { ConnectionManager.backgrounded() }
+        AppForeground.onLeft(ConnectionManager) { ConnectionManager.backgrounded() }
         AppUpdater.start()
         // Cast: on the details page, and offered every resolved stream (Cast to Device…).
         com.strmr.mobile.ui.details.DetailsExtras.register(com.strmr.mobile.ui.cast.DetailsCastActions)

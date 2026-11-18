@@ -15,13 +15,12 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.tv.material3.ListItem
 import androidx.tv.material3.Text
-import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.ContinueWatchingItem
 import com.strmr.tv.api.DetailsTarget
-import com.strmr.tv.home.continueWatching
+import com.strmr.tv.home.DetailsMenuSnapshot
+import com.strmr.tv.home.loadDetailsMenuSnapshot
 import com.strmr.tv.library.CustomListsStore
 import com.strmr.tv.library.HiddenItemsStore
-import com.strmr.tv.library.SetAsideStore
 import com.strmr.tv.library.TitleActions
 import com.strmr.tv.library.WatchlistStore
 import com.strmr.tv.player.WarmPrequeue
@@ -52,22 +51,21 @@ fun DetailsMoreMenu(
     sourcePreference: DialogChoice? = null,
     reminder: DialogChoice? = null,
 ) {
-    val rate = com.strmr.tv.ui.rememberRatingAction(target)
-    var inContinueWatching by remember { mutableStateOf(false) }
+    val rate = com.strmr.tv.ui.rememberRatingAction(target, listOrigin, scope)
+    var membership by remember(listOrigin) { mutableStateOf(DetailsMenuSnapshot()) }
     LaunchedEffect(listOrigin) {
-        SetAsideStore.refresh(listOrigin.context)
-        inContinueWatching = runCatching { ApiClient.continueWatching() }.getOrNull().orEmpty().any { it.isTitle(target) }
+        loadDetailsMenuSnapshot(target, listOrigin) { snapshot -> membership = snapshot }
     }
     val choices = buildList {
-        if (!target.fromLibrary) add(DialogChoice("Rate for this profile…") { rate() })
+        if (!target.fromLibrary) add(DialogChoice("Rate for this profile…", rate))
         addAll(moved)
         sourcePreference?.let(::add)
         reminder?.let(::add)
-        if (inContinueWatching) {
+        if (membership.inContinueWatching) {
             add(DialogChoice("Set Aside", TitleListAction(listOrigin, scope) { TitleActions.setAside(target, it) }))
             add(DialogChoice("Remove from Continue Watching", TitleListAction(listOrigin, scope) { TitleActions.hideFromContinueWatching(target, it) }))
         }
-        if (SetAsideStore.contains(target)) add(DialogChoice("Remove from Set Aside", TitleListAction(listOrigin, scope) { TitleActions.removeFromSetAside(target, it) }))
+        if (membership.inSetAside) add(DialogChoice("Remove from Set Aside", TitleListAction(listOrigin, scope) { TitleActions.removeFromSetAside(target, it) }))
         if (HiddenItemsStore.isHidden(target)) {
             add(DialogChoice("Unhide", TitleListAction(listOrigin, scope) { TitleActions.unhide(target, it) }))
         } else {
@@ -79,7 +77,7 @@ fun DetailsMoreMenu(
     val first = remember { FocusRequester() }
     // The rows change once Continue Watching is read; focus the first one each time.
     LaunchedEffect(choices.map { it.label }) { withFrameNanos { }; runCatching { first.requestFocus() } }
-    SidePanelDialog("More Options", target.name, { listOrigin.dismiss(onDismiss) }) {
+    SidePanelDialog("More Options", membership.notice ?: target.name, { listOrigin.dismiss(onDismiss) }) {
         itemsIndexed(choices) { index, choice ->
             ListItem(
                 selected = false,

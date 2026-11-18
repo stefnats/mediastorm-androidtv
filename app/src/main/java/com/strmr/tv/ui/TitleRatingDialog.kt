@@ -25,7 +25,7 @@ fun TitleRatingDialog() {
     val scope = rememberCoroutineScope()
     val first = remember(editor) { FocusRequester() }
     LaunchedEffect(editor, state.loading, state.saving, state.error) { withFrameNanos { }; runCatching { first.requestFocus() } }
-    Dialog(onDismissRequest = TitleRatingPrompt::dismiss) {
+    Dialog(onDismissRequest = { TitleRatingPrompt.dismiss(editor) }) {
         Column(Modifier.width(420.dp).background(Color(0xFF1C1C1E)).verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(editor.target.name, style = MaterialTheme.typography.titleLarge)
             Text("Your rating for this profile", style = MaterialTheme.typography.bodyMedium)
@@ -42,7 +42,7 @@ fun TitleRatingDialog() {
                     }
                 }
             }
-            Button(onClick = TitleRatingPrompt::dismiss, modifier = Modifier.then(if (state.loading || state.saving || state.requiresReopen) Modifier.focusRequester(first) else Modifier)) { Text("Done") }
+            Button(onClick = { TitleRatingPrompt.dismiss(editor) }, modifier = Modifier.then(if (state.loading || state.saving || state.requiresReopen) Modifier.focusRequester(first) else Modifier)) { Text("Done") }
         }
     }
 }

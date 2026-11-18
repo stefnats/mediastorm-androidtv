@@ -23,6 +23,10 @@ import com.strmr.tv.live.recordings
 import com.strmr.tv.ui.AppToast
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineStart
+import com.strmr.tv.live.RecordingPartTiming
+import com.strmr.tv.live.recordingPartTiming
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -42,14 +46,17 @@ class RecordingsState(
     private val log:(Boolean,String)->Unit={warning,text->if(warning)AppLog.w("Recordings",text)else AppLog.i("Recordings",text)},
     private val notify:(String)->Unit={AppToast.show(it)},
     private val playQueue:(Recording,Long)->Unit={r,expected->PlaybackCoordinator.playRecordingParts(r,expected)},
+    private val timingRead:suspend (String,Int,Long)->RecordingPartTiming={id,index,expected->ApiClient.recordingPartTiming(id,index,false,expected)},
+    private val timingInspect:suspend (String,Int,Long)->RecordingPartTiming={id,index,expected->ApiClient.recordingPartTiming(id,index,true,expected)},
+    private val pageCurrent:()->Boolean={true},
     private val playback:(Recording,RecordingPart?,Long)->Unit={r,part,expected->if(part==null)PlaybackCoordinator.playRecording(r,expected)else PlaybackCoordinator.playRecordingPart(r,part,expected)},
 ) {
     private var open=true
     private var sequence=0L
     private var generation by mutableLongStateOf(0L)
-    val isCurrent get()=open && context==ProfileDataContext.current
+    val isCurrent get()=open && context==ProfileDataContext.current && scope.coroutineContext[Job]?.isActive!=false
     private fun check() {ProfileDataContext.requireCurrent(context);if(!open)throw CancellationException("Recordings page closed")}
-    fun dispose() {open=false;sequence++;generation++;recordings=emptyList();plans=emptyMap();rules=emptyList()}
+    fun dispose() {retireTiming();open=false;sequence++;generation++;recordings=emptyList();plans=emptyMap();rules=emptyList()}
     class PartAction internal constructor(val recordingId:String,val part:RecordingPart,internal val context:Long,internal val generation:Long)
     fun partAction(r:Recording,part:RecordingPart):PartAction? = if(isCurrent && recordings.any {it==r} && selected?.id==r.id && RecordingCaptureRules.playable(r,part))PartAction(r.id,part,context,generation)else null
     fun playPart(action:PartAction) {
@@ -80,8 +87,14 @@ class RecordingsState(
         private set
     var busyId by mutableStateOf<String?>(null)
         private set
-    var filter by mutableStateOf(RecordingFilter.ALL)
-    var selectedId by mutableStateOf<String?>(null)
+    private var filterState by mutableStateOf(RecordingFilter.ALL)
+    var filter: RecordingFilter
+        get() = filterState
+        set(value) { if (value != filterState) { retireTiming(); filterState = value } }
+    private var selectedState by mutableStateOf<String?>(null)
+    var selectedId: String?
+        get() = selectedState
+        set(value) { if (value != selectedState) { retireTiming(); selectedState = value } }
     /** Bumped after a delete: the deleted row had focus, so the page puts it on the new selection. */
     var deletions by mutableIntStateOf(0)
         private set
@@ -94,7 +107,9 @@ class RecordingsState(
     /** `quiet`: a poll or a reload after an action, without the Refresh button's spinner. */
     suspend fun load(quiet: Boolean = false) {
         check()
+        retireTiming()
         val request=++sequence
+        listReading = true
         if (plansContext != context) plans = emptyMap()
         if (!quiet) refreshing = true
         try {
@@ -114,11 +129,76 @@ class RecordingsState(
             log(true,"Recordings refresh failed")
             if (isCurrent && request==sequence) error = "Recordings could not be refreshed. Try again."
         } finally {
-            if (isCurrent && request==sequence) { loading = false; refreshing = false }
+            if (isCurrent && request==sequence) { loading = false; refreshing = false; listReading = false }
         }
     }
 
     fun refresh() = scope.launch { load() }
+
+    /** Each button carries its exact original state, recording/part instances and list generation. */
+    class TimingAction internal constructor(
+        internal val state: RecordingsState,
+        internal val recording: Recording,
+        internal val part: RecordingPart,
+        internal val context: Long,
+        internal val generation: Long,
+        internal val lifetime: Long,
+    )
+    private var listReading by mutableStateOf(false)
+    private var timingLifetime = 0L
+    private var timingGeneration = 0L
+    private var timingJob: Job? = null
+    private var timingBusyState by mutableStateOf<Int?>(null)
+    private var timingValues by mutableStateOf<Map<Int, RecordingPartTiming>>(emptyMap())
+    private var timingErrors by mutableStateOf<Map<Int, String>>(emptyMap())
+    val timingBusy get() = if (isCurrent && pageCurrent()) timingBusyState else null
+    fun timing(part: RecordingPart) = if (isCurrent && pageCurrent() && selected?.capture?.parts?.any { it === part } == true) timingValues[part.index] else null
+    fun timingError(part: RecordingPart) = if (isCurrent && pageCurrent() && selected?.capture?.parts?.any { it === part } == true) timingErrors[part.index] else null
+    fun timingAction(recording: Recording, part: RecordingPart): TimingAction? =
+        if (isCurrent && pageCurrent() && !listReading && selected === recording && recordings.any { it === recording } &&
+            recording.status in setOf("completed", "failed", "cancelled") &&
+            recording.capture?.parts?.any { it === part } == true && RecordingCaptureRules.playable(recording, part))
+            TimingAction(this, recording, part, context, generation, timingLifetime) else null
+    private fun timingCurrent(action: TimingAction) = isCurrent && pageCurrent() && !listReading && action.state === this &&
+        action.context == context && action.generation == generation && action.lifetime == timingLifetime && selected === action.recording &&
+        recordings.any { it === action.recording } && action.recording.capture?.parts?.any { it === action.part } == true
+    /** UI retirement cancels the actual registered child, independently of other producer siblings. */
+    fun retireTiming() {
+        timingLifetime++
+        timingGeneration++
+        timingJob?.cancel(); timingJob = null
+        timingBusyState = null; timingValues = emptyMap(); timingErrors = emptyMap()
+    }
+    fun readTiming(action: TimingAction, inspect: Boolean) {
+        if (!timingCurrent(action) || busyId != null || timingBusyState != null) return
+        val intent = ++timingGeneration
+        timingBusyState = action.part.index
+        timingErrors = timingErrors - action.part.index
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            fun checkTiming() {
+                check()
+                if (!timingCurrent(action) || intent != timingGeneration) throw CancellationException("Recording timing selection changed")
+            }
+            try {
+                currentCoroutineContext().ensureActive(); checkTiming()
+                val value = if (inspect) timingInspect(action.recording.id, action.part.index, context)
+                    else timingRead(action.recording.id, action.part.index, context)
+                currentCoroutineContext().ensureActive(); checkTiming()
+                require(value.recordingId == action.recording.id && value.partIndex == action.part.index)
+                timingValues = timingValues + (action.part.index to value)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (timingCurrent(action) && intent == timingGeneration) {
+                    timingValues = timingValues - action.part.index
+                    timingErrors = timingErrors + (action.part.index to "Timing information is unavailable. Choose an action again to retry.")
+                }
+            } finally {
+                if (timingCurrent(action) && intent == timingGeneration) { timingBusyState = null; timingJob = null }
+            }
+        }
+        timingJob = job
+        job.start()
+    }
 
     /** Cancels a scheduled recording or stops one in progress. */
     fun cancel(r: Recording) = act(r, "cancel", "Cancelled", "Failed to cancel recording.") { access.cancel(r.id,context) }

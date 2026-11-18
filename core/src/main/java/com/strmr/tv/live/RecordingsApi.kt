@@ -4,6 +4,8 @@ import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.ApiError
 import com.strmr.tv.library.ProfileDataContext
 import kotlinx.serialization.Serializable
+import kotlinx.coroutines.ensureActive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 @Serializable
@@ -129,4 +131,74 @@ suspend fun ApiClient.recordSeries(title: String, channel: LiveChannel, newOnly:
         put("channelName", channel.name)
         put("newOnly", newOnly)
     })
+}
+
+/** Historical server observation only; never a current file grant or player timeline. */
+data class RecordingPartTiming(
+    val recordingId: String,
+    val partIndex: Int,
+    val state: String,
+    val reason: String? = null,
+    val containerDurationMs: Long? = null,
+    val observedAt: String? = null,
+    val expiresAt: String? = null,
+    val binding: String? = null,
+    val observedBytes: Long? = null,
+) {
+    fun label(): String = if (state == "container_estimate") {
+        val seconds = requireNotNull(containerDurationMs) / 1000
+        "Observed container estimate: ${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
+    } else "No stored duration estimate."
+    fun observationLabel(): String? = observedAt?.let { "Measured on server: $it · Stored until: $expiresAt" }
+}
+
+internal data class RecordingTimingRequest(val method: String, val path: String, val query: Map<String, String>)
+internal fun recordingTimingRequest(id: String, index: Int, profile: String, inspect: Boolean): RecordingTimingRequest {
+    require(Regex("[A-Za-z0-9_-]{1,128}").matches(id) && index in 1..256 && profile.isNotBlank())
+    val path = "/api/live/recordings/${ApiClient.segment(id)}/parts/$index/timing" + if (inspect) "/refresh" else ""
+    return RecordingTimingRequest(if (inspect) "POST" else "GET", path, mapOf("profileId" to profile))
+}
+
+/** Only explicit callers invoke these operations. A refresh has a genuinely empty body. */
+suspend fun ApiClient.recordingPartTiming(id: String, index: Int, inspect: Boolean, expected: Long): RecordingPartTiming {
+    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+    val request = inContext(expected) { recordingTimingRequest(id, index, profileId, inspect) }
+    val raw = sendRaw(request.method, request.path, request.query, expectedContext = expected,
+        timeoutMs = 15_000, retryTransport = false)
+    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+    ProfileDataContext.requireCurrent(expected)
+    return decodeRecordingPartTiming(raw, id, index)
+}
+
+/** Internal consistency only: no comparison with the phone/TV clock and no renewed TTL. */
+internal fun decodeRecordingPartTiming(raw: String, id: String, index: Int): RecordingPartTiming {
+    try {
+        val root = com.strmr.tv.api.ApiJson.parseToJsonElement(raw) as? kotlinx.serialization.json.JsonObject ?: error("object")
+        fun text(name: String): String = (root[name] as? kotlinx.serialization.json.JsonPrimitive)
+            ?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() && it.length <= 256 && it.none(Char::isISOControl) } ?: error(name)
+        fun integer(name: String): Long = (root[name] as? kotlinx.serialization.json.JsonPrimitive)
+            ?.takeUnless { it.isString }?.longOrNull ?: error(name)
+        require(text("recordingId") == id && integer("partIndex") == index.toLong() && index in 1..256)
+        val state = text("state")
+        val fields = listOf("containerDurationMs", "observedAt", "expiresAt", "binding", "observedBytes")
+        if (state == "unknown") {
+            require(fields.none { it in root })
+            val reason = text("reason")
+            require(reason in setOf("no_observation", "ledger_changed", "observation_expired", "probe_unavailable", "unsupported_container"))
+            return RecordingPartTiming(id, index, state, reason)
+        }
+        require(state == "container_estimate")
+        val duration = integer("containerDurationMs"); val bytes = integer("observedBytes")
+        require(duration > 0 && bytes > 0)
+        val observed = text("observedAt"); val expires = text("expiresAt")
+        val start = java.time.OffsetDateTime.parse(observed); val end = java.time.OffsetDateTime.parse(expires)
+        require(start.offset.totalSeconds == 0 && end.offset.totalSeconds == 0 && end.isAfter(start))
+        require(java.time.Duration.between(start, end) <= java.time.Duration.ofMinutes(15))
+        val binding = text("binding")
+        require(Regex("[A-Za-z0-9_-]{1,128}").matches(binding))
+        return RecordingPartTiming(id, index, state, containerDurationMs = duration, observedAt = observed,
+            expiresAt = expires, binding = binding, observedBytes = bytes)
+    } catch (_: Exception) {
+        throw IllegalArgumentException("Recording timing response is unavailable")
+    }
 }

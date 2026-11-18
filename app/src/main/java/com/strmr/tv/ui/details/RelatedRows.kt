@@ -66,7 +66,7 @@ private val CARD_WIDTH = 100.dp
  * don't open anything, as on tvOS.
  */
 @Composable
-fun RelatedRows(model: DetailsModel, modifier: Modifier = Modifier) {
+fun RelatedRows(model: DetailsModel, modifier: Modifier = Modifier, currentPage: () -> Boolean = { true }) {
     val profile by AppSession.profile.collectAsState()
     val opens = profile?.isKidsProfile != true
     val navigator = LocalNavigator.current
@@ -86,6 +86,11 @@ fun RelatedRows(model: DetailsModel, modifier: Modifier = Modifier) {
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(20.dp)) {
         model.title?.collection?.let { collection ->
+            if (opens) androidx.tv.material3.OutlinedButton(onClick = {
+                com.strmr.tv.home.BrowseList.CollectionCached.open(collection, model.dataContext, requireNotNull(scope.coroutineContext[Job])) {
+                    currentPage() && model.title?.collection === collection && model.vodDenial == null
+                }?.let { navigator.open(Page.Grid(it)) }
+            }, modifier = Modifier.padding(start = ContentMargin)) { Text("Browse collection by original language") }
             if (model.collectionMovies.isNotEmpty()) RelatedRow("Part of ${collection.name}") { posters(model.collectionMovies) }
         }
         if (model.similar.isNotEmpty()) RelatedRow("More Like This") { posters(model.similar.take(20)) }

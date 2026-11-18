@@ -185,6 +185,8 @@ private fun AutoSelectCheckbox(checked: Boolean, onToggle: () -> Unit) {
         Spacer(Modifier.width(10.dp))
         Text("Use this profile automatically")
     }
+    Text("PIN-protected profiles still ask for their PIN at startup.",
+        style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.6f))
 }
 
 /** A round avatar that lifts and glows on focus, the name under it. */

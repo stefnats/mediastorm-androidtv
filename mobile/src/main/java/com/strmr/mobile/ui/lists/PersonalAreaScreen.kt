@@ -39,20 +39,17 @@ fun PersonalAreaScreen(asPage: Boolean) {
     }
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    var refreshing by remember { mutableStateOf(false) }
-    var failed by remember { mutableStateOf(false) }
     val listContext by ProfileDataContext.changes.collectAsState()
     var naming by remember(listContext) { mutableStateOf(false) }
     val preferenceRevision by TitleRatingChanges.generation.collectAsState()
-    suspend fun refresh() {
-        if (refreshing) return
-        refreshing = true
-        try { refreshPersonalArea(); failed = false }
-        catch (error: CancellationException) { throw error }
-        catch (_: Exception) { failed = true }
-        finally { refreshing = false }
-    }
-    LaunchedEffect(navigator.current.isEmpty()) { if (navigator.current.isEmpty()) refresh() }
+    val originalContext = listContext
+    val producer = requireNotNull(scope.coroutineContext[kotlinx.coroutines.Job])
+    val refreshState = remember(originalContext, producer) { com.strmr.tv.ui.lists.ProfileListRefresh(originalContext, producer) }
+    DisposableEffect(refreshState) { onDispose { refreshState.close() } }
+    val refreshing = refreshState.refreshing
+    val failed = refreshState.failed
+    suspend fun refresh() = refreshState.refresh { expected -> refreshPersonalArea(expected) }
+    LaunchedEffect(originalContext, navigator.current.isEmpty()) { if (navigator.current.isEmpty()) refresh() }
     val lists = CustomListsStore.lists
     val watching = ListsTabStore.continueWatching
     val count = WatchlistStore.items.size.takeIf { WatchlistStore.isLoaded && WatchlistStore.loadError == null }
@@ -73,7 +70,7 @@ fun PersonalAreaScreen(asPage: Boolean) {
                 TextButton(onClick = { navigator.push(com.strmr.mobile.ui.shell.Route.Reminders) }, modifier = Modifier.padding(horizontal = 16.dp)) { Text("Reminders & Inbox") }
             }
             item("your-lists") { TileRow("Your Lists", PersonalArea.ownLists(lists)) { if (listContext == ProfileDataContext.current) naming = true } }
-            if (!refreshing && (failed || lists == null || watching == null || WatchlistStore.loadError != null)) item("retry") {
+            if (!refreshing && (failed || lists == null || watching == null || WatchlistStore.loadError != null || ListsTabStore.loadError != null)) item("retry") {
                 Text("Some saved items could not be loaded. Select Refresh to try again.", modifier = Modifier.padding(horizontal = 16.dp))
             }
         }

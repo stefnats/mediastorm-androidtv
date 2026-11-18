@@ -48,10 +48,12 @@ import kotlinx.coroutines.delay
  * Play confirmed with the TV wording. Refreshes every 10 s while it is scheduled or recording.
  */
 @Composable
-fun RecordingDetailScreen(id: String) {
+fun RecordingDetailScreen(id: String, currentRoute: () -> Boolean = { true }) {
     val scope = rememberCoroutineScope()
     val context by ProfileDataContext.changes.collectAsState()
-    val state = remember(id,context) { RecordingsState(scope,context).also {it.selectedId=id} }
+    val state = remember(id,context) { RecordingsState(scope, context, pageCurrent = currentRoute).also {it.selectedId=id} }
+    val activePage = currentRoute()
+    LaunchedEffect(state, activePage) { if (!activePage) state.retireTiming() }
     DisposableEffect(state) {onDispose {state.dispose()}}
     val navigator = LocalNavigator.current
     val confirmations = remember(state) { RecordingConfirmations(state).also { it.onDeleted = { navigator.pop() } } }
@@ -134,6 +136,18 @@ private fun Detail(r: Recording, state: RecordingsState, confirmations: Recordin
                 if(RecordingCaptureRules.closed(part) && !RecordingCaptureRules.playable(r,part))Text("Playback is unavailable for this part.",color=MaterialTheme.colorScheme.onSurfaceVariant)
                 val action=state.partAction(r,part)
                 OutlinedButton(onClick={action?.let(state::playPart)},enabled=!busy && action!=null,modifier=Modifier.fillMaxWidth()) {Text("Play part ${part.index} from start")}
+                val timingAction = state.timingAction(r, part)
+                state.timing(part)?.let { value ->
+                    Text(value.label(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    value.observationLabel()?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
+                state.timingError(part)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                if (state.timingBusy == part.index) Text("Reading timing information…")
+                if (timingAction != null) {
+                    OutlinedButton(onClick = { state.readTiming(timingAction, false) }, enabled = !busy && state.timingBusy == null) { Text("Read saved timing") }
+                    OutlinedButton(onClick = { state.readTiming(timingAction, true) }, enabled = !busy && state.timingBusy == null) { Text("Inspect container duration") }
+                    Text("An inspection measures this closed part only. Estimates do not combine the parts or gaps.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }}
         }
         if (!RecordingRules.canDelete(r)) {

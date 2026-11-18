@@ -67,22 +67,24 @@ object WatchlistStore {
         }
     }
 
-    suspend fun refresh() {
-        val expected = ProfileDataContext.current
-        refresh { ServerWatchlistAccess.readLegacy(expected) }
+    suspend fun refresh(expectedContext: Long = ProfileDataContext.current) {
+        ProfileDataContext.requireCurrent(expectedContext)
+        refreshOwned(expectedContext) { ServerWatchlistAccess.readLegacy(expectedContext) }
     }
 
     /** Existing shell/TV/launcher background callers keep visible errors rather than uncaught failures.
      * Owned mutation follow-up reads never use this legacy adapter and remain strict. */
-    internal suspend fun refresh(load: suspend () -> List<WatchlistItem>) {
-        val expected = ProfileDataContext.current
+    internal suspend fun refresh(load: suspend () -> List<WatchlistItem>) = refreshOwned(ProfileDataContext.current, load)
+    private suspend fun refreshOwned(expected: Long, load: suspend () -> List<WatchlistItem>) {
+        ProfileDataContext.requireCurrent(expected)
         val state = state(expected)
         val revision = state.revision
         var sequence = 0L
         fun current() = expected == ProfileDataContext.current && sequence == readSequence && revision == state.revision && state.pending == 0
         refreshes.run(load = {
+            ProfileDataContext.requireCurrent(expected)
             sequence = ++readSequence
-            load()
+            load().also { ProfileDataContext.requireCurrent(expected) }
         }, success = {
             if (current()) { store(it, expected); loaded = true; error = null }
         }, failure = {

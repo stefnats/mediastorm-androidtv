@@ -65,8 +65,9 @@ import kotlinx.coroutines.launch
 fun ListGridScreen(list: BrowseList, query: Map<String, String> = emptyMap(), currentPage: () -> Boolean = { true }) {
     val navigator = LocalNavigator.current
     val scope = rememberCoroutineScope()
-    val model = remember { ListGridModel(list, query, scope) }
+    val model = remember { ListGridModel(list, query, scope, pageSelected = currentPage) }
     val active = currentPage()
+    LaunchedEffect(model, active) { model.pageSelectionChanged(active) }
     val operations = remember(model, active) { CustomListOperations(model.dataContext, selected = currentPage) }
     DisposableEffect(operations) { onDispose { operations.close() } }
     var renaming by remember(operations) { mutableStateOf(false) }
@@ -136,6 +137,8 @@ fun ListGridScreen(list: BrowseList, query: Map<String, String> = emptyMap(), cu
                         Column {
                             Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                             total?.let { Text(if (it == 1) "1 title" else "$it titles", color = Color.White.copy(alpha = 0.6f)) }
+                            if (list is BrowseList.ContinueWatchingCached) Text("Saved feed observation · No automatic update", color = Color.White.copy(alpha = 0.6f))
+                            if (list is BrowseList.CollectionCached) Text("Saved collection data · Original-language filters", color = Color.White.copy(alpha = 0.6f))
                             if (list == BrowseList.LovedStored) Text("All visible saved Love ratings, with original-language filters. Loved Titles also shows artwork and watched status.", color = Color.White.copy(alpha = 0.6f))
                         }
                         val parts = (list as? BrowseList.Service)?.parts.orEmpty()
@@ -150,7 +153,12 @@ fun ListGridScreen(list: BrowseList, query: Map<String, String> = emptyMap(), cu
                                     originalLanguageFilterSupported = model.originalLanguageFilterSupported,
                                 )
                             }
-                            if (list == BrowseList.LovedStored) androidx.tv.material3.OutlinedButton(onClick = { scope.launch { model.reload() } }) { Text("Reload list") }
+                            if (list == BrowseList.ContinueWatching) androidx.tv.material3.OutlinedButton(onClick = {
+                                // Accept the original page/epoch before navigation hides it.
+                                val accepted = model.openSavedWatching(requireNotNull(scope.coroutineContext[kotlinx.coroutines.Job]), currentPage)
+                                if (accepted != null) com.strmr.tv.api.ApiClient.inContext(model.dataContext) { navigator.openList(accepted) }
+                            }) { Text("Browse saved Continue Watching") }
+                            if (list == BrowseList.LovedStored || list is BrowseList.CollectionCached || list is BrowseList.ContinueWatchingCached) androidx.tv.material3.OutlinedButton(onClick = { scope.launch { model.reload() } }) { Text("Reload list") }
                             GridCardSizeButton()
                         }
                         model.actionError?.let { Text(it, color = Color(0xFFFF6B6B)) }
