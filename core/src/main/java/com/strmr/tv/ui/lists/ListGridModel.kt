@@ -35,7 +35,7 @@ class ListGridModel(
     val list: BrowseList,
     query: Map<String, String>,
     private val scope: CoroutineScope,
-    val dataContext: Long = (list as? BrowseList.CollectionCached)?.originalContext ?: (list as? BrowseList.ContinueWatchingCached)?.originalContext ?: (list as? BrowseList.RecentlyWatchedCached)?.originalContext ?: (list as? BrowseList.PopularOnServerCached)?.originalContext ?: ProfileDataContext.current,
+    val dataContext: Long = (list as? BrowseList.CollectionCached)?.originalContext ?: (list as? BrowseList.ContinueWatchingCached)?.originalContext ?: (list as? BrowseList.RecentlyWatchedCached)?.originalContext ?: (list as? BrowseList.PopularOnServerCached)?.originalContext ?: (list as? BrowseList.SimilarCached)?.originalContext ?: ProfileDataContext.current,
     private val readPage: (suspend (BrowseList, Int, Int, Map<String, String>, BrowseOptions, Long) -> BrowsePage)? = null,
     private val randomOffset: (Int) -> Int = { (0 until it).random() },
     private val clientIdentity: () -> String = { Config.clientId },
@@ -44,12 +44,13 @@ class ListGridModel(
     private val pageSize: Int = PAGE,
     private val clockMillis: () -> Long = System::currentTimeMillis,
     private val pageSelected: () -> Boolean = { true },
+    private val monotonicNanos: () -> Long = System::nanoTime,
 ) {
     private val query = query.toMap()
-    private val storedClient = if (list == BrowseList.LovedStored) ApiClient.inContext(dataContext) { clientIdentity() } else (list as? BrowseList.RecentlyWatchedCached)?.originalClient ?: (list as? BrowseList.PopularOnServerCached)?.originalClient
+    private val storedClient = if (list == BrowseList.LovedStored) ApiClient.inContext(dataContext) { clientIdentity() } else (list as? BrowseList.RecentlyWatchedCached)?.originalClient ?: (list as? BrowseList.PopularOnServerCached)?.originalClient ?: (list as? BrowseList.SimilarCached)?.originalClient
     val isCurrent get() = dataContext == ProfileDataContext.current &&
-        (list !is BrowseList.CollectionCached && list !is BrowseList.ContinueWatchingCached && list !is BrowseList.RecentlyWatchedCached && list !is BrowseList.PopularOnServerCached || scope.coroutineContext[Job]?.isActive == true) &&
-        (list !is BrowseList.ContinueWatchingCached && list !is BrowseList.RecentlyWatchedCached && list !is BrowseList.PopularOnServerCached || pageSelected()) &&
+        (list !is BrowseList.CollectionCached && list !is BrowseList.ContinueWatchingCached && list !is BrowseList.RecentlyWatchedCached && list !is BrowseList.PopularOnServerCached && list !is BrowseList.SimilarCached || scope.coroutineContext[Job]?.isActive == true) &&
+        (list !is BrowseList.ContinueWatchingCached && list !is BrowseList.RecentlyWatchedCached && list !is BrowseList.PopularOnServerCached && list !is BrowseList.SimilarCached || pageSelected()) &&
         (storedClient == null || storedClient == clientIdentity() && scope.coroutineContext[Job]?.isActive != false)
     private var generation = 0L
     private var selection by mutableLongStateOf(0)
@@ -67,7 +68,7 @@ class ListGridModel(
         get() = partState
         set(value) { if (isCurrent && value != partState) { partState = value; selection++; invalidateRows() } }
     private var publishedRatingVersion by mutableLongStateOf(TitleRatingChanges.generation.value)
-    private fun rowsCurrent() = (list != BrowseList.LovedStored || publishedRatingVersion == TitleRatingChanges.generation.value) && (list !is BrowseList.ContinueWatchingCached || watchingLive())
+    private fun rowsCurrent() = (list != BrowseList.LovedStored || publishedRatingVersion == TitleRatingChanges.generation.value) && (list !is BrowseList.ContinueWatchingCached || watchingLive()) && (list !is BrowseList.SimilarCached || similarLive())
     private var entryState by mutableStateOf<List<BrowseEntry>>(emptyList())
     var entries: List<BrowseEntry>
         get() = if (isCurrent && rowsCurrent()) entryState else emptyList()
@@ -82,6 +83,10 @@ class ListGridModel(
     var collectionObservation by mutableStateOf<CachedCollectionObservation?>(null); private set
     var watchingObservation by mutableStateOf<CachedWatchingObservation?>(null); private set
     private var watchingExpiry: Job? = null
+    var similarObservation by mutableStateOf<CachedSimilarObservation?>(null); private set
+    private var similarDeadline = Long.MAX_VALUE
+    private var similarExpiry: Job? = null
+    private fun similarLive() = similarObservation == null || monotonicNanos() < similarDeadline
     private fun watchingLive() = (list as? BrowseList.ContinueWatchingCached)?.live() != false
     fun openSavedWatching(producer: Job, selected: () -> Boolean): BrowseList.ContinueWatchingCached? =
         if (list != BrowseList.ContinueWatching || !isCurrent) null else BrowseList.ContinueWatchingCached.open(dataContext, producer, selected)
@@ -93,6 +98,10 @@ class ListGridModel(
     val canOpenSavedPopular: Boolean get() = list.isNormalPopularActivity() && isCurrent
     fun openSavedPopular(producer: Job, selected: () -> Boolean): BrowseList.PopularOnServerCached? =
         if (!canOpenSavedPopular) null else BrowseList.PopularOnServerCached.open(list, query, dataContext, producer, selected, clientIdentity)
+
+    val canOpenSavedSimilar: Boolean get() = list is BrowseList.Similar && isCurrent
+    fun openSavedSimilar(producer: Job, selected: () -> Boolean): BrowseList.SimilarCached? =
+        if (!canOpenSavedSimilar) null else BrowseList.SimilarCached.open(list, dataContext, producer, selected, clientIdentity)
 
     private var languageSupport by mutableStateOf(false)
     private var hiddenLegacyMode: Boolean? = null
@@ -120,15 +129,15 @@ class ListGridModel(
             val requested = capture()
             return entries.mapIndexed { i, entry ->
                 val card = HomeCard.from(entry).let { if (ranked) it.ranked(i + 1) else if (list == BrowseList.Hidden) it.copy(hiddenManagementEntry = true) else it }
-                if (list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached) {
+                if (list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached || list is BrowseList.SimilarCached) {
                     // A saved-row key is presentation only. All actions retain card.target.
-                    card.copy(id = "${if (list is BrowseList.RecentlyWatchedCached) "saved-recent" else "saved-popular"}:$dataContext:$generation:$i", cacheOnlyBrowseEntry = true)
+                    card.copy(id = "${if (list is BrowseList.RecentlyWatchedCached) "saved-recent" else if (list is BrowseList.PopularOnServerCached) "saved-popular" else "saved-similar"}:$dataContext:$generation:$i", cacheOnlyBrowseEntry = true)
                 } else if (list is BrowseList.CollectionCached || list is BrowseList.ContinueWatchingCached) card.copy(cacheOnlyBrowseEntry = true)
                 else if (list == BrowseList.LovedStored && entry is BrowseEntry.TitleEntry && entry.storedLove != null) {
                     card.copy(reloadStoredRating = { target, operation -> refreshStoredRating(requested, entry, card, target, operation) })
                 } else card
             }
-                .filter { list == BrowseList.Hidden || list == BrowseList.LovedStored || list is BrowseList.CollectionCached || list is BrowseList.ContinueWatchingCached || list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached || it.target?.let(HiddenItemsStore::isHidden) != true }
+                .filter { list == BrowseList.Hidden || list == BrowseList.LovedStored || list is BrowseList.CollectionCached || list is BrowseList.ContinueWatchingCached || list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached || list is BrowseList.SimilarCached || it.target?.let(HiddenItemsStore::isHidden) != true }
         }
 
     init {
@@ -142,13 +151,14 @@ class ListGridModel(
         }
     }
     fun pageSelectionChanged(selected: Boolean) {
-        if ((list is BrowseList.ContinueWatchingCached || list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached) && !selected) {
+        if ((list is BrowseList.ContinueWatchingCached || list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached || list is BrowseList.SimilarCached) && !selected) {
             selection++; invalidateRows(); loadError = "Saved page changed. Reload this view."
         }
     }
     private fun invalidateRows() {
         pageReads.toList().forEach { it.cancel() }
         watchingExpiry?.cancel(); watchingExpiry = null; watchingObservation = null
+        similarExpiry?.cancel(); similarExpiry = null; similarObservation = null; similarDeadline = Long.MAX_VALUE
         generation++; randomGeneration++; picking = false
         entries = emptyList(); fetched = 0; total = null; loadError = null; blockedGeneration = null
         loading = null; loadingFor = null; hiddenLegacyMode = null; collectionObservation = null
@@ -174,17 +184,36 @@ class ListGridModel(
         currentCoroutineContext().ensureActive(); ProfileDataContext.requireCurrent(dataContext)
         if (!current(read)) throw CancellationException("List selection changed")
         if (read.list is BrowseList.ContinueWatchingCached && !watchingLive()) throw ManagementPageFailure()
+        if (read.list is BrowseList.SimilarCached && !similarLive()) throw ManagementPageFailure()
         if (read.list is BrowseList.CollectionCached && collectionObservation?.let { it.expiresMillis <= clockMillis() } == true) throw ManagementPageFailure()
         val page = readPage?.invoke(read.list, limit, offset, extra, read.options, dataContext)
             ?: ApiClient.browsePage(read.list, limit, offset, extra, options = read.options, expectedContext = dataContext, hiddenLegacyMode = hiddenLegacyMode)
         currentCoroutineContext().ensureActive(); ProfileDataContext.requireCurrent(dataContext)
         if (!current(read)) throw CancellationException("List selection changed")
-        if (read.list is BrowseList.RecentlyWatchedCached || read.list is BrowseList.PopularOnServerCached) {
+        if (read.list is BrowseList.SimilarCached && !similarLive()) throw ManagementPageFailure()
+        if (read.list is BrowseList.RecentlyWatchedCached || read.list is BrowseList.PopularOnServerCached || read.list is BrowseList.SimilarCached) {
             val remaining = maxOf(0L, page.total.toLong() - offset)
             val expectedRows = if (limit == 0) remaining else minOf(limit.toLong(), remaining)
             if (!page.originalLanguageFilterSupported || page.total < 0 ||
                 offset > page.total && fetched > 0 || page.entries.size.toLong() != expectedRows ||
                 page.entries.any { it !is BrowseEntry.TitleEntry }) throw ManagementPageFailure()
+        }
+        if (read.list is BrowseList.SimilarCached) {
+            val observation = page.similar ?: throw ManagementPageFailure()
+            if (page.total > 4096) throw ManagementPageFailure()
+            if (observation.seedID != read.list.seedID || observation.kind != read.list.kind.mediaType || observation.scope != "returned-results" ||
+                similarObservation?.let { !it.sameObservation(observation) } == true) throw ManagementPageFailure()
+            val acceptedDeadline = read.list.accept(observation)
+            similarDeadline = if (similarObservation?.sameObservation(observation) == true) minOf(similarDeadline, acceptedDeadline) else acceptedDeadline
+            similarObservation = observation
+            similarExpiry?.cancel()
+            val expiryGeneration = generation
+            similarExpiry = scope.launch {
+                kotlinx.coroutines.delay(maxOf(1L, (similarDeadline - monotonicNanos()) / 1_000_000L + 1L))
+                if (isCurrent && generation == expiryGeneration && !similarLive()) {
+                    invalidateRows(); blockedGeneration = generation; loadError = "Saved recommendations expired. Reload this view."
+                }
+            }
         }
         if (read.list is BrowseList.CollectionCached) {
             val observed = page.collection ?: throw ManagementPageFailure()
@@ -212,7 +241,7 @@ class ListGridModel(
                 if (isCurrent && !watchingLive()) { invalidateRows(); loadError = "Saved feed expired. Return to Continue Watching to update it." }
             }
         }
-        if ((read.list == BrowseList.LovedStored || read.list is BrowseList.RecentlyWatchedCached || read.list is BrowseList.PopularOnServerCached || read.list.originalLanguageEligible && read.options.originalLanguageActive) && !page.originalLanguageFilterSupported) throw LanguageFilterUnavailable()
+        if ((read.list == BrowseList.LovedStored || read.list is BrowseList.RecentlyWatchedCached || read.list is BrowseList.PopularOnServerCached || read.list is BrowseList.SimilarCached || read.list.originalLanguageEligible && read.options.originalLanguageActive) && !page.originalLanguageFilterSupported) throw LanguageFilterUnavailable()
         if (read.list == BrowseList.Hidden) {
             val mode = !page.originalLanguageFilterSupported
             if (hiddenLegacyMode != null && hiddenLegacyMode != mode) throw ManagementPageFailure()
@@ -223,12 +252,14 @@ class ListGridModel(
     private class LanguageFilterUnavailable : Exception("This server cannot apply the original language filter. Clear the filter or reload this list.")
     private fun failed(read: Read, error: Exception) {
         if (!current(read)) return
-        if (error is LanguageFilterUnavailable || error is ManagementPageFailure || read.list == BrowseList.Hidden || read.list == BrowseList.LovedStored || read.list is BrowseList.CollectionCached || read.list is BrowseList.ContinueWatchingCached || read.list is BrowseList.RecentlyWatchedCached || read.list is BrowseList.PopularOnServerCached) {
+        if (error is LanguageFilterUnavailable || error is ManagementPageFailure || read.list == BrowseList.Hidden || read.list == BrowseList.LovedStored || read.list is BrowseList.CollectionCached || read.list is BrowseList.ContinueWatchingCached || read.list is BrowseList.RecentlyWatchedCached || read.list is BrowseList.PopularOnServerCached || read.list is BrowseList.SimilarCached) {
+            if (read.list is BrowseList.SimilarCached) invalidateRows()
             // Preserve selected intent and its clear controls; never replace it with an unfiltered page.
             entries = emptyList(); fetched = 0; total = null; blockedGeneration = generation
             if (read.list is BrowseList.CollectionCached) collectionObservation = null
             if (read.list is BrowseList.ContinueWatchingCached) { watchingObservation = null; watchingExpiry?.cancel() }
-            loadError = error.vodDenial?.message ?: if (read.list is BrowseList.RecentlyWatchedCached) "Saved activity unavailable. Reload this view." else if (read.list is BrowseList.PopularOnServerCached) "Saved popularity unavailable. Reload this view." else if (read.list is BrowseList.ContinueWatchingCached) "Saved feed unavailable. Return to Continue Watching to update it." else if (read.list is BrowseList.CollectionCached) "Saved collection unavailable. Return to details to update it." else if (error is LanguageFilterUnavailable || error is ManagementPageFailure) error.message else "Unable to load this management view. Reload the list."
+            if (read.list is BrowseList.SimilarCached) { similarObservation = null; similarExpiry?.cancel(); similarDeadline = Long.MAX_VALUE }
+            loadError = error.vodDenial?.message ?: if (read.list is BrowseList.RecentlyWatchedCached) "Saved activity unavailable. Reload this view." else if (read.list is BrowseList.PopularOnServerCached) "Saved popularity unavailable. Reload this view." else if (read.list is BrowseList.SimilarCached) "Saved recommendations unavailable. Return to recommendations." else if (read.list is BrowseList.ContinueWatchingCached) "Saved feed unavailable. Return to Continue Watching to update it." else if (read.list is BrowseList.CollectionCached) "Saved collection unavailable. Return to details to update it." else if (error is LanguageFilterUnavailable || error is ManagementPageFailure) error.message else "Unable to load this management view. Reload the list."
         } else if (entries.isEmpty()) loadError = error.vodDenial?.message ?: "Unable to load this list. Try again."
     }
 
@@ -259,9 +290,9 @@ class ListGridModel(
             languageSupport = requested.list.originalLanguageEligible && page.originalLanguageFilterSupported
             fetched += page.entries.size
             val seen = entries.map { HomeCard.from(it).id }.toMutableSet()
-            entries = entries + if (list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached) page.entries else page.entries.filter { seen.add(HomeCard.from(it).id) }
+            entries = entries + if (list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached || list is BrowseList.SimilarCached) page.entries else page.entries.filter { seen.add(HomeCard.from(it).id) }
             publishedRatingVersion = requested.ratingVersion ?: publishedRatingVersion
-            total = if (list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached) page.total else page.listSize(fetched); loadError = null
+            total = if (list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached || list is BrowseList.SimilarCached) page.total else page.listSize(fetched); loadError = null
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) { failed(requested, error) }
         finally { if (loading === requested) { loading = null; loadingFor = null } }
@@ -277,7 +308,7 @@ class ListGridModel(
         }
     }
     suspend fun rereadLoaded() {
-        if (list is BrowseList.ContinueWatchingCached || list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached) return
+        if (list is BrowseList.ContinueWatchingCached || list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached || list is BrowseList.SimilarCached) return
         if (!isCurrent || loading != null || total == null || blockedGeneration == generation) return
         generation++; randomGeneration++; picking = false
         val requested = capture(); val wanted = fetched
@@ -351,7 +382,7 @@ class ListGridModel(
         }
     }
     fun pickRandom(open: (HomeLink) -> Unit) {
-        if (!isCurrent || list is BrowseList.ContinueWatchingCached && !watchingLive() || picking || blockedGeneration == generation || loading != null) return
+        if (!isCurrent || list is BrowseList.ContinueWatchingCached && !watchingLive() || list is BrowseList.SimilarCached && !similarLive() || picking || blockedGeneration == generation || loading != null) return
         val count = total ?: fetched
         if (count <= 0) return
         val requested = capture(); val cached = entries.toList(); val countRead = fetched; val token = ++randomGeneration
@@ -362,7 +393,7 @@ class ListGridModel(
                 repeat(6) {
                     val offset = randomOffset(count).coerceIn(0, count - 1)
                     val entry = if (offset < cached.size && countRead == cached.size) cached[offset] else read(requested, 1, offset).entries.firstOrNull() ?: return@launch
-                    if (!current(requested) || token != randomGeneration || list is BrowseList.ContinueWatchingCached && !watchingLive()) return@launch
+                    if (!current(requested) || token != randomGeneration || list is BrowseList.ContinueWatchingCached && !watchingLive() || list is BrowseList.SimilarCached && !similarLive()) return@launch
                     val link = HomeCard.from(entry).link
                     if (link is HomeLink.Details || link is HomeLink.Library && link.entry.group.isShow) return@launch open(link)
                 }

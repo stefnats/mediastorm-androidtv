@@ -261,7 +261,7 @@ object ApiClient {
         return sendOwnedRaw(method, path, query, body, authorized, promptOnLock, timeoutMs, encodedQuery, headers, expectedContext, retryTransport).text
     }
 
-    /** Only the explicit saved-feed GET opts into actual transport time/body bounds. */
+    /** Only explicit saved-feed and saved-Similar GETs opt into transport time/body bounds. */
     internal suspend fun sendObservedRaw(path: String, query: Map<String, String>, expectedContext: Long): ObservedRawResponse =
         sendOwnedRaw("GET", path, query, expectedContext = expectedContext, observeResponse = true)
 
@@ -272,7 +272,7 @@ object ApiClient {
         retryTransport: Boolean = true, observeResponse: Boolean = false,
     ): ObservedRawResponse {
         val context = requestContexts.capture(expectedContext)
-        if (observeResponse) context.use { require(method == "GET" && expectedContext != null && path == "$profilePath/display-list" && query["source"] == "continue-watching-cached") }
+        if (observeResponse) context.use { requireObservedBrowseRequest(method, path, profilePath, query, expectedContext != null) }
         if (method == "GET") SportsFixtures.response(path)?.let {
             context.check()
             if (observeResponse) throw ObservedResponseUnavailable()
@@ -485,6 +485,12 @@ suspend fun Call.await(observeResponse: Boolean = false): HttpResult = suspendCa
     cont.invokeOnCancellation { runCatching { cancel() } }
 }
 
+/** This is the actual sender guard, independent of Android configuration for portable checks. */
+internal fun requireObservedBrowseRequest(method: String, path: String, profilePath: String, query: Map<String, String>, expectedContext: Boolean) {
+    require(method == "GET" && expectedContext && path == "$profilePath/display-list" &&
+        query["source"] in setOf("continue-watching-cached", "similar-cached"))
+}
+
 /** Presentation freshness only; never an auth, PIN, file or playback capability. */
 internal class ObservedResponseUnavailable : IOException("Saved observation time unavailable")
 internal data class ObservedRawResponse(val text: String, val clock: ObservedResponseClock?)
@@ -509,10 +515,13 @@ class ObservedResponseClock internal constructor(private val upperAtReceipt: Lon
     }
     fun remainingMillis(expires: Long): Long = expires - upperMillis()
     /** Absolute monotone deadline from the actual receipt anchor, never adoption time. */
-    internal fun deadlineNanos(expires: Long): Long {
-        val budget = expires - upperAtReceipt
-        if (budget <= 0 || budget > 600_000L) throw ObservedResponseUnavailable()
-        return received + budget * 1_000_000L
+    internal fun deadlineNanos(expires: Long, maxBudgetMillis: Long = 600_000L): Long {
+        if (maxBudgetMillis !in 1L..86_400_000L) throw ObservedResponseUnavailable()
+        try {
+            val budget = Math.subtractExact(expires, upperAtReceipt)
+            if (budget <= 0 || budget > maxBudgetMillis) throw ObservedResponseUnavailable()
+            return Math.addExact(received, Math.multiplyExact(budget, 1_000_000L))
+        } catch (_: ArithmeticException) { throw ObservedResponseUnavailable() }
     }
     internal fun predates(previous: ObservedResponseClock): Boolean = serverDate < previous.serverDate
     override fun toString() = "ObservedResponseClock(presentation)"

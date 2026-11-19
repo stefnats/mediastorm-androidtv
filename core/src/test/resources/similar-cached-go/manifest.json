@@ -1,0 +1,249 @@
+{
+  "httpProvenance": "Actual httptest HTTP server Date, exact-loopback client, injected synthetic owner middleware; not full application login/PIN or live-provider execution.",
+  "inputProvenance": "Synthetic file observations read by the real cached Similar reader; actual normal producer round-trip is separately tested. Returned finite pool only, never all upstream catalogue pages.",
+  "replies": [
+    {
+      "name": "movie-unfiltered",
+      "request": "/api/users/profile/display-list?source=similar-cached\u0026mediaType=movie\u0026tmdbId=77\u0026limit=0",
+      "file": "movie-unfiltered.json",
+      "sha256": "67baefb3709c3e7813ecf6f2750d472648a9be9becedcea4730c8e9150b534bd",
+      "bytes": 805,
+      "httpDate": "Thu, 19 Nov 2026 07:30:08 GMT",
+      "requestStartedAt": "2026-11-19T07:30:08.936489395Z",
+      "headersAt": "2026-11-19T07:30:08.939091327Z",
+      "total": 5,
+      "count": 5,
+      "ids": [
+        "tmdb:movie:1",
+        "tmdb:movie:2",
+        "tmdb:movie:3",
+        "tmdb:movie:4",
+        "tmdb:movie:5"
+      ],
+      "similar": {
+        "tmdbId": 77,
+        "mediaType": "movie",
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T07:25:08Z",
+        "expiresAt": "2026-11-19T13:25:08Z",
+        "scope": "returned-results"
+      }
+    },
+    {
+      "name": "unknown-only",
+      "request": "/api/users/profile/display-list?source=similar-cached\u0026mediaType=movie\u0026tmdbId=77\u0026includeUnknownOriginalLanguage=true\u0026limit=0",
+      "file": "unknown-only.json",
+      "sha256": "dd308e42b12a2d8fbe8ec480eed6c272a5e51c897d8073684686c4c31513aa0d",
+      "bytes": 483,
+      "httpDate": "Thu, 19 Nov 2026 07:30:09 GMT",
+      "requestStartedAt": "2026-11-19T07:30:09.05711391Z",
+      "headersAt": "2026-11-19T07:30:09.060226593Z",
+      "total": 2,
+      "count": 2,
+      "ids": [
+        "tmdb:movie:4",
+        "tmdb:movie:5"
+      ],
+      "similar": {
+        "tmdbId": 77,
+        "mediaType": "movie",
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T07:25:08Z",
+        "expiresAt": "2026-11-19T13:25:08Z",
+        "scope": "returned-results"
+      }
+    },
+    {
+      "name": "or-unknown",
+      "request": "/api/users/profile/display-list?source=similar-cached\u0026mediaType=movie\u0026tmdbId=77\u0026originalLanguages=fra\u0026includeUnknownOriginalLanguage=true\u0026sortBy=name\u0026limit=0",
+      "file": "or-unknown.json",
+      "sha256": "b9ece61247cd624e1c5a513f7bf04e9b4fb5fad68b74712f991fe224c01c6104",
+      "bytes": 696,
+      "httpDate": "Thu, 19 Nov 2026 07:30:09 GMT",
+      "requestStartedAt": "2026-11-19T07:30:09.189506126Z",
+      "headersAt": "2026-11-19T07:30:09.192563906Z",
+      "total": 4,
+      "count": 4,
+      "ids": [
+        "tmdb:movie:4",
+        "tmdb:movie:5",
+        "tmdb:movie:3",
+        "tmdb:movie:2"
+      ],
+      "similar": {
+        "tmdbId": 77,
+        "mediaType": "movie",
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T07:25:08Z",
+        "expiresAt": "2026-11-19T13:25:08Z",
+        "scope": "returned-results"
+      }
+    },
+    {
+      "name": "name-alphabet",
+      "request": "/api/users/profile/display-list?source=similar-cached\u0026mediaType=movie\u0026tmdbId=77\u0026alphabet=B\u0026sortBy=name\u0026limit=1",
+      "file": "name-alphabet.json",
+      "sha256": "ca67ad1707fe421e235d314411ced9070097ce624b6f0c85fa47daa6e36b0bd7",
+      "bytes": 392,
+      "httpDate": "Thu, 19 Nov 2026 07:30:09 GMT",
+      "requestStartedAt": "2026-11-19T07:30:09.316038367Z",
+      "headersAt": "2026-11-19T07:30:09.317394311Z",
+      "total": 2,
+      "count": 1,
+      "ids": [
+        "tmdb:movie:3"
+      ],
+      "similar": {
+        "tmdbId": 77,
+        "mediaType": "movie",
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T07:25:08Z",
+        "expiresAt": "2026-11-19T13:25:08Z",
+        "scope": "returned-results"
+      }
+    },
+    {
+      "name": "blank-labels",
+      "request": "/api/users/profile/display-list?source=similar-cached\u0026mediaType=movie\u0026tmdbId=77\u0026alphabet=%23\u0026limit=0",
+      "file": "blank-labels.json",
+      "sha256": "4887e97363239689a482513aa958ed8a30613c8988c9ec41c139596bd84f0d13",
+      "bytes": 491,
+      "httpDate": "Thu, 19 Nov 2026 07:30:09 GMT",
+      "requestStartedAt": "2026-11-19T07:30:09.422216362Z",
+      "headersAt": "2026-11-19T07:30:09.424154113Z",
+      "total": 2,
+      "count": 2,
+      "ids": [
+        "tmdb:movie:4",
+        "tmdb:movie:5"
+      ],
+      "similar": {
+        "tmdbId": 77,
+        "mediaType": "movie",
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T07:25:08Z",
+        "expiresAt": "2026-11-19T13:25:08Z",
+        "scope": "returned-results"
+      }
+    },
+    {
+      "name": "series-unfiltered",
+      "request": "/api/users/profile/display-list?source=similar-cached\u0026mediaType=series\u0026tmdbId=88\u0026limit=0",
+      "file": "series-unfiltered.json",
+      "sha256": "9ec17eb5694508e723f2553101446ecaad5ec80705cc952c3a060d1098f7d39f",
+      "bytes": 614,
+      "httpDate": "Thu, 19 Nov 2026 07:30:09 GMT",
+      "requestStartedAt": "2026-11-19T07:30:09.554723532Z",
+      "headersAt": "2026-11-19T07:30:09.556060677Z",
+      "total": 3,
+      "count": 3,
+      "ids": [
+        "tmdb:tv:21",
+        "tmdb:series:22",
+        "tmdb:tv:23"
+      ],
+      "similar": {
+        "tmdbId": 88,
+        "mediaType": "series",
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T07:25:08Z",
+        "expiresAt": "2026-11-19T13:25:08Z",
+        "scope": "returned-results"
+      }
+    },
+    {
+      "name": "movie-global-locale",
+      "request": "/api/users/profile/display-list?source=similar-cached\u0026mediaType=movie\u0026tmdbId=77\u0026limit=0",
+      "file": "movie-global-locale.json",
+      "sha256": "511654d20d151d5dd61943989a5457312577a8cfc177de01c7008f3865ebcea5",
+      "bytes": 805,
+      "httpDate": "Thu, 19 Nov 2026 07:30:09 GMT",
+      "requestStartedAt": "2026-11-19T07:30:09.664009202Z",
+      "headersAt": "2026-11-19T07:30:09.665284905Z",
+      "total": 5,
+      "count": 5,
+      "ids": [
+        "tmdb:movie:1",
+        "tmdb:movie:2",
+        "tmdb:movie:3",
+        "tmdb:movie:4",
+        "tmdb:movie:5"
+      ],
+      "similar": {
+        "tmdbId": 77,
+        "mediaType": "movie",
+        "metadataLanguage": "en-US",
+        "observedAt": "2026-11-19T07:25:08Z",
+        "expiresAt": "2026-11-19T13:25:08Z",
+        "scope": "returned-results"
+      }
+    },
+    {
+      "name": "late-filtered",
+      "request": "/api/users/profile/display-list?source=similar-cached\u0026mediaType=movie\u0026tmdbId=77\u0026originalLanguages=fra\u0026limit=1",
+      "file": "late-filtered.json",
+      "sha256": "167924841d6f2ce6e9b29a7ea2fff445cfef33b005e2181641ed570d632f0252",
+      "bytes": 397,
+      "httpDate": "Thu, 19 Nov 2026 07:30:09 GMT",
+      "requestStartedAt": "2026-11-19T07:30:09.820429693Z",
+      "headersAt": "2026-11-19T07:30:09.866153457Z",
+      "total": 2,
+      "count": 1,
+      "ids": [
+        "tmdb:movie:650"
+      ],
+      "similar": {
+        "tmdbId": 77,
+        "mediaType": "movie",
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T07:25:08Z",
+        "expiresAt": "2026-11-19T13:25:08Z",
+        "scope": "returned-results"
+      }
+    },
+    {
+      "name": "late-continuation",
+      "request": "/api/users/profile/display-list?source=similar-cached\u0026mediaType=movie\u0026tmdbId=77\u0026originalLanguages=fra\u0026limit=1\u0026offset=1",
+      "file": "late-continuation.json",
+      "sha256": "abb050d9f0f1ba45384e19829281792fcd42b4c6e27dfc2b5cd184c6284c426d",
+      "bytes": 397,
+      "httpDate": "Thu, 19 Nov 2026 07:30:10 GMT",
+      "requestStartedAt": "2026-11-19T07:30:10.039660818Z",
+      "headersAt": "2026-11-19T07:30:10.089251673Z",
+      "total": 2,
+      "count": 1,
+      "ids": [
+        "tmdb:movie:653"
+      ],
+      "similar": {
+        "tmdbId": 77,
+        "mediaType": "movie",
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T07:25:08Z",
+        "expiresAt": "2026-11-19T13:25:08Z",
+        "scope": "returned-results"
+      }
+    },
+    {
+      "name": "empty-capability",
+      "request": "/api/users/profile/display-list?source=similar-cached\u0026mediaType=movie\u0026tmdbId=77\u0026limit=0",
+      "file": "empty-capability.json",
+      "sha256": "a0fc0e02f58af3ca6fb97f5c41a39ceed5cbc39b4b2af5cb096538932cc90a71",
+      "bytes": 257,
+      "httpDate": "Thu, 19 Nov 2026 07:30:10 GMT",
+      "requestStartedAt": "2026-11-19T07:30:10.216268214Z",
+      "headersAt": "2026-11-19T07:30:10.217437717Z",
+      "total": 0,
+      "count": 0,
+      "ids": [],
+      "similar": {
+        "tmdbId": 77,
+        "mediaType": "movie",
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T07:25:08Z",
+        "expiresAt": "2026-11-19T13:25:08Z",
+        "scope": "returned-results"
+      }
+    }
+  ]
+}

@@ -80,6 +80,43 @@ sealed class BrowseList {
               catch (_: IllegalArgumentException) { null }
         }
     }
+    /** Explicit finite normal Similar results; neither a provider search nor a retained CW pool. */
+    class SimilarCached private constructor(
+        val seedID: Long,
+        val kind: BrowseKind,
+        val seedName: String,
+        val originalContext: Long,
+        internal val originalClient: String,
+    ) : BrowseList() {
+        private var lastObservation: CachedSimilarObservation? = null
+        private var lastDeadline = Long.MAX_VALUE
+        private var lastClock: com.strmr.tv.api.ObservedResponseClock? = null
+        @Synchronized internal fun accept(observation: CachedSimilarObservation): Long {
+            if (observation.seedID != seedID || observation.kind != kind.mediaType || observation.scope != "returned-results" ||
+                observation.metadataLanguage.isBlank() || observation.metadataLanguage.length > 32 || observation.metadataLanguage.any { it < ' ' || it == '\u007f' } ||
+                observation.observedMillis > observation.clock.upperMillis() || observation.expiresMillis <= observation.observedMillis ||
+                observation.expiresMillis - observation.observedMillis > 86_400_000L || lastClock?.let { observation.clock.predates(it) } == true) throw ManagementPageFailure()
+            val next = observation.clock.deadlineNanos(observation.expiresMillis, 86_400_000L)
+            val deadline = if (lastObservation?.sameObservation(observation) == true) minOf(lastDeadline, next) else next
+            if (System.nanoTime() >= deadline) throw ManagementPageFailure()
+            lastObservation = observation; lastDeadline = deadline; lastClock = observation.clock
+            return deadline
+        }
+        companion object {
+            fun open(origin: BrowseList, expected: Long, producer: kotlinx.coroutines.Job, selected: () -> Boolean,
+                     clientIdentity: () -> String = { com.strmr.tv.app.Config.clientId }): SimilarCached? = try {
+                com.strmr.tv.api.ApiClient.inContext(expected) {
+                    if (!producer.isActive || !selected() || origin !is Similar) null
+                    else {
+                        val id = origin.tmdbId.toLongOrNull()
+                        require(id != null && id > 0 && id.toString() == origin.tmdbId)
+                        SimilarCached(id, origin.kind, origin.seed, expected, clientIdentity().also { require(it.isNotBlank()) })
+                    }
+                }
+            } catch (_: kotlinx.coroutines.CancellationException) { null }
+              catch (_: IllegalArgumentException) { null }
+        }
+    }
     /** Titles hidden from this profile ([com.strmr.tv.library.HiddenItemsStore]), where they can be unhidden. */
     data object Hidden : BrowseList()
     /** Titles the server keeps resolved until they are removed. */
@@ -133,6 +170,7 @@ sealed class BrowseList {
             is ContinueWatchingCached -> "Saved Continue Watching"
             is RecentlyWatchedCached -> "Saved Recently Watched"
             is PopularOnServerCached -> "Saved Popular on This Server"
+            is SimilarCached -> "Saved recommendations for $seedName"
             Hidden -> "Hidden"
             PermanentPrequeue -> "Permanent Prequeue"
             LovedStored -> "Saved Love Ratings"
@@ -184,6 +222,7 @@ sealed class BrowseList {
             is ContinueWatchingCached -> mapOf("source" to "continue-watching-cached")
             is RecentlyWatchedCached -> mapOf("source" to "recently-watched-cached")
             is PopularOnServerCached -> mapOf("source" to "popular-on-server-cached")
+            is SimilarCached -> mapOf("source" to "similar-cached", "tmdbId" to seedID.toString(), "mediaType" to kind.mediaType)
             Hidden -> mapOf("source" to "hidden")
             PermanentPrequeue -> mapOf("source" to "permanent-prequeue")
             LovedStored -> mapOf("source" to "loved-stored")
@@ -280,6 +319,7 @@ data class BrowsePage(val entries: List<BrowseEntry>, val total: Int, val genres
     val originalLanguageFilterSupported: Boolean = false,
     val collection: CachedCollectionObservation? = null,
     val watching: CachedWatchingObservation? = null,
+    val similar: CachedSimilarObservation? = null,
 ) {
     /**
      * The list's size once [fetched] items have been read, this page's included. Servers return

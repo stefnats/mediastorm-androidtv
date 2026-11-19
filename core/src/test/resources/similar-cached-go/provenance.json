@@ -1,0 +1,49 @@
+{
+  "backendCommit": "b244a0e1b6510acbfde6484e5672a73ac7f0e432",
+  "producerSHA256": "f6b81746736f4a924b0e739a8247a91fdc1b3fbc5dddb123c417fcac699718b9",
+  "overlaySHA256": "4be2ad14b51d0502161e41454065cf28eb60e370d153c91ae2b2ae7d14b9dceb",
+  "backendSourceHashes": {
+    "backend/handlers/similar_cached.go": "014b5365d5583a83fdb3b02adaaca2fec89d2335d16224bdae602ef36f613329",
+    "backend/handlers/cached_metadata_language.go": "f00b709784cf8849ccb4d07e6a49419b9bda6654aabde1caec1b13fb07721d5a",
+    "backend/handlers/similar_cached_test.go": "fb7272869dc8798c30832cfb4a58128ec7eaf312a6fa331b1de1ee22a5d8f5e1",
+    "backend/handlers/similar_cached_wire_test.go": "7b9a912f0d720dce68317eb5047a5e89bb73443d971fcf8f243fee7a233853ae",
+    "backend/services/metadata/similar_snapshot.go": "e898758f7ae845c29661e35dcc62bc3fb6b90b7c200f8613e35bb28e9e8102c0",
+    "backend/services/metadata/service.go": "262b26f1349fa7e9bf1add9c170939712593ed37177d902a4aa84f6e6893a4a3",
+    "backend/handlers/popular_titles_cached.go": "821822163b2a30441cc4b066166186b7f5bfa4573009379142216dbddb3c05f7",
+    "backend/handlers/popular_titles_cached_test.go": "c42328018af7686ac2f4881ef15ac139548337d24caab641226902d9eec4a29d",
+    "backend/handlers/popular_titles_cached_wire_test.go": "2a9824ca2db8dbf081ae0420b8fcb5b7449760ea988a2d74397b9b101500fb20",
+    "backend/handlers/recent_watches_cached.go": "01f17b4fc73f8aa34b4e6dbf3531a1b3f30e6343d536dded8ce2f0f501832e46",
+    "backend/handlers/cached_shared_activity.go": "637b1d1bf279231b4bbb365d2937e0fd6d10592f7139f0eee2c58f4df859af13",
+    "backend/handlers/display_list.go": "59f7e2ad234422ae3f1acafa89ae8e5539189ad603f1cec51c2318de27cded43",
+    "backend/handlers/display_list_query.go": "c86d140e81615ad8aa24cbc8cc01f43a5cfbe7c532efeebe3d481d0dcc8c6dde",
+    "backend/services/history/recent_watches_cached.go": "955882a8052990161fada8d0149d287010d4e4c06dd5e1cc04925d9b14dfc97e",
+    "backend/api/openapi/openapi.yaml": "f5cfa86cd443ae992db764b1e94d7c3ec7f375f162ea280844cda3cba5608c01",
+    "backend/handlers/recent_watches_cached_test.go": "9dc6c2e7b7c28991c0d8b70e41140553f47c15c01aba0d7c46fb90d536e0d90a",
+    "backend/handlers/recent_watches_cached_wire_test.go": "5d31de746c9f4d4f8a63ba44297b19ca06adfe3d5f64fb5703dbd507e7e9455d",
+    "backend/handlers/loved_stored_language_test.go": "d5d7841820da88262cc5fb72209ae950afa3356fbbd7de51d58d311ff1c01234",
+    "backend/handlers/continue_watching_cached_test.go": "dd4139036ee5cb17b9b25f5e766dcdfa89d2fd2af04907d359157bad7d8b9795",
+    "backend/models/history.go": "a79754499e4ba07561a43b3e98869dcf32e02242ccf197c65935f069ab581abc",
+    "backend/models/metadata.go": "4cd72499fbfe67a5251f78a8299d4ffe5f40a3cf06ebcc13e0adfe873afc13d4"
+  },
+  "acceptedRun": {
+    "exitCode": 0,
+    "subprocessClosed": true,
+    "accepted": true,
+    "counts": {
+      "pass_tests": 11,
+      "pass_packages": 1
+    },
+    "statusSHA256": "1b96031d9e24f0d14241c9f17fcb39ec496d5ec807c9fe79876f5471bbf7fa15",
+    "rawSHA256": "3742134c4a571221c0eed202faab92d5824f4537852f3257fd44de3c7900104f"
+  },
+  "replyManifestSHA256": "a0f586f29d157cb9bc794d436251530f6ea4946b867ff2cfd76ecea791ac309e",
+  "httpProvenance": "Actual httptest HTTP server Date, exact-loopback client, injected synthetic owner middleware; not full application login/PIN or live-provider execution.",
+  "inputProvenance": "Synthetic file observations read by the real cached Similar reader; actual normal producer round-trip is separately tested. Returned finite pool only, never all upstream catalogue pages.",
+  "sourceEvidence": {
+    "producer": "/home/stefan/ops-runbook/tmp/mediastorm-native-similar-cached-20261119/backend-exports/native_similar_cached_export_test.go",
+    "pre": "/home/stefan/ops-runbook/tmp/mediastorm-native-similar-cached-20261119/backend-exports/pre.json",
+    "status": "/home/stefan/ops-runbook/tmp/mediastorm-native-similar-cached-20261119/backend-exports/status.json",
+    "manifest": "/home/stefan/ops-runbook/tmp/mediastorm-native-similar-cached-20261119/backend-exports/replies/manifest.json"
+  },
+  "qualification": "Original actual-handler HTTP body bytes and manifest are unchanged. Decoder tests explicitly simulate a qualifying HTTP Date for frozen responses; positive portable HTTP replay uses the exact per-reply exported httpDate and actual receipt handling. This is the saved finite normal returned set, not all upstream catalogue pages, audio availability or playback permission. Portable transport tests do not execute Android sendOwnedRaw."
+}
