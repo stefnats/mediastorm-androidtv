@@ -1,0 +1,236 @@
+{
+  "httpProvenance": "Actual httptest HTTP server Date, exact-loopback client, injected synthetic owner middleware; not full application login/PIN or live-provider execution.",
+  "inputProvenance": "Synthetic file observations read by the real cached TMDB public-list reader; actual normal observer round-trip is separately tested. SourceType public-list names the existing global API-key-only operation and does not certify provider visibility. Finite returned items only, never all upstream catalogue pages.",
+  "replies": [
+    {
+      "name": "mixed-unfiltered",
+      "request": "/api/users/profile/display-list?source=tmdb-public-list-cached\u0026listId=77\u0026limit=0",
+      "file": "mixed-unfiltered.json",
+      "sha256": "54edca4795e778f2f388160d4fdad9739f0f3b3845cc3ec1a4ed0c5455eca95f",
+      "bytes": 801,
+      "httpDate": "Thu, 19 Nov 2026 09:41:02 GMT",
+      "requestStartedAt": "2026-11-19T09:41:02.42102108Z",
+      "headersAt": "2026-11-19T09:41:02.426330151Z",
+      "total": 5,
+      "count": 5,
+      "ids": [
+        "tmdb:movie:42",
+        "tmdb:tv:42",
+        "tmdb:movie:43",
+        "tmdb:tv:44",
+        "tmdb:movie:45"
+      ],
+      "publicList": {
+        "listId": 77,
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T09:36:02Z",
+        "expiresAt": "2026-11-19T15:36:02Z",
+        "scope": "returned-items"
+      }
+    },
+    {
+      "name": "unknown-only",
+      "request": "/api/users/profile/display-list?source=tmdb-public-list-cached\u0026listId=77\u0026includeUnknownOriginalLanguage=true\u0026limit=0",
+      "file": "unknown-only.json",
+      "sha256": "a4d192b70d9e634cd3360183cbbbeacaca9e784d54392e8db0b007bff4f0c129",
+      "bytes": 475,
+      "httpDate": "Thu, 19 Nov 2026 09:41:02 GMT",
+      "requestStartedAt": "2026-11-19T09:41:02.537659187Z",
+      "headersAt": "2026-11-19T09:41:02.539397169Z",
+      "total": 2,
+      "count": 2,
+      "ids": [
+        "tmdb:tv:44",
+        "tmdb:movie:45"
+      ],
+      "publicList": {
+        "listId": 77,
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T09:36:02Z",
+        "expiresAt": "2026-11-19T15:36:02Z",
+        "scope": "returned-items"
+      }
+    },
+    {
+      "name": "or-unknown",
+      "request": "/api/users/profile/display-list?source=tmdb-public-list-cached\u0026listId=77\u0026originalLanguages=fra\u0026includeUnknownOriginalLanguage=true\u0026sortBy=name\u0026limit=0",
+      "file": "or-unknown.json",
+      "sha256": "213a806b5a6b99a2cd1b88481697e1bb14986dc21f93d402bde8d3edb103d615",
+      "bytes": 690,
+      "httpDate": "Thu, 19 Nov 2026 09:41:02 GMT",
+      "requestStartedAt": "2026-11-19T09:41:02.655919142Z",
+      "headersAt": "2026-11-19T09:41:02.657306015Z",
+      "total": 4,
+      "count": 4,
+      "ids": [
+        "tmdb:tv:44",
+        "tmdb:movie:45",
+        "tmdb:movie:43",
+        "tmdb:tv:42"
+      ],
+      "publicList": {
+        "listId": 77,
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T09:36:02Z",
+        "expiresAt": "2026-11-19T15:36:02Z",
+        "scope": "returned-items"
+      }
+    },
+    {
+      "name": "name-alphabet",
+      "request": "/api/users/profile/display-list?source=tmdb-public-list-cached\u0026listId=77\u0026alphabet=B\u0026sortBy=name\u0026limit=1",
+      "file": "name-alphabet.json",
+      "sha256": "4f5cf79eeec81102270ed05a0f31a76be2e307d8cb00613c5e37d2c555e960d6",
+      "bytes": 384,
+      "httpDate": "Thu, 19 Nov 2026 09:41:02 GMT",
+      "requestStartedAt": "2026-11-19T09:41:02.783262151Z",
+      "headersAt": "2026-11-19T09:41:02.784579488Z",
+      "total": 2,
+      "count": 1,
+      "ids": [
+        "tmdb:movie:43"
+      ],
+      "publicList": {
+        "listId": 77,
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T09:36:02Z",
+        "expiresAt": "2026-11-19T15:36:02Z",
+        "scope": "returned-items"
+      }
+    },
+    {
+      "name": "blank-labels",
+      "request": "/api/users/profile/display-list?source=tmdb-public-list-cached\u0026listId=77\u0026alphabet=%23\u0026limit=0",
+      "file": "blank-labels.json",
+      "sha256": "1d09345d0d96ca2430c5a9038191d442271c85d25c1970de14a378ec4e0d2c37",
+      "bytes": 483,
+      "httpDate": "Thu, 19 Nov 2026 09:41:02 GMT",
+      "requestStartedAt": "2026-11-19T09:41:02.893972704Z",
+      "headersAt": "2026-11-19T09:41:02.895053605Z",
+      "total": 2,
+      "count": 2,
+      "ids": [
+        "tmdb:tv:44",
+        "tmdb:movie:45"
+      ],
+      "publicList": {
+        "listId": 77,
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T09:36:02Z",
+        "expiresAt": "2026-11-19T15:36:02Z",
+        "scope": "returned-items"
+      }
+    },
+    {
+      "name": "movies-only",
+      "request": "/api/users/profile/display-list?source=tmdb-public-list-cached\u0026listId=77\u0026filterMediaType=movie\u0026limit=0",
+      "file": "movies-only.json",
+      "sha256": "9bee21c6ca9249313ecb366093a46e202d485bcdc3baa2ab044949c93b8fadb4",
+      "bytes": 596,
+      "httpDate": "Thu, 19 Nov 2026 09:41:03 GMT",
+      "requestStartedAt": "2026-11-19T09:41:03.026618133Z",
+      "headersAt": "2026-11-19T09:41:03.029064534Z",
+      "total": 3,
+      "count": 3,
+      "ids": [
+        "tmdb:movie:42",
+        "tmdb:movie:43",
+        "tmdb:movie:45"
+      ],
+      "publicList": {
+        "listId": 77,
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T09:36:02Z",
+        "expiresAt": "2026-11-19T15:36:02Z",
+        "scope": "returned-items"
+      }
+    },
+    {
+      "name": "series-only",
+      "request": "/api/users/profile/display-list?source=tmdb-public-list-cached\u0026listId=77\u0026filterMediaType=series\u0026limit=0",
+      "file": "series-only.json",
+      "sha256": "c98ae4cb490fa93d35ae08adb2f0a079445a7ded766680041b318dd9b59267f4",
+      "bytes": 479,
+      "httpDate": "Thu, 19 Nov 2026 09:41:03 GMT",
+      "requestStartedAt": "2026-11-19T09:41:03.156022802Z",
+      "headersAt": "2026-11-19T09:41:03.157688847Z",
+      "total": 2,
+      "count": 2,
+      "ids": [
+        "tmdb:tv:42",
+        "tmdb:tv:44"
+      ],
+      "publicList": {
+        "listId": 77,
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T09:36:02Z",
+        "expiresAt": "2026-11-19T15:36:02Z",
+        "scope": "returned-items"
+      }
+    },
+    {
+      "name": "late-filtered",
+      "request": "/api/users/profile/display-list?source=tmdb-public-list-cached\u0026listId=77\u0026originalLanguages=fra\u0026limit=1",
+      "file": "late-filtered.json",
+      "sha256": "d1c42abf3a9bf052df6c0f0b1f7af3ce7a8ce2f3f8f77019e2579d9d212cc21d",
+      "bytes": 385,
+      "httpDate": "Thu, 19 Nov 2026 09:41:03 GMT",
+      "requestStartedAt": "2026-11-19T09:41:03.300276888Z",
+      "headersAt": "2026-11-19T09:41:03.34821594Z",
+      "total": 2,
+      "count": 1,
+      "ids": [
+        "tmdb:tv:650"
+      ],
+      "publicList": {
+        "listId": 77,
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T09:36:02Z",
+        "expiresAt": "2026-11-19T15:36:02Z",
+        "scope": "returned-items"
+      }
+    },
+    {
+      "name": "late-continuation",
+      "request": "/api/users/profile/display-list?source=tmdb-public-list-cached\u0026listId=77\u0026originalLanguages=fra\u0026limit=1\u0026offset=1",
+      "file": "late-continuation.json",
+      "sha256": "3c3d4dfc56df900d1697207b41cd3be9e57009398aa0e88e887a34c95157843a",
+      "bytes": 387,
+      "httpDate": "Thu, 19 Nov 2026 09:41:03 GMT",
+      "requestStartedAt": "2026-11-19T09:41:03.569666641Z",
+      "headersAt": "2026-11-19T09:41:03.619685962Z",
+      "total": 2,
+      "count": 1,
+      "ids": [
+        "tmdb:movie:653"
+      ],
+      "publicList": {
+        "listId": 77,
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T09:36:02Z",
+        "expiresAt": "2026-11-19T15:36:02Z",
+        "scope": "returned-items"
+      }
+    },
+    {
+      "name": "empty-capability",
+      "request": "/api/users/profile/display-list?source=tmdb-public-list-cached\u0026listId=77\u0026limit=0",
+      "file": "empty-capability.json",
+      "sha256": "780e873bf8549a949c9d974a2e3ab7e24a11250a68af0fd49fdabbe33b2e7646",
+      "bytes": 247,
+      "httpDate": "Thu, 19 Nov 2026 09:41:03 GMT",
+      "requestStartedAt": "2026-11-19T09:41:03.764122992Z",
+      "headersAt": "2026-11-19T09:41:03.764988868Z",
+      "total": 0,
+      "count": 0,
+      "ids": [],
+      "publicList": {
+        "listId": 77,
+        "metadataLanguage": "fr-US",
+        "observedAt": "2026-11-19T09:36:02Z",
+        "expiresAt": "2026-11-19T15:36:02Z",
+        "scope": "returned-items"
+      }
+    }
+  ]
+}

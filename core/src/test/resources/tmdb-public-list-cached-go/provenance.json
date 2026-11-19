@@ -1,0 +1,39 @@
+{
+  "backendCommit": "3eca9e98ebddcfb41f700f9240d5246622af7de3",
+  "producerSHA256": "1038b2cf5502019506e337d41820f17ab2c65fbfe4e9116bffe2ba027b17d360",
+  "overlaySHA256": "65f0eed01845ac9ac9f18c6bdb0066791f3bd5758de674ad37aa0fc4d72226bf",
+  "backendSourceHashes": {
+    "backend/api/openapi/openapi.yaml": "e54fbe7a44a0dd2bbce686b491352397fd2aa3f76acbc07ada0cabbfd47309eb",
+    "backend/api/tmdb_public_list_cached_access_test.go": "8e579a2d79b0473b39cf28026f1bfb170cf1a04c323ad80447a7f8ba33478688",
+    "backend/handlers/cached_metadata_language.go": "aa136de074a433e84b0c31305ffaea29d1bc52402ebfa9c2b412fd30ec22b5ac",
+    "backend/handlers/display_list.go": "d8900d80f4d5c7ff3d7fc20826f4326523fc8c2bb8d75047b8eb3631e5c5daba",
+    "backend/handlers/display_list_query.go": "740e9d874f722efeb4f54d4d26f4d599b0170c34d491d3fd77ee19059514e816",
+    "backend/handlers/tmdb_public_list_cached.go": "0a1a631c849f4b0d7e80535d85ed6104c23daf9bf38476dfeb1f6d7785ddeb66",
+    "backend/handlers/tmdb_public_list_cached_test.go": "763ba086b559527b4be543e00d99bf98961ea624856d5e8bdbe7bc057dee9b8e",
+    "backend/handlers/tmdb_public_list_cached_wire_test.go": "f46d172562314cc95c0a67ca86ba577943c2e1dab3cd18b18b1d32f732a3ba9c",
+    "backend/services/metadata/public_list_snapshot.go": "ea8097d2fe316d4fa95f6c05a1962075859f3a02ad5e87bb66a4ab6115c2a530",
+    "backend/services/metadata/public_list_snapshot_test.go": "c98a83e4e8001377f72ca939fe3f0f60bf1da9b5fe844095274750aaabede24c",
+    "backend/services/metadata/tmdb_client.go": "6f82d9174e728b0ac5ccd92bbabf6046bff570564b45b230bc2ec940e9046c8d"
+  },
+  "acceptedRun": {
+    "exitCode": 0,
+    "subprocessClosed": true,
+    "accepted": true,
+    "counts": {
+      "pass_tests": 11,
+      "pass_packages": 1
+    },
+    "statusSHA256": "88137ca20c4702b5f83234cf294c712a3e6bcbc1d1d3309d984ae39ccc85ab60",
+    "rawSHA256": "efd119ff4f60419002e2cc3563dfbe4b66a7df606f2adf1211840a11b8987741"
+  },
+  "replyManifestSHA256": "6031eabe7f8041fd17ce0bc1f233ad39e0fbebae412781e711b8e4d85c00e903",
+  "httpProvenance": "Actual httptest HTTP server Date, exact-loopback client, injected synthetic owner middleware; not full application login/PIN or live-provider execution.",
+  "inputProvenance": "Synthetic file observations read by the real cached TMDB public-list reader; actual normal observer round-trip is separately tested. SourceType public-list names the existing global API-key-only operation and does not certify provider visibility. Finite returned items only, never all upstream catalogue pages.",
+  "sourceEvidence": {
+    "producer": "/home/stefan/ops-runbook/tmp/mediastorm-native-public-list-cached-20261119/backend-exports/native_public_list_cached_export_test.go",
+    "pre": "/home/stefan/ops-runbook/tmp/mediastorm-native-public-list-cached-20261119/backend-exports/pre.json",
+    "status": "/home/stefan/ops-runbook/tmp/mediastorm-native-public-list-cached-20261119/backend-exports/status.json",
+    "manifest": "/home/stefan/ops-runbook/tmp/mediastorm-native-public-list-cached-20261119/backend-exports/replies/manifest.json"
+  },
+  "qualification": "Original actual-handler HTTP bodies and manifest are byte-exact. Decoder tests explicitly simulate a qualifying HTTP Date for frozen responses; positive portable HTTP replay uses exact per-reply exported httpDate and actual receipt handling. Inputs are synthetic observed file snapshots read by the real cache reader; normal producer proof is separate. Returned-items is a finite normal global-operation result, not public/private permission, all upstream catalogue pages, audio availability or playback authorization. Portable transport tests do not execute Android sendOwnedRaw."
+}

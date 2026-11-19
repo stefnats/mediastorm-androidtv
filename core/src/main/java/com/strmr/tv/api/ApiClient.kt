@@ -261,7 +261,7 @@ object ApiClient {
         return sendOwnedRaw(method, path, query, body, authorized, promptOnLock, timeoutMs, encodedQuery, headers, expectedContext, retryTransport).text
     }
 
-    /** Only explicit saved-feed and saved-Similar GETs opt into transport time/body bounds. */
+    /** Only explicit saved-feed, saved-Similar and saved public-list GETs opt into transport time/body bounds. */
     internal suspend fun sendObservedRaw(path: String, query: Map<String, String>, expectedContext: Long): ObservedRawResponse =
         sendOwnedRaw("GET", path, query, expectedContext = expectedContext, observeResponse = true)
 
@@ -488,7 +488,7 @@ suspend fun Call.await(observeResponse: Boolean = false): HttpResult = suspendCa
 /** This is the actual sender guard, independent of Android configuration for portable checks. */
 internal fun requireObservedBrowseRequest(method: String, path: String, profilePath: String, query: Map<String, String>, expectedContext: Boolean) {
     require(method == "GET" && expectedContext && path == "$profilePath/display-list" &&
-        query["source"] in setOf("continue-watching-cached", "similar-cached"))
+        query["source"] in setOf("continue-watching-cached", "similar-cached", "tmdb-public-list-cached"))
 }
 
 /** Presentation freshness only; never an auth, PIN, file or playback capability. */

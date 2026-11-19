@@ -66,12 +66,12 @@ fun BrowseControls(
     var panel by remember { mutableStateOf<Panel?>(null) }
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         if (parts.size > 1) Control(parts.getOrElse(part) { "" }) { panel = Panel.PART }
-        if (list.sorts.isNotEmpty() && (list != BrowseList.Hidden && list != BrowseList.LovedStored && list !is BrowseList.CollectionCached && list !is BrowseList.ContinueWatchingCached && list !is BrowseList.RecentlyWatchedCached && list !is BrowseList.PopularOnServerCached && list !is BrowseList.SimilarCached || originalLanguageFilterSupported)) {
+        if (list.sorts.isNotEmpty() && (list != BrowseList.Hidden && list != BrowseList.LovedStored && list !is BrowseList.CollectionCached && list !is BrowseList.ContinueWatchingCached && list !is BrowseList.RecentlyWatchedCached && list !is BrowseList.PopularOnServerCached && list !is BrowseList.SimilarCached && list !is BrowseList.TMDBPublicListCached || originalLanguageFilterSupported)) {
             val arrow = if (options.sort == BrowseSort.DEFAULT) "" else if (options.ascending) " ↑" else " ↓"
             Control("Sort: ${options.sort.labelFor(list)}$arrow") { panel = Panel.SORT }
             if (options.sort == BrowseSort.RATING && list.filters) Control(options.ratingSource.label) { panel = Panel.RATING }
         }
-        if (list.filters || (list == BrowseList.Hidden || list == BrowseList.LovedStored || list is BrowseList.CollectionCached || list is BrowseList.ContinueWatchingCached || list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached || list is BrowseList.SimilarCached) && originalLanguageFilterSupported) {
+        if (list.filters || (list == BrowseList.Hidden || list == BrowseList.LovedStored || list is BrowseList.CollectionCached || list is BrowseList.ContinueWatchingCached || list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached || list is BrowseList.SimilarCached || list is BrowseList.TMDBPublicListCached) && originalLanguageFilterSupported) {
             Control(options.kind?.noun ?: "Movies & Shows") { panel = Panel.KIND }
             if (list.filters) Control(options.watch.label) { panel = Panel.WATCH }
             if (genres.isNotEmpty()) {

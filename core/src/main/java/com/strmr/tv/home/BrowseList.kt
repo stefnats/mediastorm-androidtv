@@ -117,6 +117,41 @@ sealed class BrowseList {
               catch (_: IllegalArgumentException) { null }
         }
     }
+    /** Explicit finite normal public-list items; no source generation or private-list permission. */
+    class TMDBPublicListCached private constructor(
+        val listID: Long,
+        val listName: String,
+        val initialKind: BrowseKind?,
+        val originalContext: Long,
+        internal val originalClient: String,
+    ) : BrowseList() {
+        private var lastObservation: CachedTMDBPublicListObservation? = null
+        private var lastDeadline = Long.MAX_VALUE
+        private var lastClock: com.strmr.tv.api.ObservedResponseClock? = null
+        @Synchronized internal fun accept(observation: CachedTMDBPublicListObservation): Long {
+            if (observation.listID != listID || observation.scope != "returned-items" ||
+                observation.metadataLanguage.isBlank() || observation.metadataLanguage.length > 32 || observation.metadataLanguage.any { it < ' ' || it == '\u007f' } ||
+                observation.observedMillis > observation.clock.upperMillis() || observation.expiresMillis <= observation.observedMillis ||
+                observation.expiresMillis - observation.observedMillis > 86_400_000L || lastClock?.let { observation.clock.predates(it) } == true) throw ManagementPageFailure()
+            val next = observation.clock.deadlineNanos(observation.expiresMillis, 86_400_000L)
+            val deadline = if (lastObservation?.sameObservation(observation) == true) minOf(lastDeadline, next) else next
+            if (System.nanoTime() >= deadline) throw ManagementPageFailure()
+            lastObservation = observation; lastDeadline = deadline; lastClock = observation.clock
+            return deadline
+        }
+        companion object {
+            fun open(origin: BrowseList, query: Map<String,String>, expected: Long, producer: kotlinx.coroutines.Job, selected: () -> Boolean,
+                     clientIdentity: () -> String = { com.strmr.tv.app.Config.clientId }): TMDBPublicListCached? = try {
+                com.strmr.tv.api.ApiClient.inContext(expected) {
+                    if (!producer.isActive || !selected()) null
+                    else tmdbPublicListSelection(origin, query)?.let {
+                        TMDBPublicListCached(it.listID, (origin as Remote).name, it.initialKind, expected, clientIdentity().also { require(it.isNotBlank()) })
+                    }
+                }
+            } catch (_: kotlinx.coroutines.CancellationException) { null }
+              catch (_: IllegalArgumentException) { null }
+        }
+    }
     /** Titles hidden from this profile ([com.strmr.tv.library.HiddenItemsStore]), where they can be unhidden. */
     data object Hidden : BrowseList()
     /** Titles the server keeps resolved until they are removed. */
@@ -171,6 +206,7 @@ sealed class BrowseList {
             is RecentlyWatchedCached -> "Saved Recently Watched"
             is PopularOnServerCached -> "Saved Popular on This Server"
             is SimilarCached -> "Saved recommendations for $seedName"
+            is TMDBPublicListCached -> "Saved items from $listName"
             Hidden -> "Hidden"
             PermanentPrequeue -> "Permanent Prequeue"
             LovedStored -> "Saved Love Ratings"
@@ -223,6 +259,7 @@ sealed class BrowseList {
             is RecentlyWatchedCached -> mapOf("source" to "recently-watched-cached")
             is PopularOnServerCached -> mapOf("source" to "popular-on-server-cached")
             is SimilarCached -> mapOf("source" to "similar-cached", "tmdbId" to seedID.toString(), "mediaType" to kind.mediaType)
+            is TMDBPublicListCached -> mapOf("source" to "tmdb-public-list-cached", "listId" to listID.toString())
             Hidden -> mapOf("source" to "hidden")
             PermanentPrequeue -> mapOf("source" to "permanent-prequeue")
             LovedStored -> mapOf("source" to "loved-stored")
@@ -320,6 +357,7 @@ data class BrowsePage(val entries: List<BrowseEntry>, val total: Int, val genres
     val collection: CachedCollectionObservation? = null,
     val watching: CachedWatchingObservation? = null,
     val similar: CachedSimilarObservation? = null,
+    val publicList: CachedTMDBPublicListObservation? = null,
 ) {
     /**
      * The list's size once [fetched] items have been read, this page's included. Servers return

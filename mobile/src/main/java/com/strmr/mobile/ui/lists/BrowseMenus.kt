@@ -62,12 +62,12 @@ fun BrowseActions(model: ListGridModel) {
     var deleting by remember(operations) { mutableStateOf(false) }
     val list = model.list
 
-    if (list == BrowseList.ContinueWatching || model.canOpenSavedRecent || model.canOpenSavedPopular || model.canOpenSavedSimilar) Box {
+    if (list == BrowseList.ContinueWatching || model.canOpenSavedRecent || model.canOpenSavedPopular || model.canOpenSavedSimilar || model.canOpenSavedPublicList) Box {
         IconButton(onClick = { if (selected()) savedFeedMenu = true }) { Icon(Icons.Filled.MoreVert, "More") }
         DropdownMenu(expanded = savedFeedMenu, onDismissRequest = { savedFeedMenu = false }) {
-            DropdownMenuItem(text = { Text(if (model.canOpenSavedRecent) "Browse saved Recently Watched" else if (model.canOpenSavedPopular) "Browse saved Popular on This Server" else if (model.canOpenSavedSimilar) "Browse saved recommendations" else "Browse saved Continue Watching") }, onClick = {
+            DropdownMenuItem(text = { Text(if (model.canOpenSavedRecent) "Browse saved Recently Watched" else if (model.canOpenSavedPopular) "Browse saved Popular on This Server" else if (model.canOpenSavedSimilar) "Browse saved recommendations" else if (model.canOpenSavedPublicList) "Browse saved list" else "Browse saved Continue Watching") }, onClick = {
                 val producer = requireNotNull(scope.coroutineContext[kotlinx.coroutines.Job])
-                val accepted = if (model.canOpenSavedRecent) model.openSavedRecent(producer, selected) else if (model.canOpenSavedPopular) model.openSavedPopular(producer, selected) else if (model.canOpenSavedSimilar) model.openSavedSimilar(producer, selected) else model.openSavedWatching(producer, selected)
+                val accepted = if (model.canOpenSavedRecent) model.openSavedRecent(producer, selected) else if (model.canOpenSavedPopular) model.openSavedPopular(producer, selected) else if (model.canOpenSavedSimilar) model.openSavedSimilar(producer, selected) else if (model.canOpenSavedPublicList) model.openSavedPublicList(producer, selected) else model.openSavedWatching(producer, selected)
                 savedFeedMenu = false
                 if (accepted != null) com.strmr.tv.api.ApiClient.inContext(model.dataContext) { navigator.openList(accepted) }
             })
@@ -87,7 +87,7 @@ fun BrowseActions(model: ListGridModel) {
             else Icon(Icons.Filled.Casino, "Random")
         }
     }
-    if (list.sorts.isNotEmpty() && (list != BrowseList.Hidden && list != BrowseList.LovedStored && list !is BrowseList.CollectionCached && list !is BrowseList.ContinueWatchingCached && list !is BrowseList.RecentlyWatchedCached && list !is BrowseList.PopularOnServerCached && list !is BrowseList.SimilarCached || model.originalLanguageFilterSupported)) {
+    if (list.sorts.isNotEmpty() && (list != BrowseList.Hidden && list != BrowseList.LovedStored && list !is BrowseList.CollectionCached && list !is BrowseList.ContinueWatchingCached && list !is BrowseList.RecentlyWatchedCached && list !is BrowseList.PopularOnServerCached && list !is BrowseList.SimilarCached && list !is BrowseList.TMDBPublicListCached || model.originalLanguageFilterSupported)) {
         Box {
             IconButton(onClick = { sorting = true }) { Icon(Icons.AutoMirrored.Filled.Sort, "Sort") }
             DropdownMenu(expanded = sorting, onDismissRequest = { sorting = false }) {
