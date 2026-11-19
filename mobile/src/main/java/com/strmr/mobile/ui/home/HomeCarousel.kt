@@ -19,6 +19,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,6 +41,17 @@ import com.strmr.mobile.ui.components.cardClicks
 import com.strmr.mobile.ui.components.showsProgress
 import com.strmr.tv.api.Artwork
 import com.strmr.tv.home.HomeCard
+import com.strmr.tv.home.HeroActions
+import com.strmr.tv.home.heroCta
+import com.strmr.tv.library.ProfileDataContext
+import com.strmr.tv.library.CustomListSelectionKey
+import com.strmr.tv.player.PlaybackCoordinator
+import com.strmr.tv.ui.SourceHintBadge
+import com.strmr.tv.ui.rememberSourceHint
+import com.strmr.tv.ui.rememberVisibleTitleSource
+import com.strmr.mobile.ui.shell.LocalNavigator
+import com.strmr.mobile.ui.shell.Route
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 
 /** How long a carousel slide stays before the next slides in (the iPhone app's eight seconds). */
@@ -49,9 +64,11 @@ private const val SLIDE_MS = 8_000L
  * starts the eight seconds over. Tap opens, long press shows the title menu.
  */
 @Composable
-fun HomeCarousel(slides: List<HomeCard>, onCard: (HomeCard) -> Unit, onMenu: (HomeCard) -> Unit) {
+fun HomeCarousel(slides: List<HomeCard>, onCard: (HomeCard) -> Unit, onMenu: (HomeCard) -> Unit,
+                 dataContext: Long, parent: Job, selected: () -> Boolean, currentSlides: () -> List<HomeCard>) {
     if (slides.isEmpty()) return
     val pager = rememberPagerState { slides.size }
+    val navigator = LocalNavigator.current
     val landscapePhone = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp && it.smallestScreenWidthDp < 600 }
     LaunchedEffect(pager.currentPage, pager.isScrollInProgress, slides.size) {
         if (slides.size < 2 || pager.isScrollInProgress) return@LaunchedEffect
@@ -75,7 +92,23 @@ fun HomeCarousel(slides: List<HomeCard>, onCard: (HomeCard) -> Unit, onMenu: (Ho
                 key = { slides[it].id },
             ) { page ->
                 val card = slides[page]
-                CarouselTile(card, Modifier.fillMaxSize().cardClicks({ onCard(card) }, { onMenu(card) }))
+                fun selectedHero() = dataContext == ProfileDataContext.current && parent.isActive && selected() && page == pager.currentPage && !pager.isScrollInProgress && currentSlides().getOrNull(page) === card
+                val active = selectedHero()
+                val visibleSource = rememberVisibleTitleSource(card, enabled = active)
+                val source by rememberUpdatedState(visibleSource.source)
+                val hint = rememberSourceHint(visibleSource.source)
+                val actions = remember(CustomListSelectionKey(card), dataContext, parent, active) {
+                    HeroActions(card, dataContext, parent,
+                        selected = { selectedHero() },
+                        currentSlide = { currentSlides().getOrNull(pager.currentPage) }, source = { source },
+                        prepareBeforeOpen = false, prepare = PlaybackCoordinator::prewarm,
+                        discard = { value, expected -> PlaybackCoordinator.invalidateWarmSources(value.titleId, expected) },
+                        open = { value, autoplay, prewarm -> navigator.push(Route.Details(value, autoplay = autoplay, prewarmOnOpen = prewarm)) })
+                }
+                DisposableEffect(actions) { onDispose { actions.close() } }
+                CarouselTile(card, hint, Modifier.fillMaxSize().then(visibleSource.modifier).cardClicks({
+                    if (card.target != null) actions.details(heroCta(card.progress, hint).confirmedMissing) else if (selectedHero()) onCard(card)
+                }, { if (selectedHero()) onMenu(card) }))
             }
             if (slides.size > 1) PageDots(slides.size, pager.currentPage, Modifier.align(Alignment.CenterHorizontally))
         }
@@ -83,7 +116,7 @@ fun HomeCarousel(slides: List<HomeCard>, onCard: (HomeCard) -> Unit, onMenu: (Ho
 }
 
 @Composable
-private fun CarouselTile(card: HomeCard, modifier: Modifier) {
+private fun CarouselTile(card: HomeCard, sourceHint: com.strmr.tv.home.SourceHint?, modifier: Modifier) {
     Box(modifier.clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
         ArtImage(card.backdropUrl ?: card.artworkUrl, "w1280", card.title, Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f))))
@@ -106,6 +139,10 @@ private fun CarouselTile(card: HomeCard, modifier: Modifier) {
             }
             if (card.subtitle.isNotEmpty()) {
                 Text(card.subtitle, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.75f), maxLines = 1)
+            }
+            sourceHint?.let { SourceHintBadge(it) }
+            if (heroCta(card.progress, sourceHint).confirmedMissing) {
+                Text("Details", style = MaterialTheme.typography.labelMedium, color = Color.White)
             }
             if (showsProgress(card.progress)) ProgressLine(card.progress, Modifier.padding(top = 4.dp))
         }

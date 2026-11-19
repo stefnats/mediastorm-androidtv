@@ -43,6 +43,7 @@ import com.strmr.tv.app.AppSession
 import com.strmr.tv.home.BrowseList
 import com.strmr.tv.home.CardText
 import com.strmr.tv.home.CarouselPick
+import com.strmr.tv.home.heroSlides
 import com.strmr.tv.home.HomeLayoutStore
 import com.strmr.tv.home.HomeSlot
 import com.strmr.tv.home.HomeStore
@@ -126,7 +127,7 @@ private fun HomeContent(entry: HomeEntry, padding: PaddingValues) {
     val slots = store.slots
     val carouselId = if (layout.topCarousel) CarouselPick.pick(slots, layout.carouselRow) else null
     val carouselShelf = (slots.firstOrNull { it.id == carouselId } as? HomeSlot.Shelf)?.shelf
-    val slides = remember(carouselShelf) { carouselShelf?.let(CarouselPick::slides).orEmpty() }
+    val slides = heroSlides(carouselShelf)
     val showTitles = layout.cardText != CardText.NONE
 
     PullToRefreshBox(
@@ -147,7 +148,10 @@ private fun HomeContent(entry: HomeEntry, padding: PaddingValues) {
         ) {
             if (slides.isNotEmpty()) {
                 item(key = "__carousel__") {
-                    HomeCarousel(slides, onCard = onCard, onMenu = { TitleMenu.show(it, menuContext, requireNotNull(menuScope.coroutineContext[Job])) })
+                    HomeCarousel(slides, onCard = onCard, onMenu = { TitleMenu.show(it, menuContext, requireNotNull(menuScope.coroutineContext[Job])) },
+                        dataContext = store.dataContext, parent = requireNotNull(scope.coroutineContext[Job]),
+                        selected = { store.isCurrent && HomeViewStore.current == store.view && navigator.section == com.strmr.mobile.ui.shell.Section.HOME && navigator.current.isEmpty() },
+                        currentSlides = { (store.slots.firstOrNull { it.id == carouselId } as? HomeSlot.Shelf)?.shelf?.let(CarouselPick::slides).orEmpty() })
                 }
             }
             items(slots.filterNot { it.id == carouselId || it is HomeSlot.Failed }, key = { it.id }) { slot ->

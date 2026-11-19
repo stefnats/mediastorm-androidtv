@@ -7,6 +7,7 @@ import com.strmr.tv.api.TitleSourceDemand
 import com.strmr.tv.api.TitleSourceResponse
 import com.strmr.tv.api.toTitleSourceBody
 import com.strmr.tv.api.SourceAvailability
+import com.strmr.tv.library.ProfileDataContext
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -32,16 +33,23 @@ interface TitleSourceGateway {
     fun isCurrent(): Boolean
     suspend fun update(view: String, body: TitleSourceDemand): TitleSourceResponse
 }
-class ServerTitleSourceGateway : TitleSourceGateway {
+class ServerTitleSourceGateway(
+    private val send: suspend (String, TitleSourceDemand, Long) -> TitleSourceResponse = { path, body, expected ->
+        ApiClient.send("PUT", path, body = body.toTitleSourceBody(), promptOnLock = false, timeoutMs = 5_000, expectedContext = expected)
+    },
+) : TitleSourceGateway {
+    private val context = ProfileDataContext.current
     private val profile = ApiClient.profileId
     private val server = ApiClient.baseUrl
     private val account = ApiClient.session?.accountId
     private val remote = ApiClient.remoteCredential
     private val path = ApiClient.profilePath
-    override fun isCurrent() = profile == ApiClient.profileId && server == ApiClient.baseUrl && account == ApiClient.session?.accountId && remote == ApiClient.remoteCredential
+    override fun isCurrent() = context == ProfileDataContext.current && profile == ApiClient.profileId && server == ApiClient.baseUrl && account == ApiClient.session?.accountId && remote == ApiClient.remoteCredential
     override suspend fun update(view: String, body: TitleSourceDemand): TitleSourceResponse {
         if (!isCurrent()) throw CancellationException("Title source context changed")
-        return ApiClient.send("PUT", "$path/source-availability/titles/$view", body = body.toTitleSourceBody(), promptOnLock = false, timeoutMs = 5_000)
+        val reply = send("$path/source-availability/titles/$view", body, context)
+        if (!isCurrent()) throw CancellationException("Title source context changed")
+        return reply
     }
 }
 

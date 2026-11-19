@@ -43,6 +43,7 @@ import com.strmr.tv.app.AppLog
 import com.strmr.tv.home.BrowseList
 import com.strmr.tv.home.CAROUSEL_LOG
 import com.strmr.tv.home.CarouselPick
+import com.strmr.tv.home.heroSlides
 import com.strmr.tv.home.ExploreCard
 import com.strmr.tv.home.HeroSize
 import com.strmr.tv.home.HomeCard
@@ -143,7 +144,7 @@ private fun HomePage(store: HomeStore, memory: HomeFocusMemory, tabsFocused: () 
     // Top Carousel: one row feeds the carousel and isn't shown again below it.
     val carouselId = if (layout.topCarousel) CarouselPick.pick(store.slots, layout.carouselRow) else null
     val carouselShelf = (store.slots.firstOrNull { it.id == carouselId } as? HomeSlot.Shelf)?.shelf
-    val slides = remember(carouselShelf) { carouselShelf?.let(CarouselPick::slides).orEmpty() }
+    val slides = heroSlides(carouselShelf)
     val slideCount = slides.size
     val hasSlides = slideCount > 0
     val carouselFocus = remember { FocusRequester() }

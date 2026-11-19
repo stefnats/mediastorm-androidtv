@@ -44,3 +44,17 @@ class TitleSourceCoordinator(scope: CoroutineScope, private val gateway: TitleSo
 /** Visibility is demand only while the active window can actually show the card. */
 fun titleSourceActive(inWindow: Boolean, resumed: Boolean, focused: Boolean, playerOpen: Boolean, resolving: Boolean, ready: Boolean, completedPlayback: Boolean = false): Boolean =
     inWindow && resumed && focused && (!playerOpen || completedPlayback) && !resolving && ready
+
+/** Cached evidence belongs to one gateway lifetime, including its original profile epoch. */
+class TitleSourceCoordinatorStore(
+    private val scope: CoroutineScope,
+    private val gateway: () -> TitleSourceGateway = { ServerTitleSourceGateway() },
+) {
+    private var value: TitleSourceCoordinator? = null
+    fun current(): TitleSourceCoordinator {
+        val old = value
+        if (old != null && old.isCurrent()) return old
+        old?.close()
+        return TitleSourceCoordinator(scope, gateway()).also { value = it }
+    }
+}
