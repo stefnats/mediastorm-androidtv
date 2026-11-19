@@ -33,6 +33,7 @@ import com.strmr.tv.app.AppLog
 import com.strmr.tv.player.PlaybackCoordinator
 import com.strmr.tv.player.RecordingPartHandoff
 import com.strmr.tv.player.PlayerController
+import com.strmr.tv.player.recordingDerivedReady
 import com.strmr.tv.player.recordingPartReady
 import com.strmr.tv.player.canOpenPlayer
 import com.strmr.tv.player.SubtitleStyleStore
@@ -68,7 +69,7 @@ class MobilePlayerActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         val session = PlaybackCoordinator.pending
-        if (session == null || !session.canOpenPlayer() || !session.recordingPartReady()) {
+        if (session == null || !session.canOpenPlayer() || !session.recordingPartReady() || !session.recordingDerivedReady()) {
             finish()
             return
         }
@@ -81,7 +82,11 @@ class MobilePlayerActivity : ComponentActivity() {
         hideSystemBars()
         applyOrientation()
         PlaybackCoordinator.playerOpen = true
-        val c = PlayerController(this, session) { }
+        val c = try { PlayerController(this, session) { } }
+        catch (retired: kotlinx.coroutines.CancellationException) {
+            val joined = session.recordingDerived ?: throw retired
+            joined.release(); PlaybackCoordinator.playerOpen = false; finish(); return
+        }
         controller = c
         onBackPressedDispatcher.addCallback(this) {c.cancelRecordingParts();finish()}
         PlayerMediaSession.start(this, c)
@@ -140,7 +145,7 @@ class MobilePlayerActivity : ComponentActivity() {
     /** A title played from elsewhere while this one is open (paused behind the app, say): hand over to it. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (PlaybackCoordinator.pending?.let {it.canOpenPlayer() && it.recordingPartReady()}==true && controller != null) {
+        if (PlaybackCoordinator.pending?.let {it.canOpenPlayer() && it.recordingPartReady() && it.recordingDerivedReady()}==true && controller != null) {
             AppLog.i("Player", "new playback over the open player; restarting")
             relaunch = true
             finish()

@@ -265,21 +265,34 @@ object ApiClient {
     internal suspend fun sendObservedRaw(path: String, query: Map<String, String>, expectedContext: Long): ObservedRawResponse =
         sendOwnedRaw("GET", path, query, expectedContext = expectedContext, observeResponse = true)
 
+    /** Only the two explicit recording descriptor operations use this policy. */
+    internal suspend fun sendRecordingDerivedRaw(id: String, prepare: Boolean, expected: Long): ObservedRawResponse {
+        val request = inContext(expected) { com.strmr.tv.live.recordingDerivedRequest(id, profileId, prepare) }
+        return sendOwnedRaw(request.method, request.path, request.query, expectedContext = expected,
+            timeoutMs = if (prepare) 330_000 else 15_000, retryTransport = false, observeResponse = true,
+            observationPolicy = if (prepare) ObservedResponsePolicy.DERIVED_PREPARE else ObservedResponsePolicy.DERIVED_READ)
+    }
+
     private suspend fun sendOwnedRaw(
         method: String, path: String, query: Map<String, String> = emptyMap(), body: JsonElement? = null,
         authorized: Boolean = true, promptOnLock: Boolean = true, timeoutMs: Long = 30_000,
         encodedQuery: String? = null, headers: Map<String, String> = emptyMap(), expectedContext: Long? = null,
         retryTransport: Boolean = true, observeResponse: Boolean = false,
+        observationPolicy: ObservedResponsePolicy = ObservedResponsePolicy.BROWSE,
     ): ObservedRawResponse {
         val context = requestContexts.capture(expectedContext)
-        if (observeResponse) context.use { requireObservedBrowseRequest(method, path, profilePath, query, expectedContext != null) }
+        if (observeResponse) context.use {
+            if (observationPolicy == ObservedResponsePolicy.BROWSE) requireObservedBrowseRequest(method, path, profilePath, query, expectedContext != null)
+            else requireObservedDerivedRequest(method, path, query, profileId, expectedContext != null,
+                observationPolicy, body == null && encodedQuery == null && authorized && !retryTransport)
+        }
         if (method == "GET") SportsFixtures.response(path)?.let {
             context.check()
             if (observeResponse) throw ObservedResponseUnavailable()
             return ObservedRawResponse(it, null)
         }
         val prepared = context.use {
-            Prepared(method, url(path, query, encodedQuery), body?.toString(), timeoutMs, context, retryTransport, observeResponse).apply {
+            Prepared(method, url(path, query, encodedQuery), body?.toString(), timeoutMs, context, retryTransport, observeResponse, observationPolicy).apply {
                 this.headers.putAll(headers)
                 this.headers["X-Client-ID"] = Config.clientId
                 remoteCredential?.let { this.headers["X-Remote-Access-Credential"] = it }
@@ -306,7 +319,7 @@ object ApiClient {
     }
 
     /** A request retains the identity under which its URL and headers were prepared. */
-    private class Prepared(val method: String, var url: HttpUrl, val body: String?, val timeoutMs: Long, val context: RequestContext.Scope, val retryTransport: Boolean = true, val observeResponse: Boolean = false) {
+    private class Prepared(val method: String, var url: HttpUrl, val body: String?, val timeoutMs: Long, val context: RequestContext.Scope, val retryTransport: Boolean = true, val observeResponse: Boolean = false, val observationPolicy: ObservedResponsePolicy = ObservedResponsePolicy.BROWSE) {
         var observation: ObservedResponseClock? = null
         val headers = mutableMapOf<String, String>()
     }
@@ -371,11 +384,11 @@ object ApiClient {
             },
             onFailure = { error -> if (recoverConnection) onTransportFailure?.invoke(error) },
         ).execute {
-            (if (req.retryTransport) http else nonReplayingHttp).newCall(request).apply { timeout().timeout(req.timeoutMs, TimeUnit.MILLISECONDS) }.await(req.observeResponse)
+            (if (req.retryTransport) http else nonReplayingHttp).newCall(request).apply { timeout().timeout(req.timeoutMs, TimeUnit.MILLISECONDS) }.await(req.observeResponse, req.observationPolicy)
         }
         if (!response.isSuccessful) throw ApiError.Http(HttpFailure(response.code, response.text, response.retryAfter))
         req.context.use {
-            if (req.observeResponse) req.observation = response.observedClock(req.url)
+            if (req.observeResponse) req.observation = response.observedClock(req.url, req.observationPolicy.maxRoundTripMillis)
         }
         return response.text
     }
@@ -453,9 +466,9 @@ object ApiClient {
 class HttpResult(val code: Int, val text: String, val retryAfter: String?) {
     val isSuccessful get() = code in 200..299
     internal var observation: NetworkResponseObservation? = null
-    internal fun observedClock(expectedUrl: HttpUrl): ObservedResponseClock {
+    internal fun observedClock(expectedUrl: HttpUrl, maxRoundTripMillis: Long = 120_000L): ObservedResponseClock {
         if (!isSuccessful) throw ObservedResponseUnavailable()
-        return observation?.clock(expectedUrl) ?: throw ObservedResponseUnavailable()
+        return observation?.clock(expectedUrl, maxRoundTripMillis) ?: throw ObservedResponseUnavailable()
     }
 }
 
@@ -463,13 +476,15 @@ class HttpResult(val code: Int, val text: String, val retryAfter: String?) {
  * Runs the call on OkHttp's dispatcher and reads the body there; cancelling the coroutine
  * cancels the call.
  */
-suspend fun Call.await(observeResponse: Boolean = false): HttpResult = suspendCancellableCoroutine { cont ->
+suspend fun Call.await(observeResponse: Boolean = false, observationPolicy: ObservedResponsePolicy = ObservedResponsePolicy.BROWSE): HttpResult = suspendCancellableCoroutine { cont ->
     val started = if (observeResponse) System.nanoTime() else 0L
     enqueue(object : Callback {
         override fun onResponse(call: Call, response: Response) {
             val result = try {
                 response.use {
-                    val text = if (observeResponse) boundedObservedBody(it) else it.body?.string() ?: ""
+                    if (observeResponse && observationPolicy != ObservedResponsePolicy.BROWSE && it.isSuccessful &&
+                        it.body?.contentType()?.let { type -> type.type == "application" && type.subtype == "json" } != true) throw ObservedResponseUnavailable()
+                    val text = if (observeResponse) boundedObservedBody(it, observationPolicy.bodyLimit) else it.body?.string() ?: ""
                     HttpResult(it.code, text, it.header("Retry-After")).apply {
                         if (observeResponse && isSuccessful) observation = NetworkResponseObservation(it.request.url, it.headers.values("Date"), started, System.nanoTime())
                     }
@@ -495,14 +510,14 @@ internal fun requireObservedBrowseRequest(method: String, path: String, profileP
 internal class ObservedResponseUnavailable : IOException("Saved observation time unavailable")
 internal data class ObservedRawResponse(val text: String, val clock: ObservedResponseClock?)
 internal class NetworkResponseObservation(private val url: HttpUrl, private val dates: List<String>, private val started: Long, private val received: Long) {
-    fun clock(expected: HttpUrl): ObservedResponseClock {
+    fun clock(expected: HttpUrl, maxRoundTripMillis: Long = 120_000L): ObservedResponseClock {
         if (url != expected || dates.size != 1 || received < started) throw ObservedResponseUnavailable()
         val raw = dates.single()
         val formatter = java.time.format.DateTimeFormatter.ofPattern("EEE, dd MMM uuuu HH:mm:ss 'GMT'", java.util.Locale.US).withResolverStyle(java.time.format.ResolverStyle.STRICT)
         val date = try { java.time.LocalDateTime.parse(raw, formatter) } catch (_: Exception) { throw ObservedResponseUnavailable() }
         if (formatter.format(date) != raw) throw ObservedResponseUnavailable()
         val rtt = (received - started) / 1_000_000L + 1L
-        if (rtt !in 1..120_000L) throw ObservedResponseUnavailable()
+        if (maxRoundTripMillis !in setOf(15_000L, 120_000L, 330_000L) || rtt !in 1..maxRoundTripMillis) throw ObservedResponseUnavailable()
         val serverDate = date.toInstant(java.time.ZoneOffset.UTC).toEpochMilli()
         return ObservedResponseClock(serverDate + 1000L + rtt, received, serverDate)
     }
@@ -526,14 +541,25 @@ class ObservedResponseClock internal constructor(private val upperAtReceipt: Lon
     internal fun predates(previous: ObservedResponseClock): Boolean = serverDate < previous.serverDate
     override fun toString() = "ObservedResponseClock(presentation)"
 }
-private fun boundedObservedBody(response: Response): String {
+private fun boundedObservedBody(response: Response, limit: Long = 4L * 1024 * 1024): String {
     val source = response.body?.source() ?: throw ObservedResponseUnavailable()
     val buffer = okio.Buffer()
-    val limit = 4L * 1024 * 1024
     while (buffer.size <= limit) {
         val count = source.read(buffer, minOf(8192L, limit + 1L - buffer.size))
         if (count == -1L) break
     }
     if (buffer.size > limit) throw ObservedResponseUnavailable()
     return java.nio.charset.StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT).onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(buffer.readByteArray())).toString()
+}
+
+/** Finite body/time policies; the actual owned sender separately validates routes. */
+enum class ObservedResponsePolicy(val bodyLimit: Long, val maxRoundTripMillis: Long) {
+    BROWSE(4L * 1024 * 1024, 120_000L), DERIVED_READ(64L * 1024, 15_000L), DERIVED_PREPARE(64L * 1024, 330_000L)
+}
+internal fun requireObservedDerivedRequest(method: String, path: String, query: Map<String,String>, profile: String,
+    expected: Boolean, policy: ObservedResponsePolicy, emptyOwnedRequest: Boolean) {
+    val prepare = policy == ObservedResponsePolicy.DERIVED_PREPARE
+    require(policy != ObservedResponsePolicy.BROWSE && expected && emptyOwnedRequest && profile.isNotBlank() &&
+        query == mapOf("profileId" to profile) && method == (if (prepare) "POST" else "GET"))
+    require(Regex("/api/live/recordings/[A-Za-z0-9_-]{1,128}/derived" + if (prepare) "/join" else "").matches(path))
 }

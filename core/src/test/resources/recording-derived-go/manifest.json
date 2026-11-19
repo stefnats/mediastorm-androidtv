@@ -1,0 +1,53 @@
+{
+  "cases": [
+    {
+      "descriptor": "ready-two-parts.json",
+      "source": "source-two-parts.json",
+      "state": "ready"
+    },
+    {
+      "descriptor": "ready-incomplete-gaps.json",
+      "source": "source-incomplete-gaps.json",
+      "state": "ready"
+    },
+    {
+      "descriptor": "ready-256-parts.json",
+      "source": "source-256-parts.json",
+      "state": "ready"
+    },
+    {
+      "descriptor": "unknown-not-prepared.json",
+      "source": "source-two-parts.json",
+      "state": "unknown"
+    },
+    {
+      "descriptor": "unknown-configuration-changed.json",
+      "source": "source-two-parts.json",
+      "state": "unknown"
+    },
+    {
+      "descriptor": "unknown-source-changed.json",
+      "source": "source-two-parts.json",
+      "state": "unknown"
+    },
+    {
+      "descriptor": "unknown-expired.json",
+      "source": "source-two-parts.json",
+      "state": "unknown"
+    }
+  ],
+  "files": {
+    "ready-256-parts.json": "18807f9dad14183cc7d2efbd7308798292127b2c74ae746507ea03083fe333ee",
+    "ready-incomplete-gaps.json": "97219bd13b8a5597a28ae7cef1578bb719fed21989bb4797bbf62de3b0e6d728",
+    "ready-two-parts.json": "db0b2fc84159997ac1b96c868540fedeaa47474356251aada66f6d884ff468aa",
+    "source-256-parts.json": "031dc98eb9e56e0a02ab8bad9b6145a778c098d19a188d99e40d4456df8f68cc",
+    "source-incomplete-gaps.json": "998077fa4a9dbfb10fa896cf76e90aa69c1352aaddfd2653e107ade45e0cff10",
+    "source-two-parts.json": "bc008dc97b2f358f74ec43c7062d265824cc87245f9e8d82500af8db50063e68",
+    "unknown-configuration-changed.json": "521487d522ff08ffcb3200146db8b4cd7951774aa467f961c01ef2d10e3dfeef",
+    "unknown-expired.json": "2b1ebc7370ee601af56555035426178af64fe4b5870b1198ad1eec3ba067c293",
+    "unknown-not-prepared.json": "1da76eca6f52d30588ae39a8244c22cf6a25924135410c48068466de12c109c8",
+    "unknown-source-changed.json": "3052e787378d320be40a908232742cfa228cb1d2e8bc6408679e944eea7ffaa2"
+  },
+  "provenance": "actual Go models.Recording and recordings.DerivedRecording JSON serialization; synthetic metadata only",
+  "version": 1
+}

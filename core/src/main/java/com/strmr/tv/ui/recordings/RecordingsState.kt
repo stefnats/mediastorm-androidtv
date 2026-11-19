@@ -51,12 +51,22 @@ class RecordingsState(
     private val pageCurrent:()->Boolean={true},
     private val playback:(Recording,RecordingPart?,Long)->Unit={r,part,expected->if(part==null)PlaybackCoordinator.playRecording(r,expected)else PlaybackCoordinator.playRecordingPart(r,part,expected)},
 ) {
+    private var joinedTools: RecordingDerivedState? = null
+    fun joined(recording: Recording): RecordingDerivedState? {
+        if (!isCurrent || selected !== recording || !pageCurrent()) return null
+        val tools = joinedTools ?: RecordingDerivedState(scope, context, { selected },
+            { ApiClient.inContext(context) { profileId } },
+            { com.strmr.tv.app.AppSession.profile.value?.isKidsProfile == false },
+            { isCurrent && pageCurrent() }).also { joinedTools = it }
+        return tools.takeIf { it.eligible(recording) }
+    }
+    fun retireJoined() { joinedTools?.retire() }
     private var open=true
     private var sequence=0L
     private var generation by mutableLongStateOf(0L)
     val isCurrent get()=open && context==ProfileDataContext.current && scope.coroutineContext[Job]?.isActive!=false
     private fun check() {ProfileDataContext.requireCurrent(context);if(!open)throw CancellationException("Recordings page closed")}
-    fun dispose() {retireTiming();open=false;sequence++;generation++;recordings=emptyList();plans=emptyMap();rules=emptyList()}
+    fun dispose() {joinedTools?.dispose();retireTiming();open=false;sequence++;generation++;recordings=emptyList();plans=emptyMap();rules=emptyList()}
     class PartAction internal constructor(val recordingId:String,val part:RecordingPart,internal val context:Long,internal val generation:Long)
     fun partAction(r:Recording,part:RecordingPart):PartAction? = if(isCurrent && recordings.any {it==r} && selected?.id==r.id && RecordingCaptureRules.playable(r,part))PartAction(r.id,part,context,generation)else null
     fun playPart(action:PartAction) {
@@ -90,11 +100,11 @@ class RecordingsState(
     private var filterState by mutableStateOf(RecordingFilter.ALL)
     var filter: RecordingFilter
         get() = filterState
-        set(value) { if (value != filterState) { retireTiming(); filterState = value } }
+        set(value) { if (value != filterState) { retireJoined(); retireTiming(); filterState = value } }
     private var selectedState by mutableStateOf<String?>(null)
     var selectedId: String?
         get() = selectedState
-        set(value) { if (value != selectedState) { retireTiming(); selectedState = value } }
+        set(value) { if (value != selectedState) { retireJoined(); retireTiming(); selectedState = value } }
     /** Bumped after a delete: the deleted row had focus, so the page puts it on the new selection. */
     var deletions by mutableIntStateOf(0)
         private set
@@ -115,7 +125,7 @@ class RecordingsState(
         try {
             val loaded = access.recordings(context)
             currentCoroutineContext().ensureActive();check();if(request!=sequence)return
-            recordings=loaded;generation++;plans=emptyMap();plansContext=context
+            recordings=loaded;joinedTools?.observeCurrent(selected);generation++;plans=emptyMap();plansContext=context
             val loadedRules=optionalProfileRead {check();access.rules(context)}
             currentCoroutineContext().ensureActive();check();if(request!=sequence)return
             loadedRules?.let {rules=it}
@@ -133,7 +143,7 @@ class RecordingsState(
         }
     }
 
-    fun refresh() = scope.launch { load() }
+    fun refresh() = scope.launch { retireJoined(); load() }
 
     /** Each button carries its exact original state, recording/part instances and list generation. */
     class TimingAction internal constructor(
@@ -226,6 +236,7 @@ class RecordingsState(
 
     private fun act(r: Recording, verb: String, done: String, failed: String,onSuccess:()->Unit={}, call: suspend () -> Unit) {
         if (!isCurrent || busyId != null || recordings.none {it==r}) return
+        retireJoined()
         busyId = r.id
         scope.launch {
             try {

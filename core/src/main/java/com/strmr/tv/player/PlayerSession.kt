@@ -81,7 +81,17 @@ data class PlayerSession(
     internal val startupTiming: PlaybackStartupAttempt? = null,
     /** Original closed-part queue actor, never serialized as media or account authority. */
     val recordingPart: RecordingPartPlayback? = null,
-)
+    /** Exact ephemeral joined recording, with its original response deadline. */
+    val recordingDerived: RecordingDerivedPlayback? = null,
+) {
+    init {
+        recordingDerived?.let { source ->
+            require(ownership === source.owner && !reportsProgress && !isLive && !localFile && streamPath == null &&
+                prequeueId == null && recordingPart == null && progressSink == null && liveSessionId == null &&
+                growingRestart == null && retuneLive == null && request.start == null) { "Joined recording source cannot participate in catalogue playback" }
+        }
+    }
+}
 
 /** A resolved stream: its path, the server's track choice and what online subtitles match against. */
 data class ResolvedStream(
@@ -101,4 +111,4 @@ data class ResolvedStream(
 )
 
 /** Local-file callers must supply a live owner check at every player entry. */
-fun PlayerSession.playbackAllowed():Boolean = ownership?.isCurrent()!=false && (!localFile || runCatching {localFileAccess?.invoke()==true}.getOrDefault(false))
+fun PlayerSession.playbackAllowed():Boolean = ownership?.isCurrent()!=false && recordingDerived?.allowed()!=false && (!localFile || runCatching {localFileAccess?.invoke()==true}.getOrDefault(false))

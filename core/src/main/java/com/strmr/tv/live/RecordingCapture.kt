@@ -12,6 +12,7 @@ import kotlinx.serialization.json.*
 data class RecordingCapture(
     val version:Int=0, val phase:String?=null, val incomplete:Boolean?=null, val sourceChanges:Int?=null,
     val parts:List<RecordingPart> = emptyList(), val gaps:List<RecordingGap> = emptyList(),
+    val restored:Boolean=false,
 )
 
 data class RecordingPart(val index:Int,val startedAt:String,val endedAt:String?=null,val bytes:Long?=null,val endReason:String?=null,val streamPath:String?=null)
@@ -55,11 +56,12 @@ object RecordingCaptureSerializer:KSerializer<RecordingCapture> {
             if(end!=null && RecordingRules.instant(end)!!.isBefore(RecordingRules.instant(start)))return unknown
             RecordingGap(start,end,reason)
         }
-        return RecordingCapture(1,phase,incomplete,changes,parts.sortedBy {it.index},gaps)
+        val restored = if ("restored" in obj) obj.boolean("restored") ?: return unknown else false
+        return RecordingCapture(1,phase,incomplete,changes,parts.sortedBy {it.index},gaps,restored)
     }
     override fun serialize(encoder:Encoder,value:RecordingCapture) {
         (encoder as JsonEncoder).encodeJsonElement(buildJsonObject {
-            put("version",value.version);value.phase?.let {put("phase",it)};value.incomplete?.let {put("incomplete",it)};value.sourceChanges?.let {put("sourceChanges",it)}
+            put("version",value.version);if(value.restored)put("restored",true);value.phase?.let {put("phase",it)};value.incomplete?.let {put("incomplete",it)};value.sourceChanges?.let {put("sourceChanges",it)}
             putJsonArray("parts") {value.parts.forEach {part -> add(buildJsonObject {put("index",part.index);put("startedAt",part.startedAt);part.endedAt?.let {put("endedAt",it)};part.bytes?.let {put("bytes",it)};part.endReason?.let {put("endReason",it)};part.streamPath?.let {put("streamPath",it)}})}}
             putJsonArray("gaps") {value.gaps.forEach {gap -> add(buildJsonObject {put("startedAt",gap.startedAt);gap.endedAt?.let {put("endedAt",it)};put("reason",gap.reason)})}}
         })

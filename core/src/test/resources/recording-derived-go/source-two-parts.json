@@ -1,0 +1,43 @@
+{
+  "capture": {
+    "version": 1,
+    "phase": "finished",
+    "incomplete": false,
+    "sourceChanges": 0,
+    "parts": [
+      {
+        "index": 1,
+        "startedAt": "2026-11-19T10:00:00Z",
+        "endedAt": "2026-11-19T10:00:01Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-two-parts/parts/1"
+      },
+      {
+        "index": 2,
+        "startedAt": "2026-11-19T10:00:01Z",
+        "endedAt": "2026-11-19T10:00:02Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-two-parts/parts/2"
+      }
+    ],
+    "gaps": []
+  },
+  "id": "synthetic-two-parts",
+  "userId": "synthetic-adult",
+  "type": "",
+  "status": "completed",
+  "channelId": "synthetic-channel",
+  "channelName": "Synthetic channel",
+  "title": "Synthetic contract recording",
+  "sourceUrl": "",
+  "startAt": "2026-11-19T10:00:00Z",
+  "endAt": "2026-11-19T10:00:02Z",
+  "paddingBeforeSeconds": 0,
+  "paddingAfterSeconds": 0,
+  "actualStartAt": "2026-11-19T10:00:00Z",
+  "actualEndAt": "2026-11-19T10:00:02Z",
+  "createdAt": "2026-11-19T10:00:00Z",
+  "updatedAt": "2026-11-19T12:00:00Z"
+}

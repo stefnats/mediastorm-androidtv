@@ -1,0 +1,9 @@
+{
+  "recordingId": "synthetic-two-parts",
+  "state": "unknown",
+  "reason": "configuration_changed",
+  "sourceIncomplete": false,
+  "gapsOmitted": false,
+  "sourceStatus": "completed",
+  "partOffsets": []
+}

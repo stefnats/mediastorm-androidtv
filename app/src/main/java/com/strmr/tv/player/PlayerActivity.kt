@@ -46,7 +46,7 @@ class PlayerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val session = PlaybackCoordinator.pending
-        if (session == null || !session.canOpenPlayer() || !session.recordingPartReady()) {
+        if (session == null || !session.canOpenPlayer() || !session.recordingPartReady() || !session.recordingDerivedReady()) {
             finish()
             return
         }
@@ -54,7 +54,11 @@ class PlayerActivity : ComponentActivity() {
         PlaybackCoordinator.playerOpen = true
         val matcher = FrameRateMatcher(window, currentDisplay())
         frameRate = matcher
-        val c = PlayerController(this, session) { format -> matcher.match(format.frameRate) }
+        val c = try { PlayerController(this, session) { format -> matcher.match(format.frameRate) } }
+        catch (retired: kotlinx.coroutines.CancellationException) {
+            val joined = session.recordingDerived ?: throw retired
+            joined.release(); finish(); return
+        }
         controller = c
         onBackPressedDispatcher.addCallback(this) {c.cancelRecordingParts();finish()}
         setContent {

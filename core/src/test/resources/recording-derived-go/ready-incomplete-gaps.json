@@ -1,0 +1,24 @@
+{
+  "recordingId": "synthetic-incomplete-gaps",
+  "id": "0123456789abcdef0123456789abcdef",
+  "state": "ready",
+  "durationMs": 2000,
+  "bytes": 2048,
+  "sourceIncomplete": true,
+  "gapsOmitted": true,
+  "sourceStatus": "failed",
+  "partOffsets": [
+    {
+      "partIndex": 1,
+      "startMs": 0,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 2,
+      "startMs": 1000,
+      "durationMs": 1000
+    }
+  ],
+  "observedAt": "2026-11-19T12:00:00Z",
+  "expiresAt": "2026-11-20T12:00:00Z"
+}

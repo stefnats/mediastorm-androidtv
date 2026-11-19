@@ -105,6 +105,14 @@ fun RecordingDetail(
                 }
             }
         }
+        timingState?.joined(r)?.let { joined ->
+            Text("Joined recording copy", fontWeight = FontWeight.SemiBold)
+            joined.label(r)?.let { Text(it, color = Muted) }
+            if (joined.busy) Text("Joined-copy action in progress…", color = Muted)
+            OutlinedButton(onClick = { joined.read(r, false) }, enabled = !busy && !joined.busy) { Text("Read saved joined copy") }
+            OutlinedButton(onClick = { joined.read(r, true) }, enabled = !busy && !joined.busy) { Text("Prepare joined copy") }
+            OutlinedButton(onClick = { joined.playFromStart(r) }, enabled = !busy && !joined.busy && joined.ready(r)) { Text("Play joined copy from start") }
+        }
         RecordingCaptureRules.known(r)?.let {capture ->
             Spacer(Modifier.height(12.dp))
             Text("Captured parts",style=MaterialTheme.typography.titleMedium)

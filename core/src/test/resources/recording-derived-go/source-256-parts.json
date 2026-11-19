@@ -1,0 +1,2075 @@
+{
+  "capture": {
+    "version": 1,
+    "phase": "finished",
+    "incomplete": false,
+    "sourceChanges": 0,
+    "parts": [
+      {
+        "index": 1,
+        "startedAt": "2026-11-19T10:00:00Z",
+        "endedAt": "2026-11-19T10:00:01Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/1"
+      },
+      {
+        "index": 2,
+        "startedAt": "2026-11-19T10:00:01Z",
+        "endedAt": "2026-11-19T10:00:02Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/2"
+      },
+      {
+        "index": 3,
+        "startedAt": "2026-11-19T10:00:02Z",
+        "endedAt": "2026-11-19T10:00:03Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/3"
+      },
+      {
+        "index": 4,
+        "startedAt": "2026-11-19T10:00:03Z",
+        "endedAt": "2026-11-19T10:00:04Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/4"
+      },
+      {
+        "index": 5,
+        "startedAt": "2026-11-19T10:00:04Z",
+        "endedAt": "2026-11-19T10:00:05Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/5"
+      },
+      {
+        "index": 6,
+        "startedAt": "2026-11-19T10:00:05Z",
+        "endedAt": "2026-11-19T10:00:06Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/6"
+      },
+      {
+        "index": 7,
+        "startedAt": "2026-11-19T10:00:06Z",
+        "endedAt": "2026-11-19T10:00:07Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/7"
+      },
+      {
+        "index": 8,
+        "startedAt": "2026-11-19T10:00:07Z",
+        "endedAt": "2026-11-19T10:00:08Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/8"
+      },
+      {
+        "index": 9,
+        "startedAt": "2026-11-19T10:00:08Z",
+        "endedAt": "2026-11-19T10:00:09Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/9"
+      },
+      {
+        "index": 10,
+        "startedAt": "2026-11-19T10:00:09Z",
+        "endedAt": "2026-11-19T10:00:10Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/10"
+      },
+      {
+        "index": 11,
+        "startedAt": "2026-11-19T10:00:10Z",
+        "endedAt": "2026-11-19T10:00:11Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/11"
+      },
+      {
+        "index": 12,
+        "startedAt": "2026-11-19T10:00:11Z",
+        "endedAt": "2026-11-19T10:00:12Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/12"
+      },
+      {
+        "index": 13,
+        "startedAt": "2026-11-19T10:00:12Z",
+        "endedAt": "2026-11-19T10:00:13Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/13"
+      },
+      {
+        "index": 14,
+        "startedAt": "2026-11-19T10:00:13Z",
+        "endedAt": "2026-11-19T10:00:14Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/14"
+      },
+      {
+        "index": 15,
+        "startedAt": "2026-11-19T10:00:14Z",
+        "endedAt": "2026-11-19T10:00:15Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/15"
+      },
+      {
+        "index": 16,
+        "startedAt": "2026-11-19T10:00:15Z",
+        "endedAt": "2026-11-19T10:00:16Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/16"
+      },
+      {
+        "index": 17,
+        "startedAt": "2026-11-19T10:00:16Z",
+        "endedAt": "2026-11-19T10:00:17Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/17"
+      },
+      {
+        "index": 18,
+        "startedAt": "2026-11-19T10:00:17Z",
+        "endedAt": "2026-11-19T10:00:18Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/18"
+      },
+      {
+        "index": 19,
+        "startedAt": "2026-11-19T10:00:18Z",
+        "endedAt": "2026-11-19T10:00:19Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/19"
+      },
+      {
+        "index": 20,
+        "startedAt": "2026-11-19T10:00:19Z",
+        "endedAt": "2026-11-19T10:00:20Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/20"
+      },
+      {
+        "index": 21,
+        "startedAt": "2026-11-19T10:00:20Z",
+        "endedAt": "2026-11-19T10:00:21Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/21"
+      },
+      {
+        "index": 22,
+        "startedAt": "2026-11-19T10:00:21Z",
+        "endedAt": "2026-11-19T10:00:22Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/22"
+      },
+      {
+        "index": 23,
+        "startedAt": "2026-11-19T10:00:22Z",
+        "endedAt": "2026-11-19T10:00:23Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/23"
+      },
+      {
+        "index": 24,
+        "startedAt": "2026-11-19T10:00:23Z",
+        "endedAt": "2026-11-19T10:00:24Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/24"
+      },
+      {
+        "index": 25,
+        "startedAt": "2026-11-19T10:00:24Z",
+        "endedAt": "2026-11-19T10:00:25Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/25"
+      },
+      {
+        "index": 26,
+        "startedAt": "2026-11-19T10:00:25Z",
+        "endedAt": "2026-11-19T10:00:26Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/26"
+      },
+      {
+        "index": 27,
+        "startedAt": "2026-11-19T10:00:26Z",
+        "endedAt": "2026-11-19T10:00:27Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/27"
+      },
+      {
+        "index": 28,
+        "startedAt": "2026-11-19T10:00:27Z",
+        "endedAt": "2026-11-19T10:00:28Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/28"
+      },
+      {
+        "index": 29,
+        "startedAt": "2026-11-19T10:00:28Z",
+        "endedAt": "2026-11-19T10:00:29Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/29"
+      },
+      {
+        "index": 30,
+        "startedAt": "2026-11-19T10:00:29Z",
+        "endedAt": "2026-11-19T10:00:30Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/30"
+      },
+      {
+        "index": 31,
+        "startedAt": "2026-11-19T10:00:30Z",
+        "endedAt": "2026-11-19T10:00:31Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/31"
+      },
+      {
+        "index": 32,
+        "startedAt": "2026-11-19T10:00:31Z",
+        "endedAt": "2026-11-19T10:00:32Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/32"
+      },
+      {
+        "index": 33,
+        "startedAt": "2026-11-19T10:00:32Z",
+        "endedAt": "2026-11-19T10:00:33Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/33"
+      },
+      {
+        "index": 34,
+        "startedAt": "2026-11-19T10:00:33Z",
+        "endedAt": "2026-11-19T10:00:34Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/34"
+      },
+      {
+        "index": 35,
+        "startedAt": "2026-11-19T10:00:34Z",
+        "endedAt": "2026-11-19T10:00:35Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/35"
+      },
+      {
+        "index": 36,
+        "startedAt": "2026-11-19T10:00:35Z",
+        "endedAt": "2026-11-19T10:00:36Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/36"
+      },
+      {
+        "index": 37,
+        "startedAt": "2026-11-19T10:00:36Z",
+        "endedAt": "2026-11-19T10:00:37Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/37"
+      },
+      {
+        "index": 38,
+        "startedAt": "2026-11-19T10:00:37Z",
+        "endedAt": "2026-11-19T10:00:38Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/38"
+      },
+      {
+        "index": 39,
+        "startedAt": "2026-11-19T10:00:38Z",
+        "endedAt": "2026-11-19T10:00:39Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/39"
+      },
+      {
+        "index": 40,
+        "startedAt": "2026-11-19T10:00:39Z",
+        "endedAt": "2026-11-19T10:00:40Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/40"
+      },
+      {
+        "index": 41,
+        "startedAt": "2026-11-19T10:00:40Z",
+        "endedAt": "2026-11-19T10:00:41Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/41"
+      },
+      {
+        "index": 42,
+        "startedAt": "2026-11-19T10:00:41Z",
+        "endedAt": "2026-11-19T10:00:42Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/42"
+      },
+      {
+        "index": 43,
+        "startedAt": "2026-11-19T10:00:42Z",
+        "endedAt": "2026-11-19T10:00:43Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/43"
+      },
+      {
+        "index": 44,
+        "startedAt": "2026-11-19T10:00:43Z",
+        "endedAt": "2026-11-19T10:00:44Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/44"
+      },
+      {
+        "index": 45,
+        "startedAt": "2026-11-19T10:00:44Z",
+        "endedAt": "2026-11-19T10:00:45Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/45"
+      },
+      {
+        "index": 46,
+        "startedAt": "2026-11-19T10:00:45Z",
+        "endedAt": "2026-11-19T10:00:46Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/46"
+      },
+      {
+        "index": 47,
+        "startedAt": "2026-11-19T10:00:46Z",
+        "endedAt": "2026-11-19T10:00:47Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/47"
+      },
+      {
+        "index": 48,
+        "startedAt": "2026-11-19T10:00:47Z",
+        "endedAt": "2026-11-19T10:00:48Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/48"
+      },
+      {
+        "index": 49,
+        "startedAt": "2026-11-19T10:00:48Z",
+        "endedAt": "2026-11-19T10:00:49Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/49"
+      },
+      {
+        "index": 50,
+        "startedAt": "2026-11-19T10:00:49Z",
+        "endedAt": "2026-11-19T10:00:50Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/50"
+      },
+      {
+        "index": 51,
+        "startedAt": "2026-11-19T10:00:50Z",
+        "endedAt": "2026-11-19T10:00:51Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/51"
+      },
+      {
+        "index": 52,
+        "startedAt": "2026-11-19T10:00:51Z",
+        "endedAt": "2026-11-19T10:00:52Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/52"
+      },
+      {
+        "index": 53,
+        "startedAt": "2026-11-19T10:00:52Z",
+        "endedAt": "2026-11-19T10:00:53Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/53"
+      },
+      {
+        "index": 54,
+        "startedAt": "2026-11-19T10:00:53Z",
+        "endedAt": "2026-11-19T10:00:54Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/54"
+      },
+      {
+        "index": 55,
+        "startedAt": "2026-11-19T10:00:54Z",
+        "endedAt": "2026-11-19T10:00:55Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/55"
+      },
+      {
+        "index": 56,
+        "startedAt": "2026-11-19T10:00:55Z",
+        "endedAt": "2026-11-19T10:00:56Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/56"
+      },
+      {
+        "index": 57,
+        "startedAt": "2026-11-19T10:00:56Z",
+        "endedAt": "2026-11-19T10:00:57Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/57"
+      },
+      {
+        "index": 58,
+        "startedAt": "2026-11-19T10:00:57Z",
+        "endedAt": "2026-11-19T10:00:58Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/58"
+      },
+      {
+        "index": 59,
+        "startedAt": "2026-11-19T10:00:58Z",
+        "endedAt": "2026-11-19T10:00:59Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/59"
+      },
+      {
+        "index": 60,
+        "startedAt": "2026-11-19T10:00:59Z",
+        "endedAt": "2026-11-19T10:01:00Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/60"
+      },
+      {
+        "index": 61,
+        "startedAt": "2026-11-19T10:01:00Z",
+        "endedAt": "2026-11-19T10:01:01Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/61"
+      },
+      {
+        "index": 62,
+        "startedAt": "2026-11-19T10:01:01Z",
+        "endedAt": "2026-11-19T10:01:02Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/62"
+      },
+      {
+        "index": 63,
+        "startedAt": "2026-11-19T10:01:02Z",
+        "endedAt": "2026-11-19T10:01:03Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/63"
+      },
+      {
+        "index": 64,
+        "startedAt": "2026-11-19T10:01:03Z",
+        "endedAt": "2026-11-19T10:01:04Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/64"
+      },
+      {
+        "index": 65,
+        "startedAt": "2026-11-19T10:01:04Z",
+        "endedAt": "2026-11-19T10:01:05Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/65"
+      },
+      {
+        "index": 66,
+        "startedAt": "2026-11-19T10:01:05Z",
+        "endedAt": "2026-11-19T10:01:06Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/66"
+      },
+      {
+        "index": 67,
+        "startedAt": "2026-11-19T10:01:06Z",
+        "endedAt": "2026-11-19T10:01:07Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/67"
+      },
+      {
+        "index": 68,
+        "startedAt": "2026-11-19T10:01:07Z",
+        "endedAt": "2026-11-19T10:01:08Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/68"
+      },
+      {
+        "index": 69,
+        "startedAt": "2026-11-19T10:01:08Z",
+        "endedAt": "2026-11-19T10:01:09Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/69"
+      },
+      {
+        "index": 70,
+        "startedAt": "2026-11-19T10:01:09Z",
+        "endedAt": "2026-11-19T10:01:10Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/70"
+      },
+      {
+        "index": 71,
+        "startedAt": "2026-11-19T10:01:10Z",
+        "endedAt": "2026-11-19T10:01:11Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/71"
+      },
+      {
+        "index": 72,
+        "startedAt": "2026-11-19T10:01:11Z",
+        "endedAt": "2026-11-19T10:01:12Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/72"
+      },
+      {
+        "index": 73,
+        "startedAt": "2026-11-19T10:01:12Z",
+        "endedAt": "2026-11-19T10:01:13Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/73"
+      },
+      {
+        "index": 74,
+        "startedAt": "2026-11-19T10:01:13Z",
+        "endedAt": "2026-11-19T10:01:14Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/74"
+      },
+      {
+        "index": 75,
+        "startedAt": "2026-11-19T10:01:14Z",
+        "endedAt": "2026-11-19T10:01:15Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/75"
+      },
+      {
+        "index": 76,
+        "startedAt": "2026-11-19T10:01:15Z",
+        "endedAt": "2026-11-19T10:01:16Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/76"
+      },
+      {
+        "index": 77,
+        "startedAt": "2026-11-19T10:01:16Z",
+        "endedAt": "2026-11-19T10:01:17Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/77"
+      },
+      {
+        "index": 78,
+        "startedAt": "2026-11-19T10:01:17Z",
+        "endedAt": "2026-11-19T10:01:18Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/78"
+      },
+      {
+        "index": 79,
+        "startedAt": "2026-11-19T10:01:18Z",
+        "endedAt": "2026-11-19T10:01:19Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/79"
+      },
+      {
+        "index": 80,
+        "startedAt": "2026-11-19T10:01:19Z",
+        "endedAt": "2026-11-19T10:01:20Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/80"
+      },
+      {
+        "index": 81,
+        "startedAt": "2026-11-19T10:01:20Z",
+        "endedAt": "2026-11-19T10:01:21Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/81"
+      },
+      {
+        "index": 82,
+        "startedAt": "2026-11-19T10:01:21Z",
+        "endedAt": "2026-11-19T10:01:22Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/82"
+      },
+      {
+        "index": 83,
+        "startedAt": "2026-11-19T10:01:22Z",
+        "endedAt": "2026-11-19T10:01:23Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/83"
+      },
+      {
+        "index": 84,
+        "startedAt": "2026-11-19T10:01:23Z",
+        "endedAt": "2026-11-19T10:01:24Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/84"
+      },
+      {
+        "index": 85,
+        "startedAt": "2026-11-19T10:01:24Z",
+        "endedAt": "2026-11-19T10:01:25Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/85"
+      },
+      {
+        "index": 86,
+        "startedAt": "2026-11-19T10:01:25Z",
+        "endedAt": "2026-11-19T10:01:26Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/86"
+      },
+      {
+        "index": 87,
+        "startedAt": "2026-11-19T10:01:26Z",
+        "endedAt": "2026-11-19T10:01:27Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/87"
+      },
+      {
+        "index": 88,
+        "startedAt": "2026-11-19T10:01:27Z",
+        "endedAt": "2026-11-19T10:01:28Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/88"
+      },
+      {
+        "index": 89,
+        "startedAt": "2026-11-19T10:01:28Z",
+        "endedAt": "2026-11-19T10:01:29Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/89"
+      },
+      {
+        "index": 90,
+        "startedAt": "2026-11-19T10:01:29Z",
+        "endedAt": "2026-11-19T10:01:30Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/90"
+      },
+      {
+        "index": 91,
+        "startedAt": "2026-11-19T10:01:30Z",
+        "endedAt": "2026-11-19T10:01:31Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/91"
+      },
+      {
+        "index": 92,
+        "startedAt": "2026-11-19T10:01:31Z",
+        "endedAt": "2026-11-19T10:01:32Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/92"
+      },
+      {
+        "index": 93,
+        "startedAt": "2026-11-19T10:01:32Z",
+        "endedAt": "2026-11-19T10:01:33Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/93"
+      },
+      {
+        "index": 94,
+        "startedAt": "2026-11-19T10:01:33Z",
+        "endedAt": "2026-11-19T10:01:34Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/94"
+      },
+      {
+        "index": 95,
+        "startedAt": "2026-11-19T10:01:34Z",
+        "endedAt": "2026-11-19T10:01:35Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/95"
+      },
+      {
+        "index": 96,
+        "startedAt": "2026-11-19T10:01:35Z",
+        "endedAt": "2026-11-19T10:01:36Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/96"
+      },
+      {
+        "index": 97,
+        "startedAt": "2026-11-19T10:01:36Z",
+        "endedAt": "2026-11-19T10:01:37Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/97"
+      },
+      {
+        "index": 98,
+        "startedAt": "2026-11-19T10:01:37Z",
+        "endedAt": "2026-11-19T10:01:38Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/98"
+      },
+      {
+        "index": 99,
+        "startedAt": "2026-11-19T10:01:38Z",
+        "endedAt": "2026-11-19T10:01:39Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/99"
+      },
+      {
+        "index": 100,
+        "startedAt": "2026-11-19T10:01:39Z",
+        "endedAt": "2026-11-19T10:01:40Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/100"
+      },
+      {
+        "index": 101,
+        "startedAt": "2026-11-19T10:01:40Z",
+        "endedAt": "2026-11-19T10:01:41Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/101"
+      },
+      {
+        "index": 102,
+        "startedAt": "2026-11-19T10:01:41Z",
+        "endedAt": "2026-11-19T10:01:42Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/102"
+      },
+      {
+        "index": 103,
+        "startedAt": "2026-11-19T10:01:42Z",
+        "endedAt": "2026-11-19T10:01:43Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/103"
+      },
+      {
+        "index": 104,
+        "startedAt": "2026-11-19T10:01:43Z",
+        "endedAt": "2026-11-19T10:01:44Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/104"
+      },
+      {
+        "index": 105,
+        "startedAt": "2026-11-19T10:01:44Z",
+        "endedAt": "2026-11-19T10:01:45Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/105"
+      },
+      {
+        "index": 106,
+        "startedAt": "2026-11-19T10:01:45Z",
+        "endedAt": "2026-11-19T10:01:46Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/106"
+      },
+      {
+        "index": 107,
+        "startedAt": "2026-11-19T10:01:46Z",
+        "endedAt": "2026-11-19T10:01:47Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/107"
+      },
+      {
+        "index": 108,
+        "startedAt": "2026-11-19T10:01:47Z",
+        "endedAt": "2026-11-19T10:01:48Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/108"
+      },
+      {
+        "index": 109,
+        "startedAt": "2026-11-19T10:01:48Z",
+        "endedAt": "2026-11-19T10:01:49Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/109"
+      },
+      {
+        "index": 110,
+        "startedAt": "2026-11-19T10:01:49Z",
+        "endedAt": "2026-11-19T10:01:50Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/110"
+      },
+      {
+        "index": 111,
+        "startedAt": "2026-11-19T10:01:50Z",
+        "endedAt": "2026-11-19T10:01:51Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/111"
+      },
+      {
+        "index": 112,
+        "startedAt": "2026-11-19T10:01:51Z",
+        "endedAt": "2026-11-19T10:01:52Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/112"
+      },
+      {
+        "index": 113,
+        "startedAt": "2026-11-19T10:01:52Z",
+        "endedAt": "2026-11-19T10:01:53Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/113"
+      },
+      {
+        "index": 114,
+        "startedAt": "2026-11-19T10:01:53Z",
+        "endedAt": "2026-11-19T10:01:54Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/114"
+      },
+      {
+        "index": 115,
+        "startedAt": "2026-11-19T10:01:54Z",
+        "endedAt": "2026-11-19T10:01:55Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/115"
+      },
+      {
+        "index": 116,
+        "startedAt": "2026-11-19T10:01:55Z",
+        "endedAt": "2026-11-19T10:01:56Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/116"
+      },
+      {
+        "index": 117,
+        "startedAt": "2026-11-19T10:01:56Z",
+        "endedAt": "2026-11-19T10:01:57Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/117"
+      },
+      {
+        "index": 118,
+        "startedAt": "2026-11-19T10:01:57Z",
+        "endedAt": "2026-11-19T10:01:58Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/118"
+      },
+      {
+        "index": 119,
+        "startedAt": "2026-11-19T10:01:58Z",
+        "endedAt": "2026-11-19T10:01:59Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/119"
+      },
+      {
+        "index": 120,
+        "startedAt": "2026-11-19T10:01:59Z",
+        "endedAt": "2026-11-19T10:02:00Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/120"
+      },
+      {
+        "index": 121,
+        "startedAt": "2026-11-19T10:02:00Z",
+        "endedAt": "2026-11-19T10:02:01Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/121"
+      },
+      {
+        "index": 122,
+        "startedAt": "2026-11-19T10:02:01Z",
+        "endedAt": "2026-11-19T10:02:02Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/122"
+      },
+      {
+        "index": 123,
+        "startedAt": "2026-11-19T10:02:02Z",
+        "endedAt": "2026-11-19T10:02:03Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/123"
+      },
+      {
+        "index": 124,
+        "startedAt": "2026-11-19T10:02:03Z",
+        "endedAt": "2026-11-19T10:02:04Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/124"
+      },
+      {
+        "index": 125,
+        "startedAt": "2026-11-19T10:02:04Z",
+        "endedAt": "2026-11-19T10:02:05Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/125"
+      },
+      {
+        "index": 126,
+        "startedAt": "2026-11-19T10:02:05Z",
+        "endedAt": "2026-11-19T10:02:06Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/126"
+      },
+      {
+        "index": 127,
+        "startedAt": "2026-11-19T10:02:06Z",
+        "endedAt": "2026-11-19T10:02:07Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/127"
+      },
+      {
+        "index": 128,
+        "startedAt": "2026-11-19T10:02:07Z",
+        "endedAt": "2026-11-19T10:02:08Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/128"
+      },
+      {
+        "index": 129,
+        "startedAt": "2026-11-19T10:02:08Z",
+        "endedAt": "2026-11-19T10:02:09Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/129"
+      },
+      {
+        "index": 130,
+        "startedAt": "2026-11-19T10:02:09Z",
+        "endedAt": "2026-11-19T10:02:10Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/130"
+      },
+      {
+        "index": 131,
+        "startedAt": "2026-11-19T10:02:10Z",
+        "endedAt": "2026-11-19T10:02:11Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/131"
+      },
+      {
+        "index": 132,
+        "startedAt": "2026-11-19T10:02:11Z",
+        "endedAt": "2026-11-19T10:02:12Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/132"
+      },
+      {
+        "index": 133,
+        "startedAt": "2026-11-19T10:02:12Z",
+        "endedAt": "2026-11-19T10:02:13Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/133"
+      },
+      {
+        "index": 134,
+        "startedAt": "2026-11-19T10:02:13Z",
+        "endedAt": "2026-11-19T10:02:14Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/134"
+      },
+      {
+        "index": 135,
+        "startedAt": "2026-11-19T10:02:14Z",
+        "endedAt": "2026-11-19T10:02:15Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/135"
+      },
+      {
+        "index": 136,
+        "startedAt": "2026-11-19T10:02:15Z",
+        "endedAt": "2026-11-19T10:02:16Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/136"
+      },
+      {
+        "index": 137,
+        "startedAt": "2026-11-19T10:02:16Z",
+        "endedAt": "2026-11-19T10:02:17Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/137"
+      },
+      {
+        "index": 138,
+        "startedAt": "2026-11-19T10:02:17Z",
+        "endedAt": "2026-11-19T10:02:18Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/138"
+      },
+      {
+        "index": 139,
+        "startedAt": "2026-11-19T10:02:18Z",
+        "endedAt": "2026-11-19T10:02:19Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/139"
+      },
+      {
+        "index": 140,
+        "startedAt": "2026-11-19T10:02:19Z",
+        "endedAt": "2026-11-19T10:02:20Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/140"
+      },
+      {
+        "index": 141,
+        "startedAt": "2026-11-19T10:02:20Z",
+        "endedAt": "2026-11-19T10:02:21Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/141"
+      },
+      {
+        "index": 142,
+        "startedAt": "2026-11-19T10:02:21Z",
+        "endedAt": "2026-11-19T10:02:22Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/142"
+      },
+      {
+        "index": 143,
+        "startedAt": "2026-11-19T10:02:22Z",
+        "endedAt": "2026-11-19T10:02:23Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/143"
+      },
+      {
+        "index": 144,
+        "startedAt": "2026-11-19T10:02:23Z",
+        "endedAt": "2026-11-19T10:02:24Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/144"
+      },
+      {
+        "index": 145,
+        "startedAt": "2026-11-19T10:02:24Z",
+        "endedAt": "2026-11-19T10:02:25Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/145"
+      },
+      {
+        "index": 146,
+        "startedAt": "2026-11-19T10:02:25Z",
+        "endedAt": "2026-11-19T10:02:26Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/146"
+      },
+      {
+        "index": 147,
+        "startedAt": "2026-11-19T10:02:26Z",
+        "endedAt": "2026-11-19T10:02:27Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/147"
+      },
+      {
+        "index": 148,
+        "startedAt": "2026-11-19T10:02:27Z",
+        "endedAt": "2026-11-19T10:02:28Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/148"
+      },
+      {
+        "index": 149,
+        "startedAt": "2026-11-19T10:02:28Z",
+        "endedAt": "2026-11-19T10:02:29Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/149"
+      },
+      {
+        "index": 150,
+        "startedAt": "2026-11-19T10:02:29Z",
+        "endedAt": "2026-11-19T10:02:30Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/150"
+      },
+      {
+        "index": 151,
+        "startedAt": "2026-11-19T10:02:30Z",
+        "endedAt": "2026-11-19T10:02:31Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/151"
+      },
+      {
+        "index": 152,
+        "startedAt": "2026-11-19T10:02:31Z",
+        "endedAt": "2026-11-19T10:02:32Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/152"
+      },
+      {
+        "index": 153,
+        "startedAt": "2026-11-19T10:02:32Z",
+        "endedAt": "2026-11-19T10:02:33Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/153"
+      },
+      {
+        "index": 154,
+        "startedAt": "2026-11-19T10:02:33Z",
+        "endedAt": "2026-11-19T10:02:34Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/154"
+      },
+      {
+        "index": 155,
+        "startedAt": "2026-11-19T10:02:34Z",
+        "endedAt": "2026-11-19T10:02:35Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/155"
+      },
+      {
+        "index": 156,
+        "startedAt": "2026-11-19T10:02:35Z",
+        "endedAt": "2026-11-19T10:02:36Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/156"
+      },
+      {
+        "index": 157,
+        "startedAt": "2026-11-19T10:02:36Z",
+        "endedAt": "2026-11-19T10:02:37Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/157"
+      },
+      {
+        "index": 158,
+        "startedAt": "2026-11-19T10:02:37Z",
+        "endedAt": "2026-11-19T10:02:38Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/158"
+      },
+      {
+        "index": 159,
+        "startedAt": "2026-11-19T10:02:38Z",
+        "endedAt": "2026-11-19T10:02:39Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/159"
+      },
+      {
+        "index": 160,
+        "startedAt": "2026-11-19T10:02:39Z",
+        "endedAt": "2026-11-19T10:02:40Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/160"
+      },
+      {
+        "index": 161,
+        "startedAt": "2026-11-19T10:02:40Z",
+        "endedAt": "2026-11-19T10:02:41Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/161"
+      },
+      {
+        "index": 162,
+        "startedAt": "2026-11-19T10:02:41Z",
+        "endedAt": "2026-11-19T10:02:42Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/162"
+      },
+      {
+        "index": 163,
+        "startedAt": "2026-11-19T10:02:42Z",
+        "endedAt": "2026-11-19T10:02:43Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/163"
+      },
+      {
+        "index": 164,
+        "startedAt": "2026-11-19T10:02:43Z",
+        "endedAt": "2026-11-19T10:02:44Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/164"
+      },
+      {
+        "index": 165,
+        "startedAt": "2026-11-19T10:02:44Z",
+        "endedAt": "2026-11-19T10:02:45Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/165"
+      },
+      {
+        "index": 166,
+        "startedAt": "2026-11-19T10:02:45Z",
+        "endedAt": "2026-11-19T10:02:46Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/166"
+      },
+      {
+        "index": 167,
+        "startedAt": "2026-11-19T10:02:46Z",
+        "endedAt": "2026-11-19T10:02:47Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/167"
+      },
+      {
+        "index": 168,
+        "startedAt": "2026-11-19T10:02:47Z",
+        "endedAt": "2026-11-19T10:02:48Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/168"
+      },
+      {
+        "index": 169,
+        "startedAt": "2026-11-19T10:02:48Z",
+        "endedAt": "2026-11-19T10:02:49Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/169"
+      },
+      {
+        "index": 170,
+        "startedAt": "2026-11-19T10:02:49Z",
+        "endedAt": "2026-11-19T10:02:50Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/170"
+      },
+      {
+        "index": 171,
+        "startedAt": "2026-11-19T10:02:50Z",
+        "endedAt": "2026-11-19T10:02:51Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/171"
+      },
+      {
+        "index": 172,
+        "startedAt": "2026-11-19T10:02:51Z",
+        "endedAt": "2026-11-19T10:02:52Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/172"
+      },
+      {
+        "index": 173,
+        "startedAt": "2026-11-19T10:02:52Z",
+        "endedAt": "2026-11-19T10:02:53Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/173"
+      },
+      {
+        "index": 174,
+        "startedAt": "2026-11-19T10:02:53Z",
+        "endedAt": "2026-11-19T10:02:54Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/174"
+      },
+      {
+        "index": 175,
+        "startedAt": "2026-11-19T10:02:54Z",
+        "endedAt": "2026-11-19T10:02:55Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/175"
+      },
+      {
+        "index": 176,
+        "startedAt": "2026-11-19T10:02:55Z",
+        "endedAt": "2026-11-19T10:02:56Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/176"
+      },
+      {
+        "index": 177,
+        "startedAt": "2026-11-19T10:02:56Z",
+        "endedAt": "2026-11-19T10:02:57Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/177"
+      },
+      {
+        "index": 178,
+        "startedAt": "2026-11-19T10:02:57Z",
+        "endedAt": "2026-11-19T10:02:58Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/178"
+      },
+      {
+        "index": 179,
+        "startedAt": "2026-11-19T10:02:58Z",
+        "endedAt": "2026-11-19T10:02:59Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/179"
+      },
+      {
+        "index": 180,
+        "startedAt": "2026-11-19T10:02:59Z",
+        "endedAt": "2026-11-19T10:03:00Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/180"
+      },
+      {
+        "index": 181,
+        "startedAt": "2026-11-19T10:03:00Z",
+        "endedAt": "2026-11-19T10:03:01Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/181"
+      },
+      {
+        "index": 182,
+        "startedAt": "2026-11-19T10:03:01Z",
+        "endedAt": "2026-11-19T10:03:02Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/182"
+      },
+      {
+        "index": 183,
+        "startedAt": "2026-11-19T10:03:02Z",
+        "endedAt": "2026-11-19T10:03:03Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/183"
+      },
+      {
+        "index": 184,
+        "startedAt": "2026-11-19T10:03:03Z",
+        "endedAt": "2026-11-19T10:03:04Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/184"
+      },
+      {
+        "index": 185,
+        "startedAt": "2026-11-19T10:03:04Z",
+        "endedAt": "2026-11-19T10:03:05Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/185"
+      },
+      {
+        "index": 186,
+        "startedAt": "2026-11-19T10:03:05Z",
+        "endedAt": "2026-11-19T10:03:06Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/186"
+      },
+      {
+        "index": 187,
+        "startedAt": "2026-11-19T10:03:06Z",
+        "endedAt": "2026-11-19T10:03:07Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/187"
+      },
+      {
+        "index": 188,
+        "startedAt": "2026-11-19T10:03:07Z",
+        "endedAt": "2026-11-19T10:03:08Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/188"
+      },
+      {
+        "index": 189,
+        "startedAt": "2026-11-19T10:03:08Z",
+        "endedAt": "2026-11-19T10:03:09Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/189"
+      },
+      {
+        "index": 190,
+        "startedAt": "2026-11-19T10:03:09Z",
+        "endedAt": "2026-11-19T10:03:10Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/190"
+      },
+      {
+        "index": 191,
+        "startedAt": "2026-11-19T10:03:10Z",
+        "endedAt": "2026-11-19T10:03:11Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/191"
+      },
+      {
+        "index": 192,
+        "startedAt": "2026-11-19T10:03:11Z",
+        "endedAt": "2026-11-19T10:03:12Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/192"
+      },
+      {
+        "index": 193,
+        "startedAt": "2026-11-19T10:03:12Z",
+        "endedAt": "2026-11-19T10:03:13Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/193"
+      },
+      {
+        "index": 194,
+        "startedAt": "2026-11-19T10:03:13Z",
+        "endedAt": "2026-11-19T10:03:14Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/194"
+      },
+      {
+        "index": 195,
+        "startedAt": "2026-11-19T10:03:14Z",
+        "endedAt": "2026-11-19T10:03:15Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/195"
+      },
+      {
+        "index": 196,
+        "startedAt": "2026-11-19T10:03:15Z",
+        "endedAt": "2026-11-19T10:03:16Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/196"
+      },
+      {
+        "index": 197,
+        "startedAt": "2026-11-19T10:03:16Z",
+        "endedAt": "2026-11-19T10:03:17Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/197"
+      },
+      {
+        "index": 198,
+        "startedAt": "2026-11-19T10:03:17Z",
+        "endedAt": "2026-11-19T10:03:18Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/198"
+      },
+      {
+        "index": 199,
+        "startedAt": "2026-11-19T10:03:18Z",
+        "endedAt": "2026-11-19T10:03:19Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/199"
+      },
+      {
+        "index": 200,
+        "startedAt": "2026-11-19T10:03:19Z",
+        "endedAt": "2026-11-19T10:03:20Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/200"
+      },
+      {
+        "index": 201,
+        "startedAt": "2026-11-19T10:03:20Z",
+        "endedAt": "2026-11-19T10:03:21Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/201"
+      },
+      {
+        "index": 202,
+        "startedAt": "2026-11-19T10:03:21Z",
+        "endedAt": "2026-11-19T10:03:22Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/202"
+      },
+      {
+        "index": 203,
+        "startedAt": "2026-11-19T10:03:22Z",
+        "endedAt": "2026-11-19T10:03:23Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/203"
+      },
+      {
+        "index": 204,
+        "startedAt": "2026-11-19T10:03:23Z",
+        "endedAt": "2026-11-19T10:03:24Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/204"
+      },
+      {
+        "index": 205,
+        "startedAt": "2026-11-19T10:03:24Z",
+        "endedAt": "2026-11-19T10:03:25Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/205"
+      },
+      {
+        "index": 206,
+        "startedAt": "2026-11-19T10:03:25Z",
+        "endedAt": "2026-11-19T10:03:26Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/206"
+      },
+      {
+        "index": 207,
+        "startedAt": "2026-11-19T10:03:26Z",
+        "endedAt": "2026-11-19T10:03:27Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/207"
+      },
+      {
+        "index": 208,
+        "startedAt": "2026-11-19T10:03:27Z",
+        "endedAt": "2026-11-19T10:03:28Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/208"
+      },
+      {
+        "index": 209,
+        "startedAt": "2026-11-19T10:03:28Z",
+        "endedAt": "2026-11-19T10:03:29Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/209"
+      },
+      {
+        "index": 210,
+        "startedAt": "2026-11-19T10:03:29Z",
+        "endedAt": "2026-11-19T10:03:30Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/210"
+      },
+      {
+        "index": 211,
+        "startedAt": "2026-11-19T10:03:30Z",
+        "endedAt": "2026-11-19T10:03:31Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/211"
+      },
+      {
+        "index": 212,
+        "startedAt": "2026-11-19T10:03:31Z",
+        "endedAt": "2026-11-19T10:03:32Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/212"
+      },
+      {
+        "index": 213,
+        "startedAt": "2026-11-19T10:03:32Z",
+        "endedAt": "2026-11-19T10:03:33Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/213"
+      },
+      {
+        "index": 214,
+        "startedAt": "2026-11-19T10:03:33Z",
+        "endedAt": "2026-11-19T10:03:34Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/214"
+      },
+      {
+        "index": 215,
+        "startedAt": "2026-11-19T10:03:34Z",
+        "endedAt": "2026-11-19T10:03:35Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/215"
+      },
+      {
+        "index": 216,
+        "startedAt": "2026-11-19T10:03:35Z",
+        "endedAt": "2026-11-19T10:03:36Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/216"
+      },
+      {
+        "index": 217,
+        "startedAt": "2026-11-19T10:03:36Z",
+        "endedAt": "2026-11-19T10:03:37Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/217"
+      },
+      {
+        "index": 218,
+        "startedAt": "2026-11-19T10:03:37Z",
+        "endedAt": "2026-11-19T10:03:38Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/218"
+      },
+      {
+        "index": 219,
+        "startedAt": "2026-11-19T10:03:38Z",
+        "endedAt": "2026-11-19T10:03:39Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/219"
+      },
+      {
+        "index": 220,
+        "startedAt": "2026-11-19T10:03:39Z",
+        "endedAt": "2026-11-19T10:03:40Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/220"
+      },
+      {
+        "index": 221,
+        "startedAt": "2026-11-19T10:03:40Z",
+        "endedAt": "2026-11-19T10:03:41Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/221"
+      },
+      {
+        "index": 222,
+        "startedAt": "2026-11-19T10:03:41Z",
+        "endedAt": "2026-11-19T10:03:42Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/222"
+      },
+      {
+        "index": 223,
+        "startedAt": "2026-11-19T10:03:42Z",
+        "endedAt": "2026-11-19T10:03:43Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/223"
+      },
+      {
+        "index": 224,
+        "startedAt": "2026-11-19T10:03:43Z",
+        "endedAt": "2026-11-19T10:03:44Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/224"
+      },
+      {
+        "index": 225,
+        "startedAt": "2026-11-19T10:03:44Z",
+        "endedAt": "2026-11-19T10:03:45Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/225"
+      },
+      {
+        "index": 226,
+        "startedAt": "2026-11-19T10:03:45Z",
+        "endedAt": "2026-11-19T10:03:46Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/226"
+      },
+      {
+        "index": 227,
+        "startedAt": "2026-11-19T10:03:46Z",
+        "endedAt": "2026-11-19T10:03:47Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/227"
+      },
+      {
+        "index": 228,
+        "startedAt": "2026-11-19T10:03:47Z",
+        "endedAt": "2026-11-19T10:03:48Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/228"
+      },
+      {
+        "index": 229,
+        "startedAt": "2026-11-19T10:03:48Z",
+        "endedAt": "2026-11-19T10:03:49Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/229"
+      },
+      {
+        "index": 230,
+        "startedAt": "2026-11-19T10:03:49Z",
+        "endedAt": "2026-11-19T10:03:50Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/230"
+      },
+      {
+        "index": 231,
+        "startedAt": "2026-11-19T10:03:50Z",
+        "endedAt": "2026-11-19T10:03:51Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/231"
+      },
+      {
+        "index": 232,
+        "startedAt": "2026-11-19T10:03:51Z",
+        "endedAt": "2026-11-19T10:03:52Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/232"
+      },
+      {
+        "index": 233,
+        "startedAt": "2026-11-19T10:03:52Z",
+        "endedAt": "2026-11-19T10:03:53Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/233"
+      },
+      {
+        "index": 234,
+        "startedAt": "2026-11-19T10:03:53Z",
+        "endedAt": "2026-11-19T10:03:54Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/234"
+      },
+      {
+        "index": 235,
+        "startedAt": "2026-11-19T10:03:54Z",
+        "endedAt": "2026-11-19T10:03:55Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/235"
+      },
+      {
+        "index": 236,
+        "startedAt": "2026-11-19T10:03:55Z",
+        "endedAt": "2026-11-19T10:03:56Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/236"
+      },
+      {
+        "index": 237,
+        "startedAt": "2026-11-19T10:03:56Z",
+        "endedAt": "2026-11-19T10:03:57Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/237"
+      },
+      {
+        "index": 238,
+        "startedAt": "2026-11-19T10:03:57Z",
+        "endedAt": "2026-11-19T10:03:58Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/238"
+      },
+      {
+        "index": 239,
+        "startedAt": "2026-11-19T10:03:58Z",
+        "endedAt": "2026-11-19T10:03:59Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/239"
+      },
+      {
+        "index": 240,
+        "startedAt": "2026-11-19T10:03:59Z",
+        "endedAt": "2026-11-19T10:04:00Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/240"
+      },
+      {
+        "index": 241,
+        "startedAt": "2026-11-19T10:04:00Z",
+        "endedAt": "2026-11-19T10:04:01Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/241"
+      },
+      {
+        "index": 242,
+        "startedAt": "2026-11-19T10:04:01Z",
+        "endedAt": "2026-11-19T10:04:02Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/242"
+      },
+      {
+        "index": 243,
+        "startedAt": "2026-11-19T10:04:02Z",
+        "endedAt": "2026-11-19T10:04:03Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/243"
+      },
+      {
+        "index": 244,
+        "startedAt": "2026-11-19T10:04:03Z",
+        "endedAt": "2026-11-19T10:04:04Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/244"
+      },
+      {
+        "index": 245,
+        "startedAt": "2026-11-19T10:04:04Z",
+        "endedAt": "2026-11-19T10:04:05Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/245"
+      },
+      {
+        "index": 246,
+        "startedAt": "2026-11-19T10:04:05Z",
+        "endedAt": "2026-11-19T10:04:06Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/246"
+      },
+      {
+        "index": 247,
+        "startedAt": "2026-11-19T10:04:06Z",
+        "endedAt": "2026-11-19T10:04:07Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/247"
+      },
+      {
+        "index": 248,
+        "startedAt": "2026-11-19T10:04:07Z",
+        "endedAt": "2026-11-19T10:04:08Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/248"
+      },
+      {
+        "index": 249,
+        "startedAt": "2026-11-19T10:04:08Z",
+        "endedAt": "2026-11-19T10:04:09Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/249"
+      },
+      {
+        "index": 250,
+        "startedAt": "2026-11-19T10:04:09Z",
+        "endedAt": "2026-11-19T10:04:10Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/250"
+      },
+      {
+        "index": 251,
+        "startedAt": "2026-11-19T10:04:10Z",
+        "endedAt": "2026-11-19T10:04:11Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/251"
+      },
+      {
+        "index": 252,
+        "startedAt": "2026-11-19T10:04:11Z",
+        "endedAt": "2026-11-19T10:04:12Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/252"
+      },
+      {
+        "index": 253,
+        "startedAt": "2026-11-19T10:04:12Z",
+        "endedAt": "2026-11-19T10:04:13Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/253"
+      },
+      {
+        "index": 254,
+        "startedAt": "2026-11-19T10:04:13Z",
+        "endedAt": "2026-11-19T10:04:14Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/254"
+      },
+      {
+        "index": 255,
+        "startedAt": "2026-11-19T10:04:14Z",
+        "endedAt": "2026-11-19T10:04:15Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/255"
+      },
+      {
+        "index": 256,
+        "startedAt": "2026-11-19T10:04:15Z",
+        "endedAt": "2026-11-19T10:04:16Z",
+        "bytes": 1024,
+        "endReason": "source_ended",
+        "streamPath": "recording:synthetic-256-parts/parts/256"
+      }
+    ],
+    "gaps": []
+  },
+  "id": "synthetic-256-parts",
+  "userId": "synthetic-adult",
+  "type": "",
+  "status": "completed",
+  "channelId": "synthetic-channel",
+  "channelName": "Synthetic channel",
+  "title": "Synthetic contract recording",
+  "sourceUrl": "",
+  "startAt": "2026-11-19T10:00:00Z",
+  "endAt": "2026-11-19T10:04:16Z",
+  "paddingBeforeSeconds": 0,
+  "paddingAfterSeconds": 0,
+  "actualStartAt": "2026-11-19T10:00:00Z",
+  "actualEndAt": "2026-11-19T10:04:16Z",
+  "createdAt": "2026-11-19T10:00:00Z",
+  "updatedAt": "2026-11-19T12:00:00Z"
+}

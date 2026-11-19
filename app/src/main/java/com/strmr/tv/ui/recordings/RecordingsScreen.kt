@@ -79,7 +79,7 @@ fun RecordingsScreen(asPage: Boolean = false, currentPage: (() -> Boolean)? = nu
     val pageCurrent = currentPage ?: { !navigator.isCovered }
     val state = remember(context) { RecordingsState(scope, context, pageCurrent = pageCurrent) }
     val activePage = pageCurrent()
-    LaunchedEffect(state, activePage) { if (!activePage) state.retireTiming() }
+    LaunchedEffect(state, activePage) { if (!activePage) { state.retireJoined(); state.retireTiming() } }
     DisposableEffect(state) {onDispose {state.dispose()}}
     val actionsFocus = remember { FocusRequester() }
     val firstFilter = remember { FocusRequester() }

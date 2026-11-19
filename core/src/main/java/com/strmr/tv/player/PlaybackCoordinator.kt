@@ -71,7 +71,10 @@ object PlaybackCoordinator {
 
     /** The session the player picks up when it starts. */
     @Volatile var pending: PlayerSession? = null
-        private set
+        private set(value) {
+            if (field !== value) field?.recordingDerived?.retirePending()
+            field = value
+        }
 
     private val scope = MainScope()
     private var resolveJob: Job? = null
@@ -188,6 +191,22 @@ object PlaybackCoordinator {
             pending = timing.attach(PlayerSession(request, ApiClient.recordingStreamUrl(recording, title,expectedContext), null, reportsProgress = false,
                                     sourceLabel = StreamInfo.recording(recording.channelName),ownership=owner))
             launchPlayer()
+        }
+    }
+
+    /** Explicit accepted joined copy only. Preparation and status reads never call this. */
+    internal fun playJoinedRecording(source: RecordingDerivedPlayback): Boolean {
+        if (!source.canStart() || _resolving.value != null) { source.retirePending(); return false }
+        return source.owner.use {
+            RecordingPartQueues.replace(null)
+            val value = source.observation.descriptor
+            val url = com.strmr.tv.live.recordingDerivedStreamUrl(ApiClient.baseUrl, source.owner.profileId,
+                value.recordingId, requireNotNull(value.id)).toString()
+            // Honest coordinator-only startup observation, not a synthesized click.
+            pending = PlaybackStartupTiming.begin(source.owner, StartupInput.DIRECT_INPUT_SUPPLIED)
+                .attach(recordingDerivedSession(source, url))
+            launchPlayer()
+            true
         }
     }
 

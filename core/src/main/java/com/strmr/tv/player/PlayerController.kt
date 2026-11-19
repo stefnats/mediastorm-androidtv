@@ -23,6 +23,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.strmr.tv.library.ProfileDataContext
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.SourceResult
+import com.strmr.tv.api.withoutAutomaticReplay
 import com.strmr.tv.api.StartPoint
 import com.strmr.tv.api.mediaHeaders
 import com.strmr.tv.app.AppLog
@@ -47,7 +48,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     val request = session.request
     val nextRecordingPart get() = session.recordingPart?.next
     fun cancelRecordingParts() {session.recordingPart?.cancel()}
-    private val ownership=requireNotNull(session.ownership) {"Playback context is unavailable"}.also {it.requireCurrent();session.recordingPart?.claim()}
+    private val ownership=requireNotNull(session.ownership) {"Playback context is unavailable"}.also {it.requireCurrent();session.recordingPart?.claim();session.recordingDerived?.claim()}
     val dataContext = ownership.epoch
     private var released=false
     val profileId = ownership.profileId
@@ -192,10 +193,12 @@ class PlayerController(context: Context, val session: PlayerSession, private val
 
     private val stallLog by lazy { StallLog(player) }
 
+    private val derivedSource = session.recordingDerived
     private val backendMediaHeaders=ApiClient.inContext(dataContext) {ApiClient.mediaHeaders}
     private val mediaAccess=VodMediaAccess(ApiClient.inContext(dataContext) {ApiClient.baseUrl},
         enabled=session.reportsProgress && !session.isLive && !session.localFile,backendHeaders=backendMediaHeaders,denialTitleId=request.title.titleId,context=dataContext,requireCurrent=ownership::requireCurrent,profileId=profileId)
 
+    private val derivedMediaAccess = derivedSource?.let { RecordingDerivedMediaAccess(ApiClient.inContext(dataContext) {ApiClient.baseUrl}, it, backendMediaHeaders) }
     internal fun canUsePlayerAux(): Boolean = !released && ownership.isCurrent() && vodDenied.value == null
 
     internal fun denyVod(denial:com.strmr.tv.api.VodAccessDenial,attempt:com.strmr.tv.api.VodAttempt?=null) {
@@ -293,6 +296,12 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         }
 
         override fun onPlayerError(e: PlaybackException) {
+            if (derivedSource != null) {
+                startup.end(StartupOutcome.FAILED)
+                derivedSource.deny(); progress.discardFuture(); player.stop()
+                error.value = "Joined recording is unavailable. Return and read status or prepare explicitly."
+                return
+            }
             cancelRecordingParts()
             if(!session.canOpenPlayer()) {cancelRecordingParts();startup.end(StartupOutcome.OWNER_LOST);progress.discardFuture();player.stop();ended.value=true;return}
             if(released)return
@@ -331,19 +340,25 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     }
 
     init {
-        require(session.canOpenPlayer()) {"This local file requires its original verified context."}
+        if (!session.canOpenPlayer()) {
+            if (derivedSource != null) throw RecordingDerivedRetired()
+            throw IllegalArgumentException("This local file requires its original verified context.")
+        }
         // Passthrough only where the output takes it (not Bluetooth); PCM otherwise.
         val renderers = PassthroughGuard.renderersFactory(context, decodedAudio.takeIf { audioRecoveryEligible(session, true, true) })
             // Platform decoders first; the FFmpeg extension (TrueHD, DTS…) when none can.
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true)
             .setMediaCodecSelector(AudioDecoderFallback.selector)
-        val http = OkHttpDataSource.Factory(ApiClient.http.newBuilder().addInterceptor(mediaAccess.interceptor).addNetworkInterceptor(mediaAccess.requestInterceptor).build()).setDefaultRequestProperties(backendMediaHeaders)
+        val mediaHttp = if (derivedMediaAccess != null) ApiClient.http.withoutAutomaticReplay()
+            .newBuilder().addInterceptor(derivedMediaAccess.interceptor).addNetworkInterceptor(derivedMediaAccess.requestInterceptor).build()
+            else ApiClient.http.newBuilder().addInterceptor(mediaAccess.interceptor).addNetworkInterceptor(mediaAccess.requestInterceptor).build()
+        val http = OkHttpDataSource.Factory(mediaHttp).setDefaultRequestProperties(backendMediaHeaders)
         // HTTP(S) through OkHttp as before; `file://` (a phone's downloaded copy) from disk.
-        val dataSource = DefaultDataSource.Factory(context, http)
+        val dataSource = derivedMediaAccess?.dataSourceFactory(http) ?: DefaultDataSource.Factory(context, http)
         player = ExoPlayer.Builder(context, renderers)
             // Dolby Vision Profile 7 rewritten for this box's decoders (player/dv7).
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource, Dv7Playback.extractorsFactory()).setLoadErrorHandlingPolicy(mediaAccess.loadPolicy))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource, Dv7Playback.extractorsFactory()).setLoadErrorHandlingPolicy(derivedMediaAccess?.loadPolicy ?: mediaAccess.loadPolicy))
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
                 true,
@@ -367,7 +382,9 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         if (AppBuild.DEBUG) player.addAnalyticsListener(androidx.media3.exoplayer.util.EventLogger())
         // A growing recording's playlist plays from its start (0), not its live edge.
         recordingHls?.let { player.setMediaItem(it.mediaItem(session.url), 0) }
-            ?: player.setMediaItem(Timeshift.mediaItem(session.url, timeshift.value))
+            ?: if (derivedSource != null) player.setMediaItem(androidx.media3.common.MediaItem.Builder().setUri(session.url)
+                .setMimeType(androidx.media3.common.MimeTypes.VIDEO_MATROSKA).build(), 0)
+            else player.setMediaItem(Timeshift.mediaItem(session.url, timeshift.value))
         request.startPosition?.let { player.seekTo((it * 1000).toLong()) }
         // Up Next / Switch Source: the previous playback's speed (live always plays at 1x).
         session.explicitAudioLanguage?.let { rememberAudioLanguage(it) }
@@ -505,6 +522,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         player.removeListener(stallLog)
         player.release()
         session.recordingPart?.release(partPosition)
+        derivedSource?.release()
         // Let the last report finish on its own.
         MainScope().launch { delay(5_000); scope.cancel() }
         return progress.lastReport

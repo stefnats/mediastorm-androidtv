@@ -30,6 +30,8 @@ data class Recording(
     val actualEndAt: String? = null,
     val error: String? = null,
     val capture: RecordingCapture? = null,
+    val userId: String? = null,
+    val updatedAt: String? = null,
 )
 
 @Serializable

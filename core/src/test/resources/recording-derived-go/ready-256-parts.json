@@ -1,0 +1,1294 @@
+{
+  "recordingId": "synthetic-256-parts",
+  "id": "0123456789abcdef0123456789abcdef",
+  "state": "ready",
+  "durationMs": 256000,
+  "bytes": 262144,
+  "sourceIncomplete": false,
+  "gapsOmitted": false,
+  "sourceStatus": "completed",
+  "partOffsets": [
+    {
+      "partIndex": 1,
+      "startMs": 0,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 2,
+      "startMs": 1000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 3,
+      "startMs": 2000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 4,
+      "startMs": 3000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 5,
+      "startMs": 4000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 6,
+      "startMs": 5000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 7,
+      "startMs": 6000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 8,
+      "startMs": 7000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 9,
+      "startMs": 8000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 10,
+      "startMs": 9000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 11,
+      "startMs": 10000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 12,
+      "startMs": 11000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 13,
+      "startMs": 12000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 14,
+      "startMs": 13000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 15,
+      "startMs": 14000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 16,
+      "startMs": 15000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 17,
+      "startMs": 16000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 18,
+      "startMs": 17000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 19,
+      "startMs": 18000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 20,
+      "startMs": 19000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 21,
+      "startMs": 20000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 22,
+      "startMs": 21000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 23,
+      "startMs": 22000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 24,
+      "startMs": 23000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 25,
+      "startMs": 24000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 26,
+      "startMs": 25000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 27,
+      "startMs": 26000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 28,
+      "startMs": 27000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 29,
+      "startMs": 28000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 30,
+      "startMs": 29000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 31,
+      "startMs": 30000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 32,
+      "startMs": 31000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 33,
+      "startMs": 32000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 34,
+      "startMs": 33000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 35,
+      "startMs": 34000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 36,
+      "startMs": 35000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 37,
+      "startMs": 36000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 38,
+      "startMs": 37000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 39,
+      "startMs": 38000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 40,
+      "startMs": 39000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 41,
+      "startMs": 40000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 42,
+      "startMs": 41000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 43,
+      "startMs": 42000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 44,
+      "startMs": 43000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 45,
+      "startMs": 44000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 46,
+      "startMs": 45000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 47,
+      "startMs": 46000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 48,
+      "startMs": 47000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 49,
+      "startMs": 48000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 50,
+      "startMs": 49000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 51,
+      "startMs": 50000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 52,
+      "startMs": 51000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 53,
+      "startMs": 52000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 54,
+      "startMs": 53000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 55,
+      "startMs": 54000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 56,
+      "startMs": 55000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 57,
+      "startMs": 56000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 58,
+      "startMs": 57000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 59,
+      "startMs": 58000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 60,
+      "startMs": 59000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 61,
+      "startMs": 60000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 62,
+      "startMs": 61000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 63,
+      "startMs": 62000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 64,
+      "startMs": 63000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 65,
+      "startMs": 64000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 66,
+      "startMs": 65000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 67,
+      "startMs": 66000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 68,
+      "startMs": 67000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 69,
+      "startMs": 68000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 70,
+      "startMs": 69000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 71,
+      "startMs": 70000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 72,
+      "startMs": 71000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 73,
+      "startMs": 72000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 74,
+      "startMs": 73000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 75,
+      "startMs": 74000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 76,
+      "startMs": 75000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 77,
+      "startMs": 76000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 78,
+      "startMs": 77000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 79,
+      "startMs": 78000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 80,
+      "startMs": 79000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 81,
+      "startMs": 80000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 82,
+      "startMs": 81000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 83,
+      "startMs": 82000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 84,
+      "startMs": 83000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 85,
+      "startMs": 84000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 86,
+      "startMs": 85000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 87,
+      "startMs": 86000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 88,
+      "startMs": 87000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 89,
+      "startMs": 88000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 90,
+      "startMs": 89000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 91,
+      "startMs": 90000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 92,
+      "startMs": 91000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 93,
+      "startMs": 92000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 94,
+      "startMs": 93000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 95,
+      "startMs": 94000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 96,
+      "startMs": 95000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 97,
+      "startMs": 96000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 98,
+      "startMs": 97000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 99,
+      "startMs": 98000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 100,
+      "startMs": 99000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 101,
+      "startMs": 100000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 102,
+      "startMs": 101000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 103,
+      "startMs": 102000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 104,
+      "startMs": 103000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 105,
+      "startMs": 104000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 106,
+      "startMs": 105000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 107,
+      "startMs": 106000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 108,
+      "startMs": 107000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 109,
+      "startMs": 108000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 110,
+      "startMs": 109000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 111,
+      "startMs": 110000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 112,
+      "startMs": 111000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 113,
+      "startMs": 112000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 114,
+      "startMs": 113000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 115,
+      "startMs": 114000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 116,
+      "startMs": 115000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 117,
+      "startMs": 116000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 118,
+      "startMs": 117000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 119,
+      "startMs": 118000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 120,
+      "startMs": 119000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 121,
+      "startMs": 120000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 122,
+      "startMs": 121000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 123,
+      "startMs": 122000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 124,
+      "startMs": 123000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 125,
+      "startMs": 124000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 126,
+      "startMs": 125000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 127,
+      "startMs": 126000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 128,
+      "startMs": 127000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 129,
+      "startMs": 128000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 130,
+      "startMs": 129000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 131,
+      "startMs": 130000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 132,
+      "startMs": 131000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 133,
+      "startMs": 132000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 134,
+      "startMs": 133000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 135,
+      "startMs": 134000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 136,
+      "startMs": 135000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 137,
+      "startMs": 136000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 138,
+      "startMs": 137000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 139,
+      "startMs": 138000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 140,
+      "startMs": 139000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 141,
+      "startMs": 140000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 142,
+      "startMs": 141000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 143,
+      "startMs": 142000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 144,
+      "startMs": 143000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 145,
+      "startMs": 144000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 146,
+      "startMs": 145000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 147,
+      "startMs": 146000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 148,
+      "startMs": 147000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 149,
+      "startMs": 148000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 150,
+      "startMs": 149000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 151,
+      "startMs": 150000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 152,
+      "startMs": 151000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 153,
+      "startMs": 152000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 154,
+      "startMs": 153000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 155,
+      "startMs": 154000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 156,
+      "startMs": 155000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 157,
+      "startMs": 156000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 158,
+      "startMs": 157000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 159,
+      "startMs": 158000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 160,
+      "startMs": 159000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 161,
+      "startMs": 160000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 162,
+      "startMs": 161000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 163,
+      "startMs": 162000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 164,
+      "startMs": 163000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 165,
+      "startMs": 164000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 166,
+      "startMs": 165000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 167,
+      "startMs": 166000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 168,
+      "startMs": 167000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 169,
+      "startMs": 168000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 170,
+      "startMs": 169000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 171,
+      "startMs": 170000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 172,
+      "startMs": 171000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 173,
+      "startMs": 172000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 174,
+      "startMs": 173000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 175,
+      "startMs": 174000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 176,
+      "startMs": 175000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 177,
+      "startMs": 176000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 178,
+      "startMs": 177000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 179,
+      "startMs": 178000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 180,
+      "startMs": 179000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 181,
+      "startMs": 180000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 182,
+      "startMs": 181000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 183,
+      "startMs": 182000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 184,
+      "startMs": 183000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 185,
+      "startMs": 184000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 186,
+      "startMs": 185000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 187,
+      "startMs": 186000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 188,
+      "startMs": 187000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 189,
+      "startMs": 188000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 190,
+      "startMs": 189000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 191,
+      "startMs": 190000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 192,
+      "startMs": 191000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 193,
+      "startMs": 192000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 194,
+      "startMs": 193000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 195,
+      "startMs": 194000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 196,
+      "startMs": 195000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 197,
+      "startMs": 196000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 198,
+      "startMs": 197000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 199,
+      "startMs": 198000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 200,
+      "startMs": 199000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 201,
+      "startMs": 200000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 202,
+      "startMs": 201000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 203,
+      "startMs": 202000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 204,
+      "startMs": 203000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 205,
+      "startMs": 204000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 206,
+      "startMs": 205000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 207,
+      "startMs": 206000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 208,
+      "startMs": 207000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 209,
+      "startMs": 208000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 210,
+      "startMs": 209000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 211,
+      "startMs": 210000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 212,
+      "startMs": 211000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 213,
+      "startMs": 212000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 214,
+      "startMs": 213000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 215,
+      "startMs": 214000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 216,
+      "startMs": 215000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 217,
+      "startMs": 216000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 218,
+      "startMs": 217000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 219,
+      "startMs": 218000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 220,
+      "startMs": 219000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 221,
+      "startMs": 220000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 222,
+      "startMs": 221000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 223,
+      "startMs": 222000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 224,
+      "startMs": 223000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 225,
+      "startMs": 224000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 226,
+      "startMs": 225000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 227,
+      "startMs": 226000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 228,
+      "startMs": 227000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 229,
+      "startMs": 228000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 230,
+      "startMs": 229000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 231,
+      "startMs": 230000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 232,
+      "startMs": 231000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 233,
+      "startMs": 232000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 234,
+      "startMs": 233000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 235,
+      "startMs": 234000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 236,
+      "startMs": 235000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 237,
+      "startMs": 236000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 238,
+      "startMs": 237000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 239,
+      "startMs": 238000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 240,
+      "startMs": 239000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 241,
+      "startMs": 240000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 242,
+      "startMs": 241000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 243,
+      "startMs": 242000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 244,
+      "startMs": 243000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 245,
+      "startMs": 244000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 246,
+      "startMs": 245000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 247,
+      "startMs": 246000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 248,
+      "startMs": 247000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 249,
+      "startMs": 248000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 250,
+      "startMs": 249000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 251,
+      "startMs": 250000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 252,
+      "startMs": 251000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 253,
+      "startMs": 252000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 254,
+      "startMs": 253000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 255,
+      "startMs": 254000,
+      "durationMs": 1000
+    },
+    {
+      "partIndex": 256,
+      "startMs": 255000,
+      "durationMs": 1000
+    }
+  ],
+  "observedAt": "2026-11-19T12:00:00Z",
+  "expiresAt": "2026-11-20T12:00:00Z"
+}

@@ -53,7 +53,7 @@ fun RecordingDetailScreen(id: String, currentRoute: () -> Boolean = { true }) {
     val context by ProfileDataContext.changes.collectAsState()
     val state = remember(id,context) { RecordingsState(scope, context, pageCurrent = currentRoute).also {it.selectedId=id} }
     val activePage = currentRoute()
-    LaunchedEffect(state, activePage) { if (!activePage) state.retireTiming() }
+    LaunchedEffect(state, activePage) { if (!activePage) { state.retireJoined(); state.retireTiming() } }
     DisposableEffect(state) {onDispose {state.dispose()}}
     val navigator = LocalNavigator.current
     val confirmations = remember(state) { RecordingConfirmations(state).also { it.onDeleted = { navigator.pop() } } }
@@ -118,6 +118,15 @@ private fun Detail(r: Recording, state: RecordingsState, confirmations: Recordin
                     else ButtonDefaults.outlinedButtonColors(),
                 ) { content() }
             }
+        }
+        state.joined(r)?.let { joined ->
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            Text("Joined recording copy", style = MaterialTheme.typography.titleMedium)
+            joined.label(r)?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            if (joined.busy) Text("Joined-copy action in progress…")
+            OutlinedButton(onClick = { joined.read(r, false) }, enabled = !busy && !joined.busy) { Text("Read saved joined copy") }
+            OutlinedButton(onClick = { joined.read(r, true) }, enabled = !busy && !joined.busy) { Text("Prepare joined copy") }
+            OutlinedButton(onClick = { joined.playFromStart(r) }, enabled = !busy && !joined.busy && joined.ready(r)) { Text("Play joined copy from start") }
         }
         RecordingCaptureRules.known(r)?.let {capture ->
             HorizontalDivider(Modifier.padding(vertical=8.dp))
