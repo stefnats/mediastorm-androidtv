@@ -1,6 +1,7 @@
 package com.strmr.tv.launcher
 
 import com.strmr.tv.app.AppLog
+import com.strmr.tv.app.AppSession
 import com.strmr.tv.library.ProfileDataContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,7 +37,12 @@ object DeepLinkRouter {
     }
 
     /** The pending link when it belongs to [profileId] (or names none); a mismatched one is dropped. */
-    fun take(profileId: String?): DeepLink? {
+    fun take(profileId: String?): DeepLink? = take(profileId, AppSession.browsingLocked.value)
+
+    /** The shared production consumption boundary, also driven by controlled lifecycle tests. */
+    internal fun take(profileId: String?, browsingLocked: Boolean): DeepLink? {
+        // Keep the original link pending while a deferred browsing PIN is owed.
+        if (browsingLocked) return null
         val pending = _pending.value ?: return null
         _pending.value = null
         val link = pending.link

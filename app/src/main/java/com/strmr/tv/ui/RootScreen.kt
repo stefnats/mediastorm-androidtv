@@ -29,6 +29,7 @@ fun RootScreen() {
     val phase by AppSession.phase.collectAsState()
     val profile by AppSession.profile.collectAsState()
     val challenge by AppSession.pinChallenge.collectAsState()
+    val browsingLocked by AppSession.browsingLocked.collectAsState()
 
     Box(Modifier.fillMaxSize().background(if (phase == AppSession.Phase.Ready) androidx.compose.ui.graphics.Color.Black else BrandBackground)) {
         when (val p = phase) {
@@ -37,10 +38,12 @@ fun RootScreen() {
             AppSession.Phase.Login -> LoginScreen()
             AppSession.Phase.Profiles -> ProfilePickerScreen()
             // Rebuilt per profile so every page reloads its data.
-            AppSession.Phase.Ready -> key(profile?.id) { PageStack { MainShell() } }
+            AppSession.Phase.Ready -> if (browsingLocked) {
+                CircularProgressIndicator(Modifier.align(Alignment.Center), color = Accent)
+            } else key(profile?.id) { PageStack { MainShell() } }
             is AppSession.Phase.Unavailable -> StartupUnavailable(p.message)
         }
-        PlaybackOverlays()
+        if (!browsingLocked || phase != AppSession.Phase.Ready) PlaybackOverlays()
         challenge?.let { ProfileLockPrompt(it) }
     }
 }

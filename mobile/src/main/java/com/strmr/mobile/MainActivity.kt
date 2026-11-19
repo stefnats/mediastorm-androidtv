@@ -33,19 +33,27 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onNewIntent(intent: Intent) {
+        AppSession.browsingStarted(this)
         super.onNewIntent(intent)
         setIntent(intent)
         DeepLinkRouter.open(intent.dataString)
     }
 
     override fun onStart() {
+        AppSession.browsingStarted(this)
         super.onStart()
         AppSession.reportDisplayCapabilities()
         AppSession.wakes.value += 1
         AppSession.reconnectRemote()
     }
 
+    override fun onStop() {
+        AppSession.browsingStopped(this)
+        super.onStop()
+    }
+
     override fun onResume() {
+        AppSession.browsingStarted(this)
         super.onResume()
         AppUpdater.onForeground()
     }

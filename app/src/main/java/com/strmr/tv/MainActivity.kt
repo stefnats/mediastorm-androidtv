@@ -31,12 +31,14 @@ class MainActivity : ComponentActivity() {
 
     /** Already running (singleTask): a home screen row opened over whatever was showing. */
     override fun onNewIntent(intent: Intent) {
+        AppSession.browsingStarted(this)
         super.onNewIntent(intent)
         setIntent(intent)
         DeepLinkRouter.open(intent.dataString)
     }
 
     override fun onStart() {
+        AppSession.browsingStarted(this)
         super.onStart()
         // The display can change while the app sleeps.
         AppSession.reportDisplayCapabilities()
@@ -44,7 +46,13 @@ class MainActivity : ComponentActivity() {
         AppSession.reconnectRemote()
     }
 
+    override fun onStop() {
+        AppSession.browsingStopped(this)
+        super.onStop()
+    }
+
     override fun onResume() {
+        AppSession.browsingStarted(this)
         super.onResume()
         AppUpdater.onForeground()
     }

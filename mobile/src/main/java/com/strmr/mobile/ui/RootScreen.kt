@@ -27,6 +27,7 @@ fun RootScreen() {
     val phase by AppSession.phase.collectAsState()
     val profile by AppSession.profile.collectAsState()
     val challenge by AppSession.pinChallenge.collectAsState()
+    val browsingLocked by AppSession.browsingLocked.collectAsState()
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize()) {
@@ -36,13 +37,15 @@ fun RootScreen() {
                 AppSession.Phase.Login -> LoginScreen()
                 AppSession.Phase.Profiles -> ProfilePickerScreen()
                 // Rebuilt per profile so every screen reloads its data.
-                AppSession.Phase.Ready -> key(profile?.id) { MainScaffold() }
+                AppSession.Phase.Ready -> if (browsingLocked) StartingScreen() else key(profile?.id) { MainScaffold() }
                 // Retries by itself and offers the downloads meanwhile.
                 is AppSession.Phase.Unavailable -> OfflineScreen(p.message)
             }
-            ConnectionHosts()
-            PlaybackOverlays()
-            ToastHost()
+            if (!browsingLocked || phase != AppSession.Phase.Ready) {
+                ConnectionHosts()
+                PlaybackOverlays()
+                ToastHost()
+            }
             challenge?.let { c ->
                 PinSheet(
                     profile = c.profile,

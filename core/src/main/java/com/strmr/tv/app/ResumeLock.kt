@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
@@ -22,7 +23,11 @@ internal enum class ResumeAction { NONE, PICKER, PIN }
 internal class ResumeAbsence(private val elapsedMs: () -> Long) {
     private var since: Long? = null
 
-    fun backgrounded() { since = elapsedMs() }
+    fun backgrounded(): Boolean {
+        if (since != null) return false
+        since = elapsedMs()
+        return true
+    }
 
     fun take(): Long? {
         val start = since ?: return null
@@ -96,23 +101,30 @@ internal class ResumeWork(private val scope: CoroutineScope) {
 }
 
 /**
- * Whole-app background return, measured monotonically. The existing player/multiscreen
- * exception consumes the absence without a deferred lock when the viewer later leaves it.
- * That exception includes paused mobile VOD, PiP and requested background audio.
- * Main thread only; this does not stop a decoder or revoke a server unlock token.
+ * Whole-app background return and deferred player-exit access. Player, paused VOD,
+ * PiP, requested background audio and multiscreen are not interrupted by this gate.
+ * Returning to browsing first hides protected content, then uses the existing PIN flow.
+ * Main thread only; this neither stops a decoder nor revokes a server unlock token.
  */
 internal object ResumeLock {
-    /** The picker cannot be backed out of when it came up to recheck a protected profile. */
+    /** A picker opened for a protected return cannot be cancelled back into browsing. */
     var pickRequired = false
     private val preferences = ResumeSettings()
     private var started = 0
-    private val absence = ResumeAbsence(SystemClock::elapsedRealtime)
+    private val resumed = mutableSetOf<Activity>()
+    private val access = DeferredResumeGate(SystemClock::elapsedRealtime)
+    val browsingLocked = access.blocked
+    private var browsingPage: Activity? = null
     private lateinit var actions: ResumeWork
+    private lateinit var pickers: ResumeWork
     private lateinit var settings: ResumeWork
 
-    private class Owner(val profile: Profile, val epoch: Long) {
+    private class Owner(val profile: Profile, val epoch: Long, val session: Any, val client: String, val source: Any) {
+        val binding = ResumeBinding(profile, epoch, session, client, source)
         fun isCurrent() = ProfileDataContext.current == epoch &&
-            AppSession.phase.value == AppSession.Phase.Ready && AppSession.profile.value === profile
+            AppSession.phase.value == AppSession.Phase.Ready && AppSession.profile.value === profile &&
+            ApiClient.session === session && ApiClient.profileId == profile.id && Config.clientId == client &&
+            (ApiClient.baseUrl to ApiClient.remoteCredential) == source
     }
 
     @Serializable
@@ -123,37 +135,145 @@ internal object ResumeLock {
 
     fun install(scope: CoroutineScope) {
         actions = ResumeWork(scope)
+        pickers = ResumeWork(scope)
         settings = ResumeWork(scope)
         scope.launch {
             ProfileDataContext.changes.collect {
-                actions.cancelStale()
-                settings.cancelStale()
+                synchronizeOwner()
+                pickers.cancelStale()
+            }
+        }
+        scope.launch {
+            combine(AppSession.phase, AppSession.profile, ProfileUnlock.pinChallenge) { _, _, _ -> Unit }.collect {
+                synchronizeOwner()
             }
         }
         (App.context as Application).registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) {
                 started += 1
-                if (started == 1) foregrounded(activity)
+                if (isPlayer(activity)) playerEntered(activity)
+                else if (started == 1) beforeBrowsing(activity)
+            }
+
+            override fun onActivityResumed(activity: Activity) {
+                resumed += activity
+                if (isPlayer(activity)) playerEntered(activity) else beforeBrowsing(activity)
+            }
+
+            override fun onActivityPaused(activity: Activity) {
+                resumed -= activity
+                browsingStopped(activity)
+                // PiP can remain STARTED while the app itself is outside the foreground.
+                if (resumed.isEmpty() && !activity.isChangingConfigurations) {
+                    access.backgrounded(owner()?.binding)
+                }
             }
 
             override fun onActivityStopped(activity: Activity) {
                 started = (started - 1).coerceAtLeast(0)
+                browsingStopped(activity)
                 if (started == 0 && !activity.isChangingConfigurations) {
-                    absence.backgrounded()
+                    access.backgrounded(owner()?.binding)
                 }
             }
 
             override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
-            override fun onActivityResumed(activity: Activity) = Unit
-            override fun onActivityPaused(activity: Activity) = Unit
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
-            override fun onActivityDestroyed(activity: Activity) = Unit
+            override fun onActivityDestroyed(activity: Activity) {
+                resumed -= activity
+                browsingStopped(activity)
+            }
         })
     }
 
+    private fun isPlayer(activity: Activity): Boolean = resumePlaybackExempt(
+        activity.javaClass, App.platform.playerActivity, App.platform.multiscreenActivity)
+
     private fun owner(): Owner? {
         val profile = AppSession.profile.value ?: return null
-        return Owner(profile, ProfileDataContext.current).takeIf { it.isCurrent() }
+        val session = ApiClient.session ?: return null
+        return Owner(profile, ProfileDataContext.current, session, Config.clientId,
+            ApiClient.baseUrl to ApiClient.remoteCredential).takeIf { it.isCurrent() }
+    }
+
+    private fun synchronizeOwner() {
+        val owner = owner()
+        if (owner == null && AppSession.phase.value == AppSession.Phase.Ready) access.ownerUnavailable()
+        else access.reconcile(owner?.binding, owner?.profile?.requiresPin == true)
+        actions.cancelStale()
+        settings.cancelStale()
+        // A changed or cancelled shared prompt may need a fresh original-page ticket.
+        browsingPage?.takeUnless { it.isFinishing }?.let(::beforeBrowsing)
+    }
+
+    /** Explicit profile selection has already completed its established startup/PIN policy. */
+    fun profileActivated() {
+        access.profileActivated()
+        if (owner() == null && AppSession.phase.value == AppSession.Phase.Ready) access.ownerUnavailable()
+        browsingPage = null
+        if (::actions.isInitialized) actions.cancelStale()
+    }
+
+    /** Main calls this before onStart/onResume can expose its existing composition. */
+    fun beforeBrowsing(activity: Activity) {
+        if (!::actions.isInitialized) return
+        browsingPage = activity
+        val owner = owner()
+        if (owner == null && AppSession.phase.value == AppSession.Phase.Ready) {
+            access.ownerUnavailable()
+            actions.cancelStale()
+            return
+        }
+        val ticket = access.enter(owner?.binding, activity, false, owner?.profile?.requiresPin == true,
+            owner?.profile?.id == AppSession.autoProfileId,
+            owner?.let { preferences.value(it.profile, it.epoch) } ?: true, AppSession.profiles.value.size)
+        actions.cancelStale()
+        if (owner == null || ticket == null) return
+        val selected = { owner.isCurrent() && browsingPage === activity && !activity.isFinishing && access.current(ticket, ResumeLock.owner()?.binding) }
+        when (ticket.action) {
+            ResumeAction.PICKER -> pickers.launch(selected) {
+                publish { pickRequired = owner.profile.requiresPin }
+                check()
+                // The existing picker changes phase synchronously and retains its own later
+                // profile reload contract. A phase change alone must not cancel that reload.
+                AppSession.switchProfile()
+            }
+            ResumeAction.PIN -> actions.launch(selected) {
+                publish { pickRequired = true }
+                check()
+                if (AppSession.unlockLockedProfile(owner.profile.id, owner.epoch)) {
+                    publish {
+                        if (access.complete(ticket, ResumeLock.owner()?.binding)) pickRequired = false
+                    }
+                } else {
+                    // A different shared prompt may still be active. Keep the obligation;
+                    // its close event can attach a fresh ticket to the same browsing page.
+                    access.release(ticket)
+                }
+            }
+            ResumeAction.NONE -> Unit
+        }
+        refreshSetting()
+    }
+
+    fun browsingStopped(activity: Activity) {
+        if (browsingPage === activity) browsingPage = null
+        access.leave(activity)
+        if (::actions.isInitialized) actions.cancelStale()
+    }
+
+    private fun playerEntered(activity: Activity) {
+        val owner = owner()
+        browsingPage = null
+        if (owner == null && AppSession.phase.value == AppSession.Phase.Ready) {
+            access.ownerUnavailable()
+            actions.cancelStale()
+            return
+        }
+        access.enter(owner?.binding, activity, true, owner?.profile?.requiresPin == true,
+            owner?.profile?.id == AppSession.autoProfileId,
+            owner?.let { preferences.value(it.profile, it.epoch) } ?: true, AppSession.profiles.value.size)
+        actions.cancelStale()
     }
 
     /** Captures the profile before scheduling; a late reply cannot change another resume policy. */
@@ -171,33 +291,5 @@ internal object ResumeLock {
             }
             publish { preferences.save(owner.profile, owner.epoch, reply.display?.alwaysShowProfileSelector ?: true) }
         }
-    }
-
-    private fun foregrounded(activity: Activity) {
-        val away = absence.take() ?: return
-        val owner = owner() ?: return
-        val onPlayer = activity.javaClass == App.platform.playerActivity ||
-            activity.javaClass == App.platform.multiscreenActivity
-        if (onPlayer || ProfileUnlock.pinChallenge.value != null) return
-
-        when (resumeAction(away, owner.profile.requiresPin, owner.profile.id == AppSession.autoProfileId,
-            preferences.value(owner.profile, owner.epoch), AppSession.profiles.value.size)) {
-            ResumeAction.PICKER -> actions.launch(owner::isCurrent) {
-                publish { pickRequired = owner.profile.requiresPin }
-                check()
-                // clear() and the phase change are synchronous inside switchProfile. Its existing
-                // later profile reload retains its own API contract, beyond this resume start gate.
-                AppSession.switchProfile()
-            }
-            ResumeAction.PIN -> actions.launch(owner::isCurrent) {
-                publish { pickRequired = true }
-                check()
-                if (AppSession.unlockLockedProfile(owner.profile.id, owner.epoch)) {
-                    publish { pickRequired = false }
-                }
-            }
-            ResumeAction.NONE -> Unit
-        }
-        refreshSetting()
     }
 }
