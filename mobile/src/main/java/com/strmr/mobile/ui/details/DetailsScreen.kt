@@ -60,7 +60,7 @@ import com.strmr.tv.ui.settings.SpoilerSettings
 @Composable
 fun DetailsScreen(target: DetailsTarget, autoplay: Boolean, prewarmOnOpen: Boolean = true, currentRoute: () -> Boolean = { true }) {
     val scope = rememberCoroutineScope()
-    val model = remember(target) { DetailsModel(target, scope) }
+    val model = remember(target) { DetailsModel(target, scope, startupCurrent = currentRoute) }
     val state = remember(model,model.accessGeneration) { DetailsPageState(model) }
     val context = LocalContext.current
     val navigator = LocalNavigator.current
@@ -87,7 +87,7 @@ fun DetailsScreen(target: DetailsTarget, autoplay: Boolean, prewarmOnOpen: Boole
         model.load()
         if (!autoplayed && state.primary != null) {
             autoplayed = true
-            state.playPrimary()
+            state.autoplayPrimary()
             return@LaunchedEffect
         }
         autoplayed = true

@@ -72,7 +72,8 @@ fun CarouselButtons(slide: HomeCard, state: CarouselState, focus: FocusRequester
             currentSlide = { owner.currentSlides().getOrNull(state.index) }, source = { source },
             prepareBeforeOpen = true, prepare = PlaybackCoordinator::prewarm,
             discard = { value, expected -> PlaybackCoordinator.invalidateWarmSources(value.titleId, expected) },
-            open = { value, autoplay, _ -> navigator.open(Page.Details(value, autoplay = autoplay)) })
+            open = { value, autoplay, _ -> navigator.open(Page.Details(value, autoplay = autoplay)) },
+            openPlayback = { value, receipt -> navigator.open(Page.Details(value, autoplay = true, startupIntent = receipt)) })
     }
     DisposableEffect(actions) { onDispose { actions.close() } }
     /**

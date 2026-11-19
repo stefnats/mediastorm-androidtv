@@ -37,7 +37,7 @@ sealed interface Page {
      * `openWatchState`: open the series watch-state sheet once the page has loaded (a menu's bulk action).
      * `autoplay`: start the primary action (Resume / Play) once loaded (a home screen row's play link).
      */
-    data class Details(val target: DetailsTarget, val openWatchState: Boolean = false, val autoplay: Boolean = false) : Page
+    data class Details(val target: DetailsTarget, val openWatchState: Boolean = false, val autoplay: Boolean = false, val startupIntent: com.strmr.tv.player.PlaybackStartupIntent? = null) : Page
     /** `query`: extra list parameters, such as the Home view (`homeView`) the list was opened from. */
     data class Grid(val list: BrowseList, val query: Map<String, String> = emptyMap()) : Page
     data class Person(val person: PersonRef) : Page
@@ -125,7 +125,7 @@ fun PageStack(content: @Composable () -> Unit) {
                 properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
             ) {
                 when (page) {
-                    is Page.Details -> DetailsScreen(page.target, page.openWatchState, page.autoplay, currentPage = { stack.lastOrNull() === page })
+                    is Page.Details -> DetailsScreen(page.target, page.openWatchState, page.autoplay, currentPage = { stack.lastOrNull() === page }, startupIntent = page.startupIntent)
                     is Page.Grid -> ListGridScreen(page.list, page.query, currentPage = { stack.lastOrNull() === page })
                     is Page.Person -> PersonScreen(page.person)
                     Page.HomeLayout -> HomeLayoutSettings()

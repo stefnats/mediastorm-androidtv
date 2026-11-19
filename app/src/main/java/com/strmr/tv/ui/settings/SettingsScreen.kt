@@ -102,6 +102,14 @@ private fun SettingsList(server: HttpUrl?, remote: Boolean, health: String?, che
             delay(IrohRoute.POLL_MS)
         }
     }
+    var startupReport by remember { mutableStateOf<com.strmr.tv.player.PlaybackStartupReport?>(null) }
+    startupReport?.let { report ->
+        com.strmr.tv.ui.ChoiceDialog("Playback Startup Timings", report.text(),
+            choices = listOf(
+                com.strmr.tv.ui.DialogChoice("Refresh") { startupReport = com.strmr.tv.player.PlaybackStartupDiagnostics.snapshot() },
+                com.strmr.tv.ui.DialogChoice("Close") { startupReport = null },
+            ), onDismiss = { startupReport = null }, dismissOnChoice = false)
+    }
     var pickingBackground by remember { mutableStateOf(false) }
     if (pickingBackground) {
         val options = AppearanceSettings.Background.entries
@@ -323,6 +331,12 @@ private fun SettingsList(server: HttpUrl?, remote: Boolean, health: String?, che
                     Text("App ${Config.fullVersion}" + (version?.let { " · Server ${it.version}" } ?: ""))
                 },
             )
+        }
+        item {
+            ListItem(selected = false,
+                onClick = { startupReport = com.strmr.tv.player.PlaybackStartupDiagnostics.snapshot() },
+                headlineContent = { Text("Playback Startup Timings") },
+                supportingContent = { Text("Local click-to-first-frame observations and completed outcomes") })
         }
         item {
             val status = LogUploader.status

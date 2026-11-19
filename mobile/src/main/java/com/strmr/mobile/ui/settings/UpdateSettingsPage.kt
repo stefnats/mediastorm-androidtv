@@ -3,6 +3,12 @@ package com.strmr.mobile.ui.settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.Modifier
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -67,6 +73,13 @@ fun UpdatePrompt() {
 /** Settings › About: the app and server versions, the device ID (tap to copy) and the log upload. */
 @Composable
 fun AboutSettingsPage() {
+    var startupReport by remember { mutableStateOf<com.strmr.tv.player.PlaybackStartupReport?>(null) }
+    startupReport?.let { report ->
+        AlertDialog(onDismissRequest = { startupReport = null }, title = { Text("Playback Startup Timings") },
+            text = { Text(report.text(), Modifier.verticalScroll(rememberScrollState())) },
+            confirmButton = { TextButton(onClick = { startupReport = com.strmr.tv.player.PlaybackStartupDiagnostics.snapshot() }) { Text("Refresh") } },
+            dismissButton = { TextButton(onClick = { startupReport = null }) { Text("Close") } })
+    }
     val version by AppSession.serverVersion.collectAsState()
     @Suppress("DEPRECATION") val clipboard = LocalClipboardManager.current
     SettingsPage("About") {
@@ -74,6 +87,9 @@ fun AboutSettingsPage() {
             ValueRow("Version", "${AppBuild.VERSION_NAME} (${AppBuild.VERSION_CODE})")
             ValueRow("Server Version", version?.let { v -> v.buildId?.takeIf { it.isNotEmpty() }?.let { "${v.version} ($it)" } ?: v.version } ?: "—")
             SettingsRow("Device ID", Config.clientId) { clipboard.setText(AnnotatedString(Config.clientId)) }
+            SettingsRow("Playback Startup Timings", "Local first-frame observations and completed outcomes") {
+                startupReport = com.strmr.tv.player.PlaybackStartupDiagnostics.snapshot()
+            }
             val status = LogUploader.status
             SettingsRow(
                 "Upload Logs",

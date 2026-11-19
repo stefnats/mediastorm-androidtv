@@ -90,11 +90,23 @@ private data class PendingVersion(val version: LibraryVersion, val episode: Epis
  * anchored in the lower left of the first screen, seasons and episodes below the fold.
  */
 @Composable
-fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autoplay: Boolean = false, currentPage: () -> Boolean = { true }) {
+fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autoplay: Boolean = false, currentPage: () -> Boolean = { true }, startupIntent: com.strmr.tv.player.PlaybackStartupIntent? = null) {
     val reminderProfile by AppSession.profile.collectAsState()
     val scope = rememberCoroutineScope()
-    val model = remember(target) { DetailsModel(target, scope) }
+    val model = remember(target) { DetailsModel(target, scope, startupCurrent = currentPage) }
     val actionGeneration=model.accessGeneration
+    val startupPageCurrent = currentPage()
+    DisposableEffect(model, startupIntent) {
+        val generation = model.accessGeneration
+        startupIntent?.bind(target, model.dataContext, scope.coroutineContext[kotlinx.coroutines.Job]) {
+            currentPage() && model.target === target && model.accessGeneration == generation && model.vodDenial == null
+        }
+        onDispose { startupIntent?.cancel() }
+    }
+    LaunchedEffect(startupIntent, startupPageCurrent, model.accessGeneration, model.vodDenial) {
+        if (model.vodDenial != null) startupIntent?.failed()
+        else if (!startupPageCurrent) startupIntent?.cancel()
+    }
     val activeWatchedPage = currentPage()
     val watchedOperations = remember(model, actionGeneration, activeWatchedPage) { CustomListOperations(model.dataContext, target, currentPage) }
     DisposableEffect(watchedOperations) { onDispose { watchedOperations.close() } }
@@ -142,9 +154,10 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
         val primary = model.primary
         if (!autoplayed && primary != null) {
             autoplayed = true
-            model.play(primary.episode, primary.start)
+            model.play(primary.episode, primary.start, startupIntent = startupIntent, measureStartup = false)
             return@LaunchedEffect
         }
+        if (!autoplayed) { if (model.loadError != null) startupIntent?.failed() else startupIntent?.notStarted() }
         autoplayed = true
         trailer.prepare(model.trailers?.primary)
     }

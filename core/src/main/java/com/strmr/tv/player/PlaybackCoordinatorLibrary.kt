@@ -12,10 +12,10 @@ import com.strmr.tv.library.ProfileDataContext
  * profile's languages choose the audio and subtitles once the player has read them. `known` is
  * the file's playback info when the caller already fetched it.
  */
-fun PlaybackCoordinator.playLibrary(request: PlaybackRequest, version: LibraryVersion, known: LibraryPlaybackInfo? = null,expectedContext:Long=ProfileDataContext.current) {
+fun PlaybackCoordinator.playLibrary(request: PlaybackRequest, version: LibraryVersion, known: LibraryPlaybackInfo? = null,expectedContext:Long=ProfileDataContext.current, startup: PlaybackStartupIntent? = null) {
     val expected = expectedContext
-    if(expected!=ProfileDataContext.current)return
-    begin(request.copy(libraryVersion = version), "Preparing…", expectedContext = expected, resolve = {
+    if(expected!=ProfileDataContext.current) { startup?.finish(StartupOutcome.OWNER_LOST); return }
+    begin(request.copy(libraryVersion = version), "Preparing…", expectedContext = expected, startup = startup, resolve = {
         val playback = known ?: ApiClient.libraryPlayback(version.id, expected)
         ResolvedStream(playback.streamPath, null, version.releaseName, pickTracksOnDevice = true)
     })

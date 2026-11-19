@@ -82,12 +82,12 @@ object PlaybackCoordinator {
     val warm: StateFlow<WarmPrequeue?> get() = prequeue.warm
 
     /** Automatic catalog playback shares its selection with Up Next and prefetch. */
-    fun play(request: PlaybackRequest, picks: PrequeuePick? = null,expectedContext:Long=ProfileDataContext.current, chooseLegacyLibrary: (() -> Unit)? = null) {
+    fun play(request: PlaybackRequest, picks: PrequeuePick? = null,expectedContext:Long=ProfileDataContext.current, startup: PlaybackStartupIntent? = null, chooseLegacyLibrary: (() -> Unit)? = null) {
         val startedNanos = PlaybackStartupTiming.now()
         val expected = expectedContext
-        if(expected!=ProfileDataContext.current)return
+        if(expected!=ProfileDataContext.current) { startup?.finish(StartupOutcome.OWNER_LOST); return }
         begin(request, "Searching…", expectedContext = expected,
-            resolveWithSettings = { settings -> catalog.resolve(request, settings, picks, expected, chooseLegacyLibrary) }, startedNanos = startedNanos)
+            resolveWithSettings = { settings -> catalog.resolve(request, settings, picks, expected, chooseLegacyLibrary) }, startedNanos = startedNanos, startup = startup)
     }
 
     /**
@@ -100,13 +100,14 @@ object PlaybackCoordinator {
         request: PlaybackRequest, source: SourceResult, manual: ManualSourceTracks? = null, carried: CarriedTracks? = null,
         resolved: Pair<String, TrackSelection?>? = null,
         prepared: com.strmr.tv.api.PrequeueStatus? = null,expectedContext:Long=ProfileDataContext.current,
+        startup: PlaybackStartupIntent? = null,
     ) {
         val startedNanos = PlaybackStartupTiming.now()
         val expected=expectedContext
-        if(expected!=ProfileDataContext.current)return
+        if(expected!=ProfileDataContext.current) { startup?.finish(StartupOutcome.OWNER_LOST); return }
         // A stream picked over a library copy (Switch Source) is no longer that copy.
         begin(request.copy(libraryVersion = null), "Preparing…", carried = carried, expectedContext=expected, startedNanos=startedNanos,
-            input=startupInput(prepared, resolved != null), resolve = {
+            input=startupInput(prepared, resolved != null), startup = startup, resolve = {
             if (prepared != null) {
                 return@begin ResolvedStream(requireNotNull(prepared.streamPath), prepared.trackSelection, prepared.displayName,
                     prepared.subtitleTracks.orEmpty(), manualTracks = true, source = prequeueSourceHints(prepared), prequeueId = prepared.prequeueId)
@@ -305,12 +306,14 @@ object PlaybackCoordinator {
         resolveWithSettings: (suspend (PlaybackSettings?) -> ResolvedStream?)? = null,
         startedNanos: Long = PlaybackStartupTiming.now(),
         input: StartupInput = StartupInput.UNKNOWN,
+        startup: PlaybackStartupIntent? = null,
         resolve: suspend () -> ResolvedStream = { error("no resolver") },
     ) {
-        if (_resolving.value != null) return
-        val ownership=PlaybackSessionContext.capture(expectedContext ?: ProfileDataContext.current)
+        if (_resolving.value != null) { startup?.finish(StartupOutcome.NOT_STARTED); return }
+        val adopted = runCatching { PlaybackStartupTiming.adopt(startup, request.title, expectedContext ?: ProfileDataContext.current, input) }.getOrNull()
+        val ownership = adopted?.owner ?: PlaybackSessionContext.capture(expectedContext ?: ProfileDataContext.current)
         RecordingPartQueues.replace(null)
-        val timing=PlaybackStartupTiming.begin(ownership,input,startedNanos)
+        val timing = adopted ?: PlaybackStartupTiming.begin(ownership, input, startedNanos)
         startupAttempt=timing
         AdaptiveThroughput.playbackStarting()
         _resolving.value = request
@@ -330,7 +333,7 @@ object PlaybackCoordinator {
                     val settings = try {ApiClient.playbackSettings(expectedContext ?: ProfileDataContext.current)} catch(error:Exception) {error.rethrowVodDenial();null}
                     val r = if (resolveWithSettings != null) resolveWithSettings(settings) else resolve()
                     if (r == null) {
-                        timing.finish(StartupOutcome.CANCELLED)
+                        timing.finish(if (adopted != null) StartupOutcome.CHOICE_REQUIRED else StartupOutcome.CANCELLED)
                         if (_resolving.value === request) _resolving.value = null
                         return@launch
                     }

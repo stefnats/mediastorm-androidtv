@@ -75,10 +75,12 @@ class DetailsPageState(val model: DetailsModel) {
     fun heading(episode: Episode?) = episode?.let { "${model.target.name} · ${it.code}" } ?: model.target.name
 
     /** Play / Resume: library first, else the prequeue with the page's track picks. */
-    fun playPrimary() {
+    fun playPrimary() { playPrimary(measureStartup = true) }
+    fun autoplayPrimary() { playPrimary(measureStartup = false) }
+    private fun playPrimary(measureStartup: Boolean) {
         if(!playbackCurrent)return
         val p = primary ?: return
-        model.play(p.episode, p.start, prequeueTracks.pick(PlaybackCoordinator.warm.value))
+        model.play(p.episode, p.start, prequeueTracks.pick(PlaybackCoordinator.warm.value), measureStartup = measureStartup)
     }
 
     /** Start Over: what Play plays, from the beginning. */

@@ -50,6 +50,12 @@ import com.strmr.tv.library.LibraryVersion
 import com.strmr.tv.library.LibraryVersions
 import com.strmr.tv.player.ManualSourceTracks
 import com.strmr.tv.player.PlaybackCoordinator
+import com.strmr.tv.player.PlaybackSessionContext
+import com.strmr.tv.player.PlaybackStartupIntent
+import com.strmr.tv.player.PlaybackStartupTiming
+import com.strmr.tv.player.StartupEntry
+import com.strmr.tv.player.StartupOutcome
+import com.strmr.tv.player.startupPreparation
 import com.strmr.tv.player.PrequeuePick
 import com.strmr.tv.player.PlaybackRequest
 import com.strmr.tv.player.playLibrary
@@ -67,6 +73,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope = MainScope(),
     private val retireWarm:(String,Long)->Unit={id,context->PlaybackCoordinator.invalidateWarmSources(id,context)},
     expectedContext: Long = ProfileDataContext.current,
+    private val captureStartup: ((PlaybackSessionContext, DetailsTarget) -> PlaybackStartupIntent)? = null,
+    private val startupCurrent: () -> Boolean = { true },
     private val lookupLibrary:suspend (DetailsTarget,Long)->List<com.strmr.tv.api.LibraryMatch> = {target,context->ApiClient.libraryMatches(target,context)},
 ) {
     val dataContext = expectedContext
@@ -403,39 +411,72 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
      * Normal Play uses the coordinator's source policy. The legacy server path can still
      * offer a library picker; explicit Versions and library pages remain deliberate choices.
      */
-    fun play(episode: Episode?, start: StartPoint?, picks: PrequeuePick? = null) {
-        if (playJob?.isActive == true || !playable) return
+    private fun startup(entry: StartupEntry): PlaybackStartupIntent? {
+        // Measurement cannot change whether the established playback path is allowed to run.
+        if (PlaybackCoordinator.resolving.value != null) return null
+        return runCatching {
+            val generation = accessGeneration
+            val owner = PlaybackSessionContext.capture(dataContext)
+            (captureStartup?.invoke(owner, target) ?: PlaybackStartupTiming.intent(owner, target, entry,
+                startupPreparation(PlaybackCoordinator.warm.value, target.titleId, dataContext, ApiClient.profileId))).also {
+                it.bind(target, dataContext, scope.coroutineContext[Job]) {
+                    startupCurrent() && generation == accessGeneration && playable
+                }
+            }
+        }.getOrNull()
+    }
+
+    fun play(episode: Episode?, start: StartPoint?, picks: PrequeuePick? = null,
+        startupIntent: PlaybackStartupIntent? = null, measureStartup: Boolean = true) {
+        if (playJob?.isActive == true || !playable) { startupIntent?.notStarted(); return }
+        val timing = startupIntent ?: if (measureStartup) startup(StartupEntry.DETAILS_PLAY) else null
         playJob = scope.launch {
             try {
                 ApiClient.inContext(dataContext) {}
                 val versions = if (libraryLookup.isCompleted) library else withTimeoutOrNull(8_000) { libraryLookup.await() }
                 ApiClient.inContext(dataContext) {
-                    if(!playable)return@inContext
-                    PlaybackCoordinator.play(request(episode, start).copy(library = versions), picks) {
+                    if(!playable) { timing?.notStarted(); return@inContext }
+                    PlaybackCoordinator.play(request(episode, start).copy(library = versions), picks, expectedContext = dataContext, startup = timing) {
                         ApiClient.inContext(dataContext) { playChoice = PlayChoice(episode, start, picks) }
                     }
                 }
             } catch (_: TimeoutCancellationException) {
+                timing?.failed()
                 if (dataContext == ProfileDataContext.current) AppToast.show("Source preferences did not respond. Try again.")
-            } catch (e: CancellationException) { throw e
+            } catch (e: CancellationException) { timing?.cancel(); throw e
             } catch (_: Exception) {
+                timing?.failed()
                 if (dataContext == ProfileDataContext.current) AppToast.show("Source preferences could not be checked. Try again.")
             }
         }
+        playJob?.invokeOnCompletion { timing?.cancel() }
+    }
+
+    private inline fun startupAction(entry: StartupEntry, action: (PlaybackStartupIntent?) -> Unit) {
+        val timing = startup(entry)
+        try { action(timing) }
+        catch (error: CancellationException) { timing?.cancel(); throw error }
+        catch (error: Exception) { timing?.failed(); throw error }
     }
 
     /** Stream Instead keeps search intent for this title and the episodes after it. */
     fun streamInstead(choice: PlayChoice) {
-        if(playable)PlaybackCoordinator.play(request(choice.episode, choice.start).copy(sourceSelection = PlaybackRequest.SourceSelection.SEARCH_ONLY), choice.picks)
+        if(playable)startupAction(StartupEntry.STREAM_INSTEAD) { timing ->
+            PlaybackCoordinator.play(request(choice.episode, choice.start).copy(sourceSelection = PlaybackRequest.SourceSelection.SEARCH_ONLY), choice.picks, expectedContext = dataContext, startup = timing)
+        }
     }
 
     /** A copy picked in Versions. */
     fun playVersion(version: LibraryVersion, episode: Episode?, start: StartPoint?) {
-        if(playable)PlaybackCoordinator.playLibrary(request(episode, start), version)
+        if(playable)startupAction(StartupEntry.LIBRARY_VERSION) { timing ->
+            PlaybackCoordinator.playLibrary(request(episode, start), version, expectedContext = dataContext, startup = timing)
+        }
     }
 
     fun play(source: SourceResult, episode: Episode?, start: StartPoint?, manual: ManualSourceTracks? = null) {
-        if(playable)PlaybackCoordinator.play(request(episode, start), source, manual)
+        if(playable)startupAction(StartupEntry.MANUAL_SOURCE) { timing ->
+            PlaybackCoordinator.play(request(episode, start), source, manual, expectedContext = dataContext, startup = timing)
+        }
     }
 
     fun request(episode: Episode?, start: StartPoint?): PlaybackRequest {
