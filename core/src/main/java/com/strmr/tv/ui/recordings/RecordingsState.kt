@@ -55,7 +55,7 @@ class RecordingsState(
     fun joined(recording: Recording): RecordingDerivedState? {
         if (!isCurrent || selected !== recording || !pageCurrent()) return null
         val tools = joinedTools ?: RecordingDerivedState(scope, context, { selected },
-            { ApiClient.inContext(context) { profileId } },
+            { ApiClient.inContext(context) { ApiClient.profileId } },
             { com.strmr.tv.app.AppSession.profile.value?.isKidsProfile == false },
             { isCurrent && pageCurrent() }).also { joinedTools = it }
         return tools.takeIf { it.eligible(recording) }
