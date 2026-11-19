@@ -1,0 +1,161 @@
+[
+  {
+    "name": "unfiltered",
+    "request": "/api/users/profile/display-list?source=recently-watched-cached\u0026maxItemsPerProfile=3\u0026limit=0",
+    "file": "unfiltered.json",
+    "sha256": "3a3815388d98f494374541d600a17fd59bdfb7c8a10232f94e5e52895068d514",
+    "bytes": 672,
+    "Total": 3,
+    "Count": 3,
+    "ids": [
+      "tmdb:movie:1",
+      "tmdb:movie:2",
+      "tmdb:movie:3"
+    ],
+    "ranks": [
+      1,
+      2,
+      3
+    ]
+  },
+  {
+    "name": "late-filtered",
+    "request": "/api/users/profile/display-list?source=recently-watched-cached\u0026originalLanguages=fra\u0026maxItemsPerProfile=2\u0026limit=1",
+    "file": "late-filtered.json",
+    "sha256": "81fec864dcc24f51672cf374141fb441ab8b8ea53e9237a95e69d52d89955268",
+    "bytes": 308,
+    "Total": 2,
+    "Count": 1,
+    "ids": [
+      "tmdb:movie:650"
+    ],
+    "ranks": [
+      1
+    ]
+  },
+  {
+    "name": "late-continuation",
+    "request": "/api/users/profile/display-list?source=recently-watched-cached\u0026originalLanguages=fra\u0026maxItemsPerProfile=2\u0026limit=1\u0026offset=1",
+    "file": "late-continuation.json",
+    "sha256": "38e1c83e81973b8e8fa160052a3b9d5b3c968ed4adef060f1251e15d23175b3f",
+    "bytes": 308,
+    "Total": 2,
+    "Count": 1,
+    "ids": [
+      "tmdb:movie:653"
+    ],
+    "ranks": [
+      2
+    ]
+  },
+  {
+    "name": "unknown-only",
+    "request": "/api/users/profile/display-list?source=recently-watched-cached\u0026includeUnknownOriginalLanguage=true\u0026maxItemsPerProfile=20\u0026limit=0\u0026sortBy=name",
+    "file": "unknown-only.json",
+    "sha256": "30e756a3969c0fd10ace04ea951710df525f0ea2edd9c8f2e0ae9ab90b3ed1a6",
+    "bytes": 488,
+    "Total": 2,
+    "Count": 2,
+    "ids": [
+      "tmdb:movie:3",
+      "tmdb:movie:5"
+    ],
+    "ranks": [
+      1,
+      2
+    ]
+  },
+  {
+    "name": "or-unknown",
+    "request": "/api/users/profile/display-list?source=recently-watched-cached\u0026originalLanguages=fra\u0026includeUnknownOriginalLanguage=true\u0026maxItemsPerProfile=20\u0026limit=0\u0026sortBy=name",
+    "file": "or-unknown.json",
+    "sha256": "64537d37f1c2fb6e3ba1b349fa42cb4c3066cd4da2036bc3478ff8cd39700954",
+    "bytes": 672,
+    "Total": 3,
+    "Count": 3,
+    "ids": [
+      "tmdb:movie:2",
+      "tmdb:movie:3",
+      "tmdb:movie:5"
+    ],
+    "ranks": [
+      1,
+      2,
+      3
+    ]
+  },
+  {
+    "name": "empty-capability",
+    "request": "/api/users/profile/display-list?source=recently-watched-cached\u0026maxItemsPerProfile=20\u0026limit=0",
+    "file": "empty-capability.json",
+    "sha256": "019a16325dffc349cf531467d961bd055bc9329f2452f550097f9e63f5f4b795",
+    "bytes": 97,
+    "Total": 0,
+    "Count": 0,
+    "ids": [],
+    "ranks": []
+  },
+  {
+    "name": "repeated-all",
+    "request": "/api/users/profile/display-list?source=recently-watched-cached\u0026maxItemsPerProfile=20\u0026limit=0",
+    "file": "repeated-all.json",
+    "sha256": "94ec94850d193c8bb38114073a405c88dc31dcca8fd8f205b315204705c38cde",
+    "bytes": 1535,
+    "Total": 7,
+    "Count": 7,
+    "ids": [
+      "tmdb:movie:42",
+      "tmdb:movie:42",
+      "tmdb:movie:42",
+      "tmdb:tv:800",
+      "tmdb:tv:800",
+      "tmdb:tv:800",
+      "tmdb:tv:800"
+    ],
+    "ranks": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ]
+  },
+  {
+    "name": "repeated-continuation",
+    "request": "/api/users/profile/display-list?source=recently-watched-cached\u0026maxItemsPerProfile=20\u0026limit=2\u0026offset=2",
+    "file": "repeated-continuation.json",
+    "sha256": "02f4ed34d355a5e02ef7621853328a86c5fe32f24179dff116ca702623ed6bd1",
+    "bytes": 525,
+    "Total": 7,
+    "Count": 2,
+    "ids": [
+      "tmdb:movie:42",
+      "tmdb:tv:800"
+    ],
+    "ranks": [
+      3,
+      4
+    ]
+  },
+  {
+    "name": "primary-alias-blank-name",
+    "request": "/api/users/profile/display-list?source=recently-watched-cached\u0026maxItemsPerProfile=20\u0026limit=0",
+    "file": "primary-alias-blank-name.json",
+    "sha256": "2bba4b6b0dc5aaa4303dff907d8998b006983c990528027c874fe87408b7fa86",
+    "bytes": 688,
+    "Total": 3,
+    "Count": 3,
+    "ids": [
+      "tmdb:42",
+      "tmdb:movie:43",
+      "tvdb:series:74852"
+    ],
+    "ranks": [
+      1,
+      2,
+      3
+    ]
+  }
+]

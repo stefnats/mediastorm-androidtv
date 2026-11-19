@@ -40,6 +40,26 @@ sealed class BrowseList {
             } catch (_: kotlinx.coroutines.CancellationException) { null }
         }
     }
+    /** Explicit stored shared activity; no retained pool or provider refresh. */
+    class RecentlyWatchedCached private constructor(
+        val originalContext: Long,
+        internal val originalClient: String,
+        internal val parameters: RecentActivitySelection,
+    ) : BrowseList() {
+        companion object {
+            fun open(origin: BrowseList, query: Map<String, String>, expected: Long,
+                     producer: kotlinx.coroutines.Job, selected: () -> Boolean,
+                     clientIdentity: () -> String = { com.strmr.tv.app.Config.clientId }): RecentlyWatchedCached? = try {
+                com.strmr.tv.api.ApiClient.inContext(expected) {
+                    if (!producer.isActive || !selected()) null
+                    else recentActivitySelection(origin, query)?.let {
+                        RecentlyWatchedCached(expected, clientIdentity().also { id -> require(id.isNotBlank()) }, it)
+                    }
+                }
+            } catch (_: kotlinx.coroutines.CancellationException) { null }
+              catch (_: IllegalArgumentException) { null }
+        }
+    }
     /** Titles hidden from this profile ([com.strmr.tv.library.HiddenItemsStore]), where they can be unhidden. */
     data object Hidden : BrowseList()
     /** Titles the server keeps resolved until they are removed. */
@@ -91,6 +111,7 @@ sealed class BrowseList {
             Watchlist -> "Watchlist"
             ContinueWatching -> "Continue Watching"
             is ContinueWatchingCached -> "Saved Continue Watching"
+            is RecentlyWatchedCached -> "Saved Recently Watched"
             Hidden -> "Hidden"
             PermanentPrequeue -> "Permanent Prequeue"
             LovedStored -> "Saved Love Ratings"
@@ -140,6 +161,7 @@ sealed class BrowseList {
             Watchlist -> mapOf("source" to "watchlist")
             ContinueWatching -> mapOf("source" to "continue-watching")
             is ContinueWatchingCached -> mapOf("source" to "continue-watching-cached")
+            is RecentlyWatchedCached -> mapOf("source" to "recently-watched-cached")
             Hidden -> mapOf("source" to "hidden")
             PermanentPrequeue -> mapOf("source" to "permanent-prequeue")
             LovedStored -> mapOf("source" to "loved-stored")

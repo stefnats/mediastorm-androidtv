@@ -136,8 +136,9 @@ fun ListGridScreen(list: BrowseList, query: Map<String, String> = emptyMap(), cu
                     Column(Modifier.padding(bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Column {
                             Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                            total?.let { Text(if (it == 1) "1 title" else "$it titles", color = Color.White.copy(alpha = 0.6f)) }
+                            total?.let { Text(if (list is BrowseList.RecentlyWatchedCached) "$it watched entries" else if (it == 1) "1 title" else "$it titles", color = Color.White.copy(alpha = 0.6f)) }
                             if (list is BrowseList.ContinueWatchingCached) Text("Saved feed observation · No automatic update", color = Color.White.copy(alpha = 0.6f))
+                            if (list is BrowseList.RecentlyWatchedCached) Text("Stored original-language information · Unknown may have no current metadata", color = Color.White.copy(alpha = 0.6f))
                             if (list is BrowseList.CollectionCached) Text("Saved collection data · Original-language filters", color = Color.White.copy(alpha = 0.6f))
                             if (list == BrowseList.LovedStored) Text("All visible saved Love ratings, with original-language filters. Loved Titles also shows artwork and watched status.", color = Color.White.copy(alpha = 0.6f))
                         }
@@ -158,7 +159,11 @@ fun ListGridScreen(list: BrowseList, query: Map<String, String> = emptyMap(), cu
                                 val accepted = model.openSavedWatching(requireNotNull(scope.coroutineContext[kotlinx.coroutines.Job]), currentPage)
                                 if (accepted != null) com.strmr.tv.api.ApiClient.inContext(model.dataContext) { navigator.openList(accepted) }
                             }) { Text("Browse saved Continue Watching") }
-                            if (list == BrowseList.LovedStored || list is BrowseList.CollectionCached || list is BrowseList.ContinueWatchingCached) androidx.tv.material3.OutlinedButton(onClick = { scope.launch { model.reload() } }) { Text("Reload list") }
+                            if (model.canOpenSavedRecent) androidx.tv.material3.OutlinedButton(onClick = {
+                                val accepted = model.openSavedRecent(requireNotNull(scope.coroutineContext[kotlinx.coroutines.Job]), currentPage)
+                                if (accepted != null) com.strmr.tv.api.ApiClient.inContext(model.dataContext) { navigator.openList(accepted) }
+                            }) { Text("Browse saved Recently Watched") }
+                            if (list == BrowseList.LovedStored || list is BrowseList.CollectionCached || list is BrowseList.ContinueWatchingCached || list is BrowseList.RecentlyWatchedCached) androidx.tv.material3.OutlinedButton(onClick = { scope.launch { model.reload() } }) { Text("Reload list") }
                             GridCardSizeButton()
                         }
                         model.actionError?.let { Text(it, color = Color(0xFFFF6B6B)) }
