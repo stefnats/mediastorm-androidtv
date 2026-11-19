@@ -11,6 +11,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +38,12 @@ import com.strmr.tv.api.DetailsTarget
 import com.strmr.tv.app.AppLog
 import com.strmr.tv.home.CAROUSEL_LOG
 import com.strmr.tv.home.HomeCard
+import com.strmr.tv.home.HeroActions
+import com.strmr.tv.home.heroCta
+import com.strmr.tv.library.ProfileDataContext
+import com.strmr.tv.ui.SourceHintBadge
+import com.strmr.tv.ui.rememberVisibleTitleSource
+import com.strmr.tv.ui.rememberSourceHint
 import com.strmr.tv.library.WatchlistStore
 import com.strmr.tv.player.PlaybackCoordinator
 import com.strmr.tv.ui.LocalNavigator
@@ -54,6 +62,19 @@ fun CarouselButtons(slide: HomeCard, state: CarouselState, focus: FocusRequester
     val target = slide.target ?: return
     val navigator = LocalNavigator.current
     var focused by remember { mutableIntStateOf(-1) }
+    val active = owner.context == ProfileDataContext.current && owner.parent.isActive && owner.selected() && owner.currentSlides().getOrNull(state.index) === slide
+    val visibleSource = rememberVisibleTitleSource(slide, enabled = active)
+    val source by rememberUpdatedState(visibleSource.source)
+    val hint = rememberSourceHint(visibleSource.source)
+    val cta = heroCta(slide.progress, hint)
+    val actions = remember(owner, slide, active) {
+        HeroActions(slide, owner.context, owner.parent, owner.selected,
+            currentSlide = { owner.currentSlides().getOrNull(state.index) }, source = { source },
+            prepareBeforeOpen = true, prepare = PlaybackCoordinator::prewarm,
+            discard = { value, expected -> PlaybackCoordinator.invalidateWarmSources(value.titleId, expected) },
+            open = { value, autoplay, _ -> navigator.open(Page.Details(value, autoplay = autoplay)) })
+    }
+    DisposableEffect(actions) { onDispose { actions.close() } }
     /**
      * [focus] sits on the button last focused (held by [state]), so focusing the carousel again
      * (Up from the rows, or after a title action rebuilds Home's rows) lands where it was left.
@@ -63,7 +84,7 @@ fun CarouselButtons(slide: HomeCard, state: CarouselState, focus: FocusRequester
         .onFocusChanged { if (it.isFocused) { focused = i; state.button = i } }
     Row(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.onPreviewKeyEvent { e ->
+        modifier = Modifier.then(visibleSource.modifier).onPreviewKeyEvent { e ->
             e.type == KeyEventType.KeyDown && when (e.key) {
                 Key.DirectionLeft -> focused == 0 && onEdge(-1)
                 Key.DirectionRight -> focused == 2 && onEdge(1)
@@ -74,24 +95,23 @@ fun CarouselButtons(slide: HomeCard, state: CarouselState, focus: FocusRequester
         Button(
             onClick = {
                 if (state.selectBlocked()) return@Button
-                AppLog.i(CAROUSEL_LOG, "play ${target.titleId}")
-                PlaybackCoordinator.prewarm(target)
-                navigator.open(Page.Details(target, autoplay = true))
+                if (actions.primary(cta.confirmedMissing)) AppLog.i(CAROUSEL_LOG, "hero ${target.titleId}")
             },
             contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
             modifier = button(0),
         ) {
-            Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Icon(if (cta.confirmedMissing) Icons.Outlined.Info else Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
             Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-            Text(if (slide.progress > 0f) "Resume" else "Play")
+            Text(cta.label)
         }
         WatchlistToggle(target, slide, state, owner, button(1))
         IconButton(
-            onClick = { if (!state.selectBlocked()) navigator.openDetails(target) },
+            onClick = { if (!state.selectBlocked()) actions.details(cta.confirmedMissing) },
             modifier = button(2),
         ) {
             Icon(Icons.Outlined.Info, contentDescription = "Details")
         }
+        hint?.let { SourceHintBadge(it) }
     }
 }
 

@@ -20,20 +20,15 @@ import kotlinx.coroutines.SupervisorJob
 
 private object VisibleTitleSources {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var current: TitleSourceCoordinator? = null
-    fun current(): TitleSourceCoordinator {
-        val old = current
-        if (old != null && old.isCurrent()) return old
-        old?.close()
-        return TitleSourceCoordinator(scope, ServerTitleSourceGateway()).also { current = it }
-    }
+    private val store = TitleSourceCoordinatorStore(scope)
+    fun current(): TitleSourceCoordinator = store.current()
 }
 
 data class VisibleTitleSource(val modifier: Modifier, val source: SourceAvailability?)
 
 /** A composed/preloaded card is not demand until its clipped bounds intersect the window. */
 @Composable
-fun rememberVisibleTitleSource(card: HomeCard, completedPlayback: Boolean = false): VisibleTitleSource {
+fun rememberVisibleTitleSource(card: HomeCard, completedPlayback: Boolean = false, enabled: Boolean = true): VisibleTitleSource {
     val profile by AppSession.profile.collectAsState()
     val server by AppSession.serverUrl.collectAsState()
     val phase by AppSession.phase.collectAsState()
@@ -58,12 +53,12 @@ fun rememberVisibleTitleSource(card: HomeCard, completedPlayback: Boolean = fals
         tree.addOnWindowFocusChangeListener(focus)
         onDispose { lifecycle?.removeObserver(observer); if (tree.isAlive) tree.removeOnWindowFocusChangeListener(focus) }
     }
-    val active = titleSourceActive(inWindow, resumed, focused, playerOpen, resolving != null, phase == AppSession.Phase.Ready, completedPlayback)
+    val active = enabled && titleSourceActive(inWindow, resumed, focused, playerOpen, resolving != null, phase == AppSession.Phase.Ready, completedPlayback)
     DisposableEffect(coordinator, owner, title, active) {
         coordinator.setVisible(owner, title.takeIf { active })
         onDispose { coordinator.setVisible(owner, null) }
     }
-    val source = title?.let { hints[titleSourceKey(it)] }
+    val source = if (enabled) title?.let { hints[titleSourceKey(it)] } else null
     return VisibleTitleSource(Modifier.onGloballyPositioned { val bounds = it.boundsInWindow(); inWindow = bounds.width > 0 && bounds.height > 0 }, source)
 }
 
