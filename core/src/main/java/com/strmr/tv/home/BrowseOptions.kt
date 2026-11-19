@@ -67,7 +67,7 @@ data class BrowseOptions(
     }
 
     fun query(list: BrowseList): Map<String, String> = buildMap {
-        if (list is BrowseList.RecentlyWatchedCached) {
+        if (list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached) {
             require(watch == WatchFilter.ALL && genres.isEmpty() && ratingSource == RatingSource.IMDB && sort in list.sorts) { "Unsupported saved activity options" }
             if (sort != BrowseSort.DEFAULT || ascending) { put("sortBy", sort.value); put("sortDirection", if (ascending) "asc" else "desc") }
             kind?.let { put("filterMediaType", it.mediaType) }
@@ -110,7 +110,7 @@ val BrowseList.sorts: List<BrowseSort>
         is BrowseList.Custom, BrowseList.Watchlist, BrowseList.PermanentPrequeue -> BrowseSort.entries
         is BrowseList.Genre, is BrowseList.Decade, is BrowseList.Remote, is BrowseList.Service, is BrowseList.Trending ->
             listOf(BrowseSort.DEFAULT, BrowseSort.NAME, BrowseSort.YEAR, BrowseSort.RATING)
-        is BrowseList.RecentlyWatchedCached -> listOf(BrowseSort.DEFAULT, BrowseSort.NAME)
+        is BrowseList.RecentlyWatchedCached, is BrowseList.PopularOnServerCached -> listOf(BrowseSort.DEFAULT, BrowseSort.NAME)
         is BrowseList.CollectionCached, is BrowseList.ContinueWatchingCached -> listOf(BrowseSort.DEFAULT, BrowseSort.NAME, BrowseSort.YEAR)
         BrowseList.Hidden, BrowseList.LovedStored -> listOf(BrowseSort.DEFAULT, BrowseSort.ADDED, BrowseSort.NAME, BrowseSort.YEAR)
         is BrowseList.Library -> listOf(BrowseSort.DEFAULT, BrowseSort.ADDED, BrowseSort.NAME, BrowseSort.YEAR)
@@ -118,14 +118,14 @@ val BrowseList.sorts: List<BrowseSort>
     }
 
 /** The A–Z index under a Name sort: the profile's own lists and libraries. */
-val BrowseList.indexesLetters: Boolean get() = filters || this == BrowseList.Hidden || this == BrowseList.LovedStored || this is BrowseList.CollectionCached || this is BrowseList.ContinueWatchingCached || this is BrowseList.RecentlyWatchedCached || this is BrowseList.Library
+val BrowseList.indexesLetters: Boolean get() = filters || this == BrowseList.Hidden || this == BrowseList.LovedStored || this is BrowseList.CollectionCached || this is BrowseList.ContinueWatchingCached || this is BrowseList.RecentlyWatchedCached || this is BrowseList.PopularOnServerCached || this is BrowseList.Library
 
 /** Movies / Shows, watch status, genre facets and the A–Z index: the profile's own lists. */
 val BrowseList.filters: Boolean
     get() = this is BrowseList.Custom || this == BrowseList.Watchlist || this == BrowseList.PermanentPrequeue
 
 /** Actual response capability still gates these controls; this is eligibility, never a claim of support. */
-val BrowseList.originalLanguageEligible: Boolean get() = filters || this == BrowseList.Hidden || this == BrowseList.LovedStored || this is BrowseList.CollectionCached || this is BrowseList.ContinueWatchingCached || this is BrowseList.RecentlyWatchedCached || this is BrowseList.Library
+val BrowseList.originalLanguageEligible: Boolean get() = filters || this == BrowseList.Hidden || this == BrowseList.LovedStored || this is BrowseList.CollectionCached || this is BrowseList.ContinueWatchingCached || this is BrowseList.RecentlyWatchedCached || this is BrowseList.PopularOnServerCached || this is BrowseList.Library
 
 /** Only catalogue language parameters, shared by stored pages and local library cards. */
 fun BrowseOptions.originalLanguageQuery(): Map<String, String> = buildMap {

@@ -1,0 +1,212 @@
+[
+  {
+    "name": "counts-default",
+    "request": "/api/users/profile/display-list?source=popular-on-server-cached\u0026limit=0",
+    "file": "counts-default.json",
+    "sha256": "bf7594269d12139a8ab6e86cae528b5a07d5ce9ea4764b0a4c6205328a4f4e74",
+    "bytes": 676,
+    "total": 3,
+    "count": 3,
+    "ids": [
+      "tmdb:tv:800",
+      "tmdb:movie:42",
+      "tmdb:movie:43"
+    ],
+    "ranks": [
+      4,
+      2,
+      2
+    ]
+  },
+  {
+    "name": "minimum-one",
+    "request": "/api/users/profile/display-list?source=popular-on-server-cached\u0026minimumViews=1\u0026limit=0",
+    "file": "minimum-one.json",
+    "sha256": "576fb5358966149cc2586dc85aaf80c45320f8d12ed90f70e1b96b26499f14a2",
+    "bytes": 856,
+    "total": 4,
+    "count": 4,
+    "ids": [
+      "tmdb:tv:800",
+      "tmdb:movie:42",
+      "tmdb:movie:43",
+      "tmdb:movie:44"
+    ],
+    "ranks": [
+      4,
+      2,
+      2,
+      1
+    ]
+  },
+  {
+    "name": "threshold-alias-one",
+    "request": "/api/users/profile/display-list?source=popular-on-server-cached\u0026minimumProfiles=1\u0026limit=0",
+    "file": "threshold-alias-one.json",
+    "sha256": "576fb5358966149cc2586dc85aaf80c45320f8d12ed90f70e1b96b26499f14a2",
+    "bytes": 856,
+    "total": 4,
+    "count": 4,
+    "ids": [
+      "tmdb:tv:800",
+      "tmdb:movie:42",
+      "tmdb:movie:43",
+      "tmdb:movie:44"
+    ],
+    "ranks": [
+      4,
+      2,
+      2,
+      1
+    ]
+  },
+  {
+    "name": "equal-threshold-one",
+    "request": "/api/users/profile/display-list?source=popular-on-server-cached\u0026minimumViews=1\u0026minimumProfiles=1\u0026limit=0",
+    "file": "equal-threshold-one.json",
+    "sha256": "576fb5358966149cc2586dc85aaf80c45320f8d12ed90f70e1b96b26499f14a2",
+    "bytes": 856,
+    "total": 4,
+    "count": 4,
+    "ids": [
+      "tmdb:tv:800",
+      "tmdb:movie:42",
+      "tmdb:movie:43",
+      "tmdb:movie:44"
+    ],
+    "ranks": [
+      4,
+      2,
+      2,
+      1
+    ]
+  },
+  {
+    "name": "late-filtered",
+    "request": "/api/users/profile/display-list?source=popular-on-server-cached\u0026originalLanguages=fra\u0026limit=1",
+    "file": "late-filtered.json",
+    "sha256": "83558b47beeb819b04e2784c93ea503ef9ce334a843690d819ff6d19f397c99c",
+    "bytes": 302,
+    "total": 2,
+    "count": 1,
+    "ids": [
+      "tmdb:movie:650"
+    ],
+    "ranks": [
+      2
+    ]
+  },
+  {
+    "name": "late-continuation",
+    "request": "/api/users/profile/display-list?source=popular-on-server-cached\u0026originalLanguages=fra\u0026limit=1\u0026offset=1",
+    "file": "late-continuation.json",
+    "sha256": "eee9085ac430715e9ec16857d0326570359f82f57d045c8bfa6274145a334eba",
+    "bytes": 302,
+    "total": 2,
+    "count": 1,
+    "ids": [
+      "tmdb:movie:653"
+    ],
+    "ranks": [
+      2
+    ]
+  },
+  {
+    "name": "primary-alias-language",
+    "request": "/api/users/profile/display-list?source=popular-on-server-cached\u0026originalLanguages=fra\u0026limit=0",
+    "file": "primary-alias-language.json",
+    "sha256": "ac9659d6bb1f1942cb1a9cd230e1b7cc24ffa12f03245ea96c89c9e48a22f06b",
+    "bytes": 299,
+    "total": 1,
+    "count": 1,
+    "ids": [
+      "tmdb:42"
+    ],
+    "ranks": [
+      2
+    ]
+  },
+  {
+    "name": "provider-kind-boundaries",
+    "request": "/api/users/profile/display-list?source=popular-on-server-cached\u0026limit=0",
+    "file": "provider-kind-boundaries.json",
+    "sha256": "eaaecb6c2e4495bbb70440cfa43426f763ecfe9dabfee288b9ec1e2416b5d228",
+    "bytes": 848,
+    "total": 4,
+    "count": 4,
+    "ids": [
+      "tmdb:tv:42",
+      "tmdb:42",
+      "tvdb:movie:42",
+      "tvdb:series:42"
+    ],
+    "ranks": [
+      3,
+      2,
+      2,
+      2
+    ]
+  },
+  {
+    "name": "unknown-only",
+    "request": "/api/users/profile/display-list?source=popular-on-server-cached\u0026includeUnknownOriginalLanguage=true\u0026sortBy=name\u0026limit=0",
+    "file": "unknown-only.json",
+    "sha256": "b8e6863069168330b10d55edb1f978ea5f3e553494a3d46d2155535b8ebc1be6",
+    "bytes": 483,
+    "total": 2,
+    "count": 2,
+    "ids": [
+      "tmdb:movie:3",
+      "tmdb:movie:4"
+    ],
+    "ranks": [
+      2,
+      2
+    ]
+  },
+  {
+    "name": "or-unknown",
+    "request": "/api/users/profile/display-list?source=popular-on-server-cached\u0026originalLanguages=fra\u0026includeUnknownOriginalLanguage=true\u0026sortBy=name\u0026limit=0",
+    "file": "or-unknown.json",
+    "sha256": "9a82da4f9b46c30042e98163fdd680822a3a2cd40c5406d8833fdf92db70253c",
+    "bytes": 664,
+    "total": 3,
+    "count": 3,
+    "ids": [
+      "tmdb:movie:2",
+      "tmdb:movie:3",
+      "tmdb:movie:4"
+    ],
+    "ranks": [
+      2,
+      2,
+      2
+    ]
+  },
+  {
+    "name": "empty-capability",
+    "request": "/api/users/profile/display-list?source=popular-on-server-cached\u0026limit=0",
+    "file": "empty-capability.json",
+    "sha256": "5f0561f28c94a6278885008a0134a6b8058717ddf5a8619176c420adcbbc8dd3",
+    "bytes": 98,
+    "total": 0,
+    "count": 0,
+    "ids": [],
+    "ranks": []
+  },
+  {
+    "name": "name-alphabet",
+    "request": "/api/users/profile/display-list?source=popular-on-server-cached\u0026minimumViews=1\u0026alphabet=B\u0026sortBy=name\u0026limit=1",
+    "file": "name-alphabet.json",
+    "sha256": "963a61f14410a45ffd1d687e178061a7e2274b11aca9de2c2bdafd2504a0e56c",
+    "bytes": 311,
+    "total": 1,
+    "count": 1,
+    "ids": [
+      "tmdb:movie:43"
+    ],
+    "ranks": [
+      2
+    ]
+  }
+]

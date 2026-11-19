@@ -105,7 +105,7 @@ fun BrowseGridPage(list: BrowseList, query: Map<String, String>, showBack: Boole
             onRefresh = {
                 refreshing = true
                 scope.launch {
-                    if (model.total == null || list is BrowseList.ContinueWatchingCached || list is BrowseList.RecentlyWatchedCached) model.reload() else model.rereadLoaded()
+                    if (model.total == null || list is BrowseList.ContinueWatchingCached || list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached) model.reload() else model.rereadLoaded()
                     refreshing = false
                 }
             },
@@ -139,6 +139,7 @@ private fun BrowseGrid(model: ListGridModel, gridState: LazyGridState, retry: ()
                 }
                 if (list is BrowseList.ContinueWatchingCached) Text("Saved feed observation · No automatic update", style = MaterialTheme.typography.bodySmall)
                 if (list is BrowseList.RecentlyWatchedCached) Text("Stored original-language information · Unknown may have no current metadata", style = MaterialTheme.typography.bodySmall)
+                if (list is BrowseList.PopularOnServerCached) Text("Stored completed-item views · Original language uses current cached information", style = MaterialTheme.typography.bodySmall)
                 if (list is BrowseList.CollectionCached) Text("Saved collection data · Original-language filters", style = MaterialTheme.typography.bodySmall)
                 if (list == BrowseList.LovedStored) Text("All visible saved Love ratings, with original-language filters. Loved Titles also shows artwork and watched status.", style = MaterialTheme.typography.bodySmall)
                 if (list.hasChips()) BrowseFilterChips(model, Modifier.bleed(16.dp))

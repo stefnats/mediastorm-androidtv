@@ -1,0 +1,42 @@
+{
+  "backendCommit": "634fef3f4d2736a7a2574a6926d8b269704fe59f",
+  "producer": "Actual Go DisplayListHandler.Get and OpenAPI validation using synthetic histories and a source-preserving external overlay.",
+  "producerSHA256": "e108a773be0f649b62ab6fae0c67f738acea562ecd260d3ee93e0049e3cb915d",
+  "overlaySHA256": "836e229e238e5cae3f0911e0a77ede2724c3b884aefef14634ffcbda23acddf7",
+  "backendSourceHashes": {
+    "backend/handlers/popular_titles_cached.go": "821822163b2a30441cc4b066166186b7f5bfa4573009379142216dbddb3c05f7",
+    "backend/handlers/popular_titles_cached_test.go": "c42328018af7686ac2f4881ef15ac139548337d24caab641226902d9eec4a29d",
+    "backend/handlers/popular_titles_cached_wire_test.go": "2a9824ca2db8dbf081ae0420b8fcb5b7449760ea988a2d74397b9b101500fb20",
+    "backend/handlers/recent_watches_cached.go": "01f17b4fc73f8aa34b4e6dbf3531a1b3f30e6343d536dded8ce2f0f501832e46",
+    "backend/handlers/cached_shared_activity.go": "637b1d1bf279231b4bbb365d2937e0fd6d10592f7139f0eee2c58f4df859af13",
+    "backend/handlers/display_list.go": "322a01eb63889e64143cf3c810c9f54c7ddcbef1eed2684a9a9047bfaed43fd7",
+    "backend/handlers/display_list_query.go": "0ec3d9abd8c92980e75fe123742ee102416e8280e6bd8a00c98b6513f4fc3fb5",
+    "backend/services/history/recent_watches_cached.go": "955882a8052990161fada8d0149d287010d4e4c06dd5e1cc04925d9b14dfc97e",
+    "backend/api/openapi/openapi.yaml": "7f606f99c9cb7255b75d51025abf4bed03edf0045803fbf4fc71583c6f84ab9e",
+    "backend/handlers/recent_watches_cached_test.go": "9dc6c2e7b7c28991c0d8b70e41140553f47c15c01aba0d7c46fb90d536e0d90a",
+    "backend/handlers/recent_watches_cached_wire_test.go": "5d31de746c9f4d4f8a63ba44297b19ca06adfe3d5f64fb5703dbd507e7e9455d",
+    "backend/handlers/loved_stored_language_test.go": "d5d7841820da88262cc5fb72209ae950afa3356fbbd7de51d58d311ff1c01234",
+    "backend/handlers/continue_watching_cached_test.go": "dd4139036ee5cb17b9b25f5e766dcdfa89d2fd2af04907d359157bad7d8b9795",
+    "backend/models/history.go": "a79754499e4ba07561a43b3e98869dcf32e02242ccf197c65935f069ab581abc",
+    "backend/models/metadata.go": "4cd72499fbfe67a5251f78a8299d4ffe5f40a3cf06ebcc13e0adfe873afc13d4"
+  },
+  "acceptedRun": {
+    "exitCode": 0,
+    "subprocessClosed": true,
+    "accepted": true,
+    "counts": {
+      "pass_tests": 13,
+      "pass_packages": 1
+    },
+    "statusSHA256": "9dbbca099f6008f25654f35b3f0b970b2e35c6887f03154f862d3e4fc82a5d8d",
+    "rawSHA256": "eb78601866688ccfb5ca5dda11628b1ef2f57674cbb61db01aef9db36332a106"
+  },
+  "replyManifestSHA256": "519c03646d909753ef7248c2b33f7fb02570d9d4f41564aed692be64782facd9",
+  "sourceEvidence": {
+    "producer": "/home/stefan/ops-runbook/tmp/mediastorm-native-popular-cached-20261119/backend-exports/native_popular_cached_export_test.go",
+    "pre": "/home/stefan/ops-runbook/tmp/mediastorm-native-popular-cached-20261119/backend-exports/pre.json",
+    "status": "/home/stefan/ops-runbook/tmp/mediastorm-native-popular-cached-20261119/backend-exports/status.json",
+    "manifest": "/home/stefan/ops-runbook/tmp/mediastorm-native-popular-cached-20261119/backend-exports/replies/manifest.json"
+  },
+  "qualification": "These are byte-exact original backend responses, with no hand-written reply golden. Synthetic scalar/model edge cases in Kotlin are separate. The native portable local HTTP tests do not execute Android sendRaw."
+}

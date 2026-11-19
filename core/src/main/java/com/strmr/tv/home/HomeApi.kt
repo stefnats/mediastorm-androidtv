@@ -251,6 +251,7 @@ suspend fun ApiClient.browsePage(
         return BrowsePage(all.drop(offset).take(limit).map { BrowseEntry.WatchingEntry(it) }, all.size)
     }
     if (list is BrowseList.RecentlyWatchedCached) return cachedRecentActivityPage(list, limit, offset, extra, options ?: BrowseOptions(), expectedContext)
+    if (list is BrowseList.PopularOnServerCached) return cachedPopularActivityPage(list, limit, offset, extra, options ?: BrowseOptions(), expectedContext)
     if (list is BrowseList.ContinueWatchingCached) return cachedWatchingPage(list, limit, offset, extra, options ?: BrowseOptions(), expectedContext)
     if (list is BrowseList.CollectionCached) return cachedCollectionPage(list, limit, offset, extra, options ?: BrowseOptions(), expectedContext)
     if (list == BrowseList.LovedStored) return storedLovedPage(limit, offset, extra, options ?: BrowseOptions(), expectedContext)
