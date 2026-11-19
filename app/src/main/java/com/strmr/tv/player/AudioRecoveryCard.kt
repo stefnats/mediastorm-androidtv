@@ -14,14 +14,14 @@ import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Button
 import androidx.tv.material3.Text
 
-/** Does not request focus or pause playback; the remote explicitly opens the prepared-source menu. */
+/** Does not request focus or pause playback; the remote explicitly opens source review. */
 @Composable
 fun AudioRecoveryCard(message: String, onReview: () -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     Column(modifier.widthIn(max = 680.dp).background(Color.Black.copy(alpha = 0.85f), RoundedCornerShape(16.dp)).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(message)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = onReview) { Text("Review alternative") }
+            Button(onClick = onReview) { Text("Review audio / source") }
             Button(onClick = onDismiss) { Text("Dismiss suggestion") }
         }
     }

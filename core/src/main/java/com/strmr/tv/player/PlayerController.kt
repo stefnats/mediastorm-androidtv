@@ -86,6 +86,8 @@ class PlayerController(context: Context, val session: PlayerSession, private val
 
     private val recoveryContext = ServerReleaseReportGateway(dataContext)
     private val audioRecoveryPolicy = AudioRecoveryPolicy()
+    private val decodedAudio = DecodedAudioObservation()
+    private val decodedAudioPolicy = DecodedAudioSilencePolicy()
     val audioRecovery by lazy { AudioRecoveryAssistant(scope, { createReleaseReports(true) }, { recoveryContext.isCurrent() }) }
     val audioRecoveryActive get() = audioRecovery.active
 
@@ -124,6 +126,17 @@ class PlayerController(context: Context, val session: PlayerSession, private val
             next.ofType(C.TRACK_TYPE_VIDEO).any { it.selected }, session.tracks?.audio != null,
             next.ofType(C.TRACK_TYPE_AUDIO).isNotEmpty(), C.TRACK_TYPE_AUDIO !in player.trackSelectionParameters.disabledTrackTypes,
             player.volume), canPrepareAudioAlternative())?.let { audioRecovery.suggest(it) }
+        val selectedAudio = next.ofType(C.TRACK_TYPE_AUDIO).singleOrNull { it.selected }
+        if (decodedAudioPolicy.observe(decodedAudio.snapshot(), DecodedAudioPlayback(
+                nowMs = SystemClock.elapsedRealtime(), positionMs = player.currentPosition,
+                durationMs = player.duration.takeIf { it != C.TIME_UNSET } ?: 0L,
+                eligible = canUsePlayerAux() && canPrepareAudioAlternative(), playing = player.isPlaying,
+                buffering = player.playbackState != Player.STATE_READY,
+                videoSelected = next.ofType(C.TRACK_TYPE_VIDEO).any { it.selected },
+                audioGroup = selectedAudio?.group?.mediaTrackGroup, audioIndex = selectedAudio?.index ?: -1,
+                audioEnabled = C.TRACK_TYPE_AUDIO !in player.trackSelectionParameters.disabledTrackTypes,
+                volume = player.volume, speed = player.playbackParameters.speed,
+            ))) audioRecovery.suggest(AudioRecoveryHint.SILENCE)
     }
     /** The cues on screen, drawn by [SubtitleOverlay] in the device's style. */
     val cues = MutableStateFlow<List<Cue>>(emptyList())
@@ -191,6 +204,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         startup.end(StartupOutcome.FAILED)
         cancelRecordingParts()
         vodDenied.value=denial;autoSwitch.cancel();upNext?.cancel();closeReleaseReports();progress.discardFuture()
+        decodedAudio.close(); decodedAudioPolicy.reset()
         recordingHls?.release();catchup?.release();liveRetune?.release()
         thumbnails?.cancel();online.cancel();external.cancel();switchTo.value=null;advanceTo.value=null
         player.stop();error.value=denial.message
@@ -265,6 +279,11 @@ class PlayerController(context: Context, val session: PlayerSession, private val
             audioFormat.value = next.ofType(C.TRACK_TYPE_AUDIO).firstOrNull { it.selected }?.format
         }
 
+        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            decodedAudio.restart()
+            decodedAudioPolicy.reset()
+        }
+
         override fun onCues(cueGroup: CueGroup) {
             if (!external.selected.value) cues.value = cueGroup.cues
         }
@@ -314,7 +333,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     init {
         require(session.canOpenPlayer()) {"This local file requires its original verified context."}
         // Passthrough only where the output takes it (not Bluetooth); PCM otherwise.
-        val renderers = PassthroughGuard.renderersFactory(context)
+        val renderers = PassthroughGuard.renderersFactory(context, decodedAudio.takeIf { audioRecoveryEligible(session, true, true) })
             // Platform decoders first; the FFmpeg extension (TrueHD, DTS…) when none can.
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true)
@@ -367,7 +386,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     /** Retire the entire old scope before queued helpers can read a replacement identity. */
     private val contextWatch=scope.launch {
         ProfileDataContext.changes.collect {
-            if(!session.canOpenPlayer()) {cancelRecordingParts();startup.end(StartupOutcome.OWNER_LOST);progress.discardFuture();player.stop();ended.value=true;scope.cancel()}
+            if(!session.canOpenPlayer()) {decodedAudio.close();decodedAudioPolicy.reset();cancelRecordingParts();startup.end(StartupOutcome.OWNER_LOST);progress.discardFuture();player.stop();ended.value=true;scope.cancel()}
         }
     }
 
@@ -465,6 +484,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     fun release(): Job? {
         startup.end(StartupOutcome.RELEASED)
         released=true
+        decodedAudio.close(); decodedAudioPolicy.reset()
         val partPosition=player.currentPosition
         if (!ended.value && advanceTo.value == null && postPlay.value == null) report(paused = true, closing = true)
         closeReleaseReports()

@@ -177,7 +177,7 @@ fun PlayerControls(
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(recoveryMessage, color = Color.White)
                 Row {
-                    TextButton(onClick = { open(PlayerSheet.REPORT) }) { Text("Review alternative") }
+                    TextButton(onClick = { open(PlayerSheet.REPORT) }) { Text("Review audio / source") }
                     TextButton(onClick = { controller.audioRecovery.dismiss() }) { Text("Dismiss") }
                 }
             }

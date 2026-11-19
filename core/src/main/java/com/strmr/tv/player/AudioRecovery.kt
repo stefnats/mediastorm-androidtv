@@ -13,6 +13,7 @@ enum class AudioRecoveryHint(val description: String) {
     DECODER("The selected audio could not be decoded on this device."),
     OUTPUT("This device could not initialize or write audio output."),
     MISSING("The server expected audio, but this device has no audio track while video advances."),
+    SILENCE("The selected decoded audio has contained only zero samples for a prolonged interval. This may be intentional silence."),
 }
 
 fun audioRecoveryEligible(session: PlayerSession, enabled: Boolean, contextCurrent: Boolean): Boolean =
@@ -93,6 +94,8 @@ class AudioRecoveryAssistant(
         val flow = createFlow()
         val suggestion = AudioRecoverySuggestion(hint, flow)
         mutable.value = suggestion
+        // Content silence is uncertain. Only the existing user-opened source menu may load or prepare.
+        if (hint == AudioRecoveryHint.SILENCE) return true
         loading = scope.launch {
             try {
                 flow.load()
@@ -113,6 +116,9 @@ class AudioRecoveryAssistant(
 }
 
 fun audioRecoveryMessage(hint: AudioRecoveryHint, state: ReleaseReportState): String {
+    if (hint == AudioRecoveryHint.SILENCE && state.options == null && !state.busy && state.message == null) {
+        return "${hint.description} If sound should be present, review audio/source controls. No alternative has been requested."
+    }
     val progress = when {
         state.ready != null -> "An alternative is ready. Review it before switching."
         state.busy || (state.options == null && state.message == null) -> "Preparing an alternative. No report or permanent exclusion is saved."

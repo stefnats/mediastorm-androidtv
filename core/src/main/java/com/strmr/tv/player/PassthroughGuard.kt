@@ -102,13 +102,16 @@ class PassthroughGuard(context: Context, delegate: AudioOutputProvider) : Forwar
         }
 
         /** [DefaultRenderersFactory] whose audio sink goes through [PassthroughGuard]. */
-        fun renderersFactory(context: Context): DefaultRenderersFactory = object : DefaultRenderersFactory(context) {
+        fun renderersFactory(context: Context): DefaultRenderersFactory = renderersFactory(context, null)
+
+        internal fun renderersFactory(context: Context, observation: DecodedAudioObservation?): DefaultRenderersFactory = object : DefaultRenderersFactory(context) {
             override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParams: Boolean): AudioSink =
                 DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(enableFloatOutput)
                     .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
                     .setAudioOutputProvider(PassthroughGuard(context, AudioTrackAudioOutputProvider.Builder(context).build()))
                     .build()
+                    .let { sink -> observation?.let { DecodedAudioSink(sink, it) } ?: sink }
         }
     }
 }
