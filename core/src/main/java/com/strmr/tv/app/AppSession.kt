@@ -61,6 +61,10 @@ object AppSession {
     val pinChallenge: MutableStateFlow<PinChallenge?> get() = ProfileUnlock.pinChallenge
     /** Bumped each time the app comes to the foreground, so pages can refresh. */
     val wakes = MutableStateFlow(0)
+    /** Protected browsing stays hidden while a deferred player-exit PIN is outstanding. */
+    val browsingLocked get() = ResumeLock.browsingLocked
+    fun browsingStarted(activity: android.app.Activity) = ResumeLock.beforeBrowsing(activity)
+    fun browsingStopped(activity: android.app.Activity) = ResumeLock.browsingStopped(activity)
 
     private val api = ApiClient
     private val scope = MainScope()
@@ -277,6 +281,7 @@ object AppSession {
         ResumeLock.pickRequired = false
         SessionPrefs.saveLastProfile(chosen.id)
         _phase.value = Phase.Ready
+        ResumeLock.profileActivated()
         ProfileSetup.afterActivating(chosen, scope)
         ResumeLock.refreshSetting()
     }
