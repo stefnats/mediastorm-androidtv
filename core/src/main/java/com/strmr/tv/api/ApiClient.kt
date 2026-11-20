@@ -8,6 +8,8 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -271,6 +273,15 @@ object ApiClient {
         return sendOwnedRaw(request.method, request.path, request.query, expectedContext = expected,
             timeoutMs = if (prepare) 330_000 else 15_000, retryTransport = false, observeResponse = true,
             observationPolicy = if (prepare) ObservedResponsePolicy.DERIVED_PREPARE else ObservedResponsePolicy.DERIVED_READ)
+    }
+
+    /** Fixed progress operations keep the original profile carrier and never refresh or replay. */
+    internal suspend fun sendRecordingProgressRaw(operation: com.strmr.tv.live.RecordingProgressRequest, expected: Long): ObservedRawResponse {
+        val context = requestContexts.capture(expected)
+        return com.strmr.tv.live.RecordingProgressTransport(context,
+            base = { baseUrl }, activeProfile = { profileId }, bearer = { storedSession?.token },
+            unlock = { profile -> unlocks.token(profile) }, clientId = { Config.clientId },
+            remoteCredential = { remoteCredential }, client = nonReplayingHttp).send(operation)
     }
 
     private suspend fun sendOwnedRaw(
@@ -556,12 +567,129 @@ private fun boundedObservedBody(response: Response, limit: Long = 4L * 1024 * 10
 
 /** Finite body/time policies; the actual owned sender separately validates routes. */
 enum class ObservedResponsePolicy(val bodyLimit: Long, val maxRoundTripMillis: Long) {
-    BROWSE(4L * 1024 * 1024, 120_000L), DERIVED_READ(64L * 1024, 15_000L), DERIVED_PREPARE(64L * 1024, 330_000L)
+    BROWSE(4L * 1024 * 1024, 120_000L), DERIVED_READ(64L * 1024, 15_000L), DERIVED_PREPARE(64L * 1024, 330_000L), PROGRESS(64L * 1024, 15_000L)
 }
 internal fun requireObservedDerivedRequest(method: String, path: String, query: Map<String,String>, profile: String,
     expected: Boolean, policy: ObservedResponsePolicy, emptyOwnedRequest: Boolean) {
     val prepare = policy == ObservedResponsePolicy.DERIVED_PREPARE
-    require(policy != ObservedResponsePolicy.BROWSE && expected && emptyOwnedRequest && profile.isNotBlank() &&
+    require(policy in setOf(ObservedResponsePolicy.DERIVED_READ, ObservedResponsePolicy.DERIVED_PREPARE) && expected && emptyOwnedRequest && profile.isNotBlank() &&
         query == mapOf("profileId" to profile) && method == (if (prepare) "POST" else "GET"))
     require(Regex("/api/live/recordings/[A-Za-z0-9_-]{1,128}/derived" + if (prepare) "/join" else "").matches(path))
+}
+
+/** Already finite and actually closed before OkHttp can evaluate any HTTP follow-up. */
+private class FinishedRecordingProgressHttp(val result: HttpResult) : IOException("Recording progress HTTP response finished")
+
+/** Only this fixed progress sender prevents SDK status-based follow-ups as well as reconnects. */
+internal fun OkHttpClient.recordingProgressClient(): OkHttpClient = withoutAutomaticReplay().newBuilder().apply {
+    networkInterceptors().add(0, okhttp3.Interceptor { chain ->
+        val response = chain.proceed(chain.request())
+        if (response.code == 200) response else {
+            val result = response.use {
+                HttpResult(it.code, boundedObservedBody(it, ObservedResponsePolicy.PROGRESS.bodyLimit), it.header("Retry-After"))
+            }
+            throw FinishedRecordingProgressHttp(result)
+        }
+    })
+}.build()
+
+/** Parse original finite parameters, including duplicates that MediaType.parameter hides. */
+private fun recordingProgressJSON(response: Response): Boolean {
+    val values = response.headers.values("Content-Type")
+    if (values.size != 1) return false
+    val raw = values.single()
+    if (raw.length !in 1..4096) return false
+    val type = response.body?.contentType() ?: return false
+    if (type.type != "application" || type.subtype != "json") return false
+    var index = raw.indexOf(';')
+    if (index == -1) return true
+    var charsets = 0
+    fun token(c: Char) = c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c in "!#$%&'*+-.^_`|~"
+    fun whitespace() { while (index < raw.length && (raw[index] == ' ' || raw[index] == '\t')) index++ }
+    while (index < raw.length) {
+        if (raw[index++] != ';') return false
+        whitespace()
+        val start = index
+        while (index < raw.length && token(raw[index])) index++
+        if (start == index) return false
+        val name = raw.substring(start, index)
+        whitespace()
+        if (index == raw.length || raw[index++] != '=') return false
+        whitespace()
+        val value: String
+        if (index < raw.length && raw[index] == '"') {
+            index++
+            val decoded = StringBuilder()
+            var closed = false
+            while (index < raw.length) {
+                var c = raw[index++]
+                if (c == '"') { closed = true; break }
+                if (c == '\\') {
+                    if (index == raw.length) return false
+                    c = raw[index++]
+                }
+                if (c.code !in 32..126 && c != '\t') return false
+                decoded.append(c)
+            }
+            if (!closed) return false
+            value = decoded.toString()
+        } else {
+            val valueStart = index
+            while (index < raw.length && token(raw[index])) index++
+            if (valueStart == index) return false
+            value = raw.substring(valueStart, index)
+        }
+        whitespace()
+        if (index < raw.length && raw[index] != ';') return false
+        if (name.equals("charset", ignoreCase = true)) {
+            if (++charsets != 1 || value.isEmpty()) return false
+            val charset = try { java.nio.charset.Charset.forName(value) } catch (_: Exception) { return false }
+            if (charset != Charsets.UTF_8) return false
+        }
+    }
+    return true
+}
+
+/** Progress owns the native callback and actual body Close even when its coroutine is canceled. */
+internal suspend fun Call.awaitRecordingProgress(): HttpResult {
+    val callbackDone = CompletableDeferred<Unit>()
+    val started = System.nanoTime()
+    try {
+        return suspendCancellableCoroutine { cont ->
+            cont.invokeOnCancellation { runCatching { cancel() } }
+            if (!cont.isActive) { callbackDone.complete(Unit); return@suspendCancellableCoroutine }
+            try {
+                enqueue(object : Callback {
+                    override fun onResponse(call: Call, response: Response) {
+                        try {
+                            val result = response.use {
+                                if (it.code != 200 || !recordingProgressJSON(it)) throw ObservedResponseUnavailable()
+                                val text = boundedObservedBody(it, ObservedResponsePolicy.PROGRESS.bodyLimit)
+                                HttpResult(it.code, text, it.header("Retry-After")).apply {
+                                    if (isSuccessful) observation = NetworkResponseObservation(it.request.url, it.headers.values("Date"), started, System.nanoTime())
+                                }
+                            }
+                            if (call.isCanceled()) throw IOException("Recording progress call canceled")
+                            cont.resume(result) { _, _, _ -> }
+                        } catch (error: Exception) {
+                            if (cont.isActive) cont.resumeWithException(error)
+                        } finally { callbackDone.complete(Unit) }
+                    }
+                    override fun onFailure(call: Call, error: IOException) {
+                        try {
+                            if (cont.isActive) {
+                                if (error is FinishedRecordingProgressHttp && !call.isCanceled()) cont.resume(error.result) { _, _, _ -> }
+                                else cont.resumeWithException(error)
+                            }
+                        } finally { callbackDone.complete(Unit) }
+                    }
+                })
+            } catch (error: Exception) {
+                callbackDone.complete(Unit)
+                if (cont.isActive) cont.resumeWithException(error)
+            }
+        }
+    } finally {
+        withContext(NonCancellable) { callbackDone.await() }
+    }
 }
