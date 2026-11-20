@@ -194,6 +194,14 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     private val stallLog by lazy { StallLog(player) }
 
     private val derivedSource = session.recordingDerived
+    private val recordingStart = derivedSource?.takeIf { it.progressReceipt != null }?.let(::RecordingProgressStart)
+    private var recordingProgress: RecordingProgressReporter? = null
+    private var recordingStartTimeout: Job? = null
+    private fun failRecordingProgressStart() {
+        derivedSource?.deny(); recordingProgress?.discard(); player.stop()
+        startup.end(StartupOutcome.FAILED)
+        error.value = "Joined recording cannot open at the confirmed position. Return and read progress again."
+    }
     private val backendMediaHeaders=ApiClient.inContext(dataContext) {ApiClient.mediaHeaders}
     private val mediaAccess=VodMediaAccess(ApiClient.inContext(dataContext) {ApiClient.baseUrl},
         enabled=session.reportsProgress && !session.isLive && !session.localFile,backendHeaders=backendMediaHeaders,denialTitleId=request.title.titleId,context=dataContext,requireCurrent=ownership::requireCurrent,profileId=profileId)
@@ -227,9 +235,24 @@ class PlayerController(context: Context, val session: PlayerSession, private val
 
         override fun onPlaybackStateChanged(state: Int) {
             buffering.value = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
-            if (state == Player.STATE_READY) applyPercentStart()
+            if (state == Player.STATE_READY) {
+                val start = recordingStart
+                if (start != null && !start.started) {
+                    try {
+                        if (start.ready(player.isCurrentMediaItemSeekable, player.duration, player.currentPosition)) {
+                            recordingStartTimeout?.cancel(); recordingStartTimeout = null
+                            recordingProgress?.start(); player.playWhenReady = true
+                        }
+                    } catch (_: Exception) { failRecordingProgressStart() }
+                } else applyPercentStart()
+            }
             if (state == Player.STATE_BUFFERING) liveRetune?.buffering()
             if (state == Player.STATE_ENDED && advanceTo.value == null) {
+                if (recordingStart != null) {
+                    if (recordingStart.started && player.playerError == null) report(ended = true)
+                    ended.value = true
+                    return
+                }
                 if (postPlay.value != null) return
                 if (catchup?.ended() == true) return
                 recordingHls?.let { hls ->
@@ -285,6 +308,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             decodedAudio.restart()
             decodedAudioPolicy.reset()
+            if (reason == Player.DISCONTINUITY_REASON_SEEK && recordingStart?.started == true) report()
         }
 
         override fun onCues(cueGroup: CueGroup) {
@@ -298,7 +322,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         override fun onPlayerError(e: PlaybackException) {
             if (derivedSource != null) {
                 startup.end(StartupOutcome.FAILED)
-                derivedSource.deny(); progress.discardFuture(); player.stop()
+                derivedSource.deny(); recordingProgress?.discard(); progress.discardFuture(); player.stop()
                 error.value = "Joined recording is unavailable. Return and read status or prepare explicitly."
                 return
             }
@@ -370,6 +394,14 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         player.addListener(listener)
         player.addListener(stallLog)
         progress = ProgressReporter(player, session, scope, context = dataContext) { autoSwitch.trigger(it) }
+        if (recordingStart != null) {
+            val source = requireNotNull(derivedSource)
+            recordingProgress = RecordingProgressReporter(requireNotNull(source.progressResource), requireNotNull(source.progressReceipt),
+                com.strmr.tv.live.ApiRecordingProgressGateway, source::allowed,
+                { player.currentPosition }, { player.isPlaying }, failed = {
+                    notice.value = "Progress saving stopped. Return and read current progress before trying again."
+                })
+        }
         recordingHls = session.growingRestart?.let { RecordingHls(player, scope, session.liveSessionId, it, dataContext, ownership, ::canUsePlayerAux,
             request.title.titleId, { reason -> denyVod(reason) }) }
         liveRetune = session.retuneLive?.let {
@@ -382,15 +414,25 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         if (AppBuild.DEBUG) player.addAnalyticsListener(androidx.media3.exoplayer.util.EventLogger())
         // A growing recording's playlist plays from its start (0), not its live edge.
         recordingHls?.let { player.setMediaItem(it.mediaItem(session.url), 0) }
-            ?: if (derivedSource != null) player.setMediaItem(androidx.media3.common.MediaItem.Builder().setUri(session.url)
-                .setMimeType(androidx.media3.common.MimeTypes.VIDEO_MATROSKA).build(), 0)
+            ?: if (derivedSource != null) {
+                val item = androidx.media3.common.MediaItem.Builder().setUri(session.url)
+                    .setMimeType(androidx.media3.common.MimeTypes.VIDEO_MATROSKA).build()
+                if (recordingStart != null) {
+                    player.setSeekParameters(androidx.media3.exoplayer.SeekParameters.EXACT)
+                    recordingStart.install { positionMs -> player.setMediaItem(item, positionMs) }
+                } else player.setMediaItem(item, 0)
+            }
             else player.setMediaItem(Timeshift.mediaItem(session.url, timeshift.value))
         request.startPosition?.let { player.seekTo((it * 1000).toLong()) }
         // Up Next / Switch Source: the previous playback's speed (live always plays at 1x).
         session.explicitAudioLanguage?.let { rememberAudioLanguage(it) }
         if (request.speed != 1f && !session.isLive) setSpeed(request.speed)
-        player.playWhenReady = true
+        player.playWhenReady = recordingStart == null
         player.prepare()
+        if (recordingStart != null) recordingStartTimeout = scope.launch {
+            delay(15_000)
+            if (!recordingStart.started && !released) failRecordingProgressStart()
+        }
         autoSwitch.start()
         AppLog.i("Player", "play ${request.displayTitle} start=${request.start?.label ?: "0"}")
         thumbnails?.start(scope) {
@@ -424,7 +466,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     }
 
     /** Seeking is possible: anything but live, or live with a timeshift window or catch-up. */
-    val seekable: Boolean get() = !session.isLive || timeshift.value || catchup?.timeline?.value != null
+    val seekable: Boolean get() = recordingStart?.started != false && (!session.isLive || timeshift.value || catchup?.timeline?.value != null)
 
     /** The bar's programme on a catch-up channel; scrubbing then works in ms from its start. */
     private val programme: ProgrammeTimeline? get() = catchup?.timeline?.value
@@ -474,8 +516,13 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         ended.value = true
     }
 
-    fun report(paused: Boolean = false, ended: Boolean = false, closing: Boolean = false) =
-        progress.report(paused, ended, closing)
+    fun report(paused: Boolean = false, ended: Boolean = false, closing: Boolean = false) {
+        val recording = recordingProgress
+        if (recording != null) {
+            val positionMs = if (ended) requireNotNull(derivedSource?.observation?.descriptor?.durationMs) else player.currentPosition
+            recording.offer(positionMs)
+        } else progress.report(paused, ended, closing)
+    }
 
     /** Wait for the final report, including its canonical server item identity. */
     val storedCompletedItemId: String? get() = progress.lastStoredItemId ?: request.progressItemId
@@ -503,6 +550,11 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         released=true
         decodedAudio.close(); decodedAudioPolicy.reset()
         val partPosition=player.currentPosition
+        recordingStartTimeout?.cancel(); recordingStartTimeout = null
+        val recordingClosing = recordingProgress?.close(
+            if (ended.value && recordingStart?.started == true) derivedSource?.observation?.descriptor?.durationMs else partPosition,
+            afterCleanup = { derivedSource?.release() })
+        recordingClosing?.let(PlaybackCoordinator::retainRecordingProgressClose)
         if (!ended.value && advanceTo.value == null && postPlay.value == null) report(paused = true, closing = true)
         closeReleaseReports()
         clock.cancel()
@@ -522,10 +574,11 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         player.removeListener(stallLog)
         player.release()
         session.recordingPart?.release(partPosition)
-        derivedSource?.release()
-        // Let the last report finish on its own.
+        if (recordingClosing == null) derivedSource?.release()
+        // The dedicated recording actor owns its actual completion independently of this scope.
+        // Let the last catalogue report finish on its own.
         MainScope().launch { delay(5_000); scope.cancel() }
-        return progress.lastReport
+        return recordingClosing ?: progress.lastReport
     }
 }
 

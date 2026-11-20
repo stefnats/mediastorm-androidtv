@@ -111,7 +111,10 @@ fun RecordingDetail(
             if (joined.busy) Text("Joined-copy action in progress…", color = Muted)
             OutlinedButton(onClick = { joined.read(r, false) }, enabled = !busy && !joined.busy) { Text("Read saved joined copy") }
             OutlinedButton(onClick = { joined.read(r, true) }, enabled = !busy && !joined.busy) { Text("Prepare joined copy") }
-            OutlinedButton(onClick = { joined.playFromStart(r) }, enabled = !busy && !joined.busy && joined.ready(r)) { Text("Play joined copy from start") }
+            joined.progressMessage?.let { Text(it) }
+            OutlinedButton(onClick = { joined.readProgress(r) }, enabled = !busy && !joined.busy && joined.ready(r)) { Text("Read current progress") }
+            if (joined.canResume(r)) OutlinedButton(onClick = { joined.playWithProgress(r, true) }, enabled = !busy && !joined.busy) { Text("Resume joined copy") }
+            if (joined.progressAvailable(r)) OutlinedButton(onClick = { joined.playWithProgress(r, false) }, enabled = !busy && !joined.busy) { Text("From start") }
         }
         RecordingCaptureRules.known(r)?.let {capture ->
             Spacer(Modifier.height(12.dp))

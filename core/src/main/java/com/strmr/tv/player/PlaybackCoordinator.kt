@@ -420,9 +420,15 @@ object PlaybackCoordinator {
      * The player closed. Pages reload watch state on this, so it waits (briefly) for the final
      * progress report to land; otherwise details would show the resume point from before.
      */
+    private val recordingProgressClosings = mutableSetOf<Job>()
+    internal fun retainRecordingProgressClose(job: Job) {
+        synchronized(recordingProgressClosings) { recordingProgressClosings.add(job) }
+        job.invokeOnCompletion { synchronized(recordingProgressClosings) { recordingProgressClosings.remove(job) } }
+    }
     fun playerClosed(saving: Job? = null) {
+        val recording = synchronized(recordingProgressClosings) { saving in recordingProgressClosings }
         scope.launch {
-            withTimeoutOrNull(3_000) { saving?.join() }
+            if (recording) saving?.join() else withTimeoutOrNull(3_000) { saving?.join() }
             sessionsEnded.value += 1
         }
     }
