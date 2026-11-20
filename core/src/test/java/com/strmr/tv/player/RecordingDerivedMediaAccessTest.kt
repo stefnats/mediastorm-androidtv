@@ -22,6 +22,9 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
+import okio.BufferedSource
+import okio.ForwardingSource
+import okio.buffer
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -105,9 +108,25 @@ class RecordingDerivedMediaAccessTest {
                 } } catch (_: IOException) { }
             }.apply { isDaemon = true; start() }
             val base = "http://127.0.0.1:${server.localPort}/".toHttpUrl(); val source = source(); val access = RecordingDerivedMediaAccess(base, source, headers)
-            val client = OkHttpClient.Builder().callTimeout(3, TimeUnit.SECONDS).eventListener(object : EventListener() {
-                override fun responseBodyStart(call: Call) { reading.countDown() }
-            }).addInterceptor(access.interceptor).addNetworkInterceptor(access.requestInterceptor).build().withoutAutomaticReplay()
+            val client = OkHttpClient.Builder().callTimeout(3, TimeUnit.SECONDS)
+                .addInterceptor(access.interceptor).addNetworkInterceptor(access.requestInterceptor)
+                .addNetworkInterceptor { chain ->
+                    val response = chain.proceed(chain.request())
+                    val body = requireNotNull(response.body)
+                    val watched = object : ResponseBody() {
+                        private val input = object : ForwardingSource(body.source()) {
+                            override fun read(sink: Buffer, byteCount: Long): Long {
+                                // Entry is observable before the real socket blocks for withheld bytes.
+                                reading.countDown()
+                                return super.read(sink, byteCount)
+                            }
+                        }.buffer()
+                        override fun contentType() = body.contentType()
+                        override fun contentLength() = body.contentLength()
+                        override fun source(): BufferedSource = input
+                    }
+                    response.newBuilder().body(watched).build()
+                }.build().withoutAutomaticReplay()
             val response = client.newCall(Request.Builder().url(endpoint(base)).build()).execute()
             val sink = Buffer(); val failure = AtomicReference<Throwable>()
             val consumer = Thread { try { response.body!!.source().read(sink, 10) } catch (error: Throwable) { failure.set(error) } }.apply { start() }

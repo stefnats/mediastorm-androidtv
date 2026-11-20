@@ -83,6 +83,17 @@ class RecordingDerivedContractTest {
         val future = DerivedTestData.raw(source).replace(DerivedTestData.observed, "2026-11-19T12:10:00Z")
         assertTrue(runCatching { DerivedTestData.observation(source, future) }.isFailure)
     }
+    @Test fun `delayed decoding cannot move the immutable provider observation receipt bound`() {
+        val source = DerivedTestData.source()
+        val received = System.nanoTime() - 60_000_000_000L
+        val clock = DerivedTestData.clock(received, DerivedTestData.serverMillis + 1001)
+        val future = DerivedTestData.raw(source).replace(DerivedTestData.observed, "2026-11-19T12:00:30Z")
+        val futureMillis = Instant.parse("2026-11-19T12:00:30Z").toEpochMilli()
+        assertTrue(clock.upperMillis() > futureMillis)
+        assertFalse(clock.observedAtReceipt(futureMillis))
+        assertTrue(runCatching { RecordingDerivedObservation.accept(source, future, clock) }.isFailure)
+        assertTrue(RecordingDerivedObservation.accept(source, DerivedTestData.raw(source), clock).ready())
+    }
     @Test fun `joined eligibility never treats restored unknown foreign or active sources as complete`() {
         val r = DerivedTestData.recording(); val capture = requireNotNull(r.capture)
         for (changed in listOf(r.copy(userId = null), r.copy(userId = "other"), r.copy(updatedAt = null), r.copy(status = "running"),

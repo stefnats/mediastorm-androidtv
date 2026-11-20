@@ -71,7 +71,7 @@ class RecordingDerivedObservation private constructor(
         fun accept(source: RecordingDerivedSource, raw: String, clock: ObservedResponseClock): RecordingDerivedObservation {
             val descriptor = decodeRecordingDerived(raw, source)
             val deadline = if (descriptor.state == "ready") {
-                require(derivedUtc(requireNotNull(descriptor.observedAt))!! <= clock.upperMillis())
+                require(clock.observedAtReceipt(requireNotNull(derivedUtc(requireNotNull(descriptor.observedAt)))))
                 clock.deadlineNanos(requireNotNull(derivedUtc(requireNotNull(descriptor.expiresAt))), 86_400_000L)
             } else null
             return RecordingDerivedObservation(source, descriptor, deadline, clock)

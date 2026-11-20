@@ -528,6 +528,8 @@ class ObservedResponseClock internal constructor(private val upperAtReceipt: Lon
         if (now < received) throw ObservedResponseUnavailable()
         return upperAtReceipt + (now - received) / 1_000_000L
     }
+    /** Provider observation must already exist at the immutable response receipt bound. */
+    internal fun observedAtReceipt(observed: Long): Boolean = observed <= upperAtReceipt
     fun remainingMillis(expires: Long): Long = expires - upperMillis()
     /** Absolute monotone deadline from the actual receipt anchor, never adoption time. */
     internal fun deadlineNanos(expires: Long, maxBudgetMillis: Long = 600_000L): Long {
