@@ -14,6 +14,7 @@ import okhttp3.MediaType.Companion.toMediaType
 
 interface RecordingProgressGateway {
     suspend fun read(original: RecordingDerivedObservation, expectedContext: Long): RecordingProgressSnapshotObservation
+    suspend fun readHistory(original: RecordingDerivedObservation, expectedContext: Long): RecordingProgressSnapshotObservation = read(original, expectedContext)
     suspend fun write(original: RecordingDerivedObservation, command: RecordingProgressCommand, expectedContext: Long): RecordingProgressWriteObservation
 }
 object ApiRecordingProgressGateway : RecordingProgressGateway {
@@ -25,6 +26,16 @@ object ApiRecordingProgressGateway : RecordingProgressGateway {
         return recordingProgressReply(
             checkCurrent = { coroutine.ensureActive(); ApiClient.inContext(expectedContext) { require(ApiClient.profileId == original.source.profile) } },
             parse = { RecordingProgressSnapshotObservation.accept(original, raw.text, requireNotNull(raw.clock), expectedContext) },
+            adoptable = { it.adoptable() })
+    }
+    override suspend fun readHistory(original: RecordingDerivedObservation, expectedContext: Long): RecordingProgressSnapshotObservation {
+        currentCoroutineContext().ensureActive()
+        val raw = ApiClient.sendRecordingProgressRaw(RecordingProgressRequest.history(original, expectedContext), expectedContext)
+        currentCoroutineContext().ensureActive(); ProfileDataContext.requireCurrent(expectedContext)
+        val coroutine = currentCoroutineContext()
+        return recordingProgressReply(
+            checkCurrent = { coroutine.ensureActive(); ApiClient.inContext(expectedContext) { require(ApiClient.profileId == original.source.profile) } },
+            parse = { RecordingProgressSnapshotObservation.acceptHistory(original, raw.text, requireNotNull(raw.clock), expectedContext) },
             adoptable = { it.adoptable() })
     }
     override suspend fun write(original: RecordingDerivedObservation, command: RecordingProgressCommand, expectedContext: Long): RecordingProgressWriteObservation {
@@ -42,7 +53,10 @@ object ApiRecordingProgressGateway : RecordingProgressGateway {
 
 /** No free URL, selector, profile body field or header is accepted from a consumer. */
 internal class RecordingProgressRequest(val original: RecordingDerivedObservation, val expectedContext: Long,
-    private val command: RecordingProgressCommand? = null) {
+    private val command: RecordingProgressCommand? = null, internal val includeHistory: Boolean = false) {
+    companion object {
+        fun history(original: RecordingDerivedObservation, expectedContext: Long) = RecordingProgressRequest(original, expectedContext, includeHistory = true)
+    }
     private val attempted = AtomicBoolean()
     internal fun beginAttempt() {
         check(attempted.compareAndSet(false, true)) { "Recording progress request already used" }
@@ -54,6 +68,7 @@ internal class RecordingProgressRequest(val original: RecordingDerivedObservatio
     internal fun body(): String? = command?.body()?.toString()?.also { require(it.toByteArray(Charsets.UTF_8).size in 1..4096) }
     internal fun check(now: Long = System.nanoTime()) {
         require(Regex("[A-Za-z0-9_-]{1,128}").matches(original.source.recording.id) && profile.isNotBlank() && original.ready(now))
+        require(!includeHistory || command == null)
         require(command == null || command.original === original && command.expectedContext == expectedContext)
     }
     override fun toString() = "RecordingProgressRequest(opaque)"
@@ -75,7 +90,9 @@ internal class RecordingProgressTransport(
             require(context.profileEpoch == operation.expectedContext && activeProfile() == operation.profile)
             val origin = base()
             require(origin.username.isEmpty() && origin.password.isEmpty())
-            val url = origin.newBuilder().encodedPath(origin.encodedPath.trimEnd('/') + operation.path).query(null).fragment(null).build()
+            val url = origin.newBuilder().encodedPath(origin.encodedPath.trimEnd('/') + operation.path).query(null).fragment(null).apply {
+                if (operation.includeHistory) addQueryParameter("includeHistory", "true")
+            }.build()
             val token = bearer() ?: throw ApiError.SignedOut()
             val body = operation.body()?.toRequestBody("application/json; charset=utf-8".toMediaType())
             Request.Builder().url(url).method(operation.method, body).apply {

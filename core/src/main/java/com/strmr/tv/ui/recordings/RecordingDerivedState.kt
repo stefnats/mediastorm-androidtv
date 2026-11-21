@@ -102,6 +102,60 @@ class RecordingDerivedState(
     fun canResume(recording: Recording) = progressAvailable(recording) &&
         progressSnapshot?.data?.let { it.positionState == "matching" && it.atDerivedEnd == false } == true
 
+    fun canCheckEarlier(recording: Recording) = progressAvailable(recording) &&
+        progressSnapshot?.data?.let { it.positionState == "conflict" && it.historyState != "compatible" } == true
+    fun canResumeEarlier(recording: Recording) = progressAvailable(recording) &&
+        progressSnapshot?.data?.let { data -> data.positionState == "conflict" && data.historyState == "compatible" && data.historicalAtDerivedEnd == false &&
+            data.historicalPositionMs?.let { position -> position in 0..data.identity.durationMs } == true } == true
+
+    private fun watchProgress(value: Producer, snapshot: RecordingProgressSnapshotObservation, resource: RecordingProgressResource) {
+        progressExpiry?.cancel()
+        progressExpiry = resource.scope.launch {
+            while (current(value) && progressSnapshot === snapshot) {
+                if (!snapshot.adoptable(now())) {
+                    retireProgress(); progressMessage = "Progress choice expired. Read current progress again."; return@launch
+                }
+                delay(100)
+            }
+        }
+    }
+    /** Only an explicit conflicted-position choice requests historical DATA. */
+    fun checkEarlierProgress(recording: Recording) {
+        if (busy || !canCheckEarlier(recording)) return
+        val value = requireNotNull(producer); val previous = requireNotNull(progressSnapshot)
+        val original = previous.original; val resource = requireNotNull(progressResource)
+        busy = true; progressMessage = "Checking the earlier saved position…"
+        val job = resource.scope.launch(start = CoroutineStart.LAZY) {
+            try {
+                check(value); currentCoroutineContext().ensureActive()
+                require(progressSnapshot === previous && observation === original && original.ready(now()) && previous.adoptable(now()))
+                // The explicit historical GET independently checks current source,
+                // native authority and PG; no extra media/status request is made.
+                val snapshot = progressGateway.readHistory(original, context)
+                check(value); currentCoroutineContext().ensureActive()
+                require(progressSnapshot === previous && observation === original && original.ready(now()) &&
+                    snapshot.original === original && snapshot.expectedContext == context &&
+                    snapshot.data.identity == previous.data.identity && snapshot.adoptable(now()))
+                present(value, original); progressSnapshot = snapshot; watchProgress(value, snapshot, resource)
+                progressMessage = if (snapshot.data.positionState == "matching") {
+                    if (snapshot.data.atDerivedEnd == true) "Current progress is at the recorded container's end. Choose From start."
+                    else "Current saved position: ${requireNotNull(snapshot.data.positionMs)} ms. Choose Resume or From start."
+                } else when (snapshot.data.historyState) {
+                    "compatible" -> if (snapshot.data.historicalAtDerivedEnd == true) "The earlier copy was saved at its end. Choose From start."
+                        else "Earlier saved position: ${requireNotNull(snapshot.data.historicalPositionMs)} ms. Choose Resume earlier copy or From start."
+                    "absent" -> "No earlier saved position is available. You can choose From start."
+                    else -> "The earlier saved position could not be verified. You can choose From start."
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (_: Exception) {
+                if (current(value) && observation === original && original.ready(now()) && progressSnapshot === previous && previous.adoptable(now())) {
+                    progressMessage = "Earlier progress could not be checked. You can still choose From start."
+                } else if (producer === value) { retireProgress(); progressMessage = "Progress choice changed. Read current progress again." }
+            } finally { if (producer === value && request === currentCoroutineContext()[Job]) { busy = false; request = null } }
+        }
+        request = job; job.start()
+    }
+
     /** Explicit progress read delegates current source/PG checks to the backend; composition starts no work. */
     fun readProgress(recording: Recording) {
         if (busy || !ready(recording)) return
@@ -125,16 +179,9 @@ class RecordingDerivedState(
                     "matching" -> if (snapshot.data.atDerivedEnd == true) "Saved at the recorded container's end. Choose From start."
                         else "Saved position: ${requireNotNull(snapshot.data.positionMs)} ms. Choose Resume or From start."
                     "none" -> "No saved position. Choose From start."
-                    else -> "Saved progress belongs to a different artifact. Only From start can bind this copy explicitly."
+                    else -> "Saved progress belongs to a different artifact. Choose Check earlier saved position or From start."
                 }
-                progressExpiry = resource.scope.launch {
-                    while (current(value) && progressSnapshot === snapshot) {
-                        if (!snapshot.adoptable(now())) {
-                            retireProgress(); progressMessage = "Progress choice expired. Read current progress again."; return@launch
-                        }
-                        delay(100)
-                    }
-                }
+                watchProgress(value, snapshot, resource)
             } catch (error: CancellationException) { throw error }
             catch (_: Exception) {
                 if (producer === value) { retireProgress(); progressMessage = "Progress is unavailable. Unlock if required, then read again explicitly." }
@@ -144,8 +191,10 @@ class RecordingDerivedState(
     }
 
     /** A one-attempt claim must be known before any new progress-enabled player opens. */
-    fun playWithProgress(recording: Recording, resume: Boolean) {
-        if (busy || !progressAvailable(recording) || resume && !canResume(recording)) return
+    fun playWithProgress(recording: Recording, resume: Boolean) = claimAndPlay(recording, resume, false)
+    fun playEarlier(recording: Recording) = claimAndPlay(recording, false, true)
+    private fun claimAndPlay(recording: Recording, resume: Boolean, historical: Boolean) {
+        if (busy || !progressAvailable(recording) || resume && !canResume(recording) || historical && !canResumeEarlier(recording)) return
         val value = requireNotNull(producer); val snapshot = requireNotNull(progressSnapshot)
         val resource = requireNotNull(progressResource); val owner = PlaybackSessionContext.capture(context)
         busy = true; progressMessage = "Confirming the original recording position…"
@@ -158,7 +207,11 @@ class RecordingDerivedState(
                 val original = snapshot.original
                 require(observation === original && original.ready(now()) && snapshot.adoptable(now()))
                 // The dedicated Progress POST independently checks the same current source and CAS.
-                val command = if (resume) RecordingProgressCommand.resume(snapshot) else RecordingProgressCommand.fromStart(snapshot)
+                val command = when {
+                    historical -> RecordingProgressCommand.resumeHistory(snapshot)
+                    resume -> RecordingProgressCommand.resume(snapshot)
+                    else -> RecordingProgressCommand.fromStart(snapshot)
+                }
                 val receipt = progressGateway.write(snapshot.original, command, context)
                 check(value); owner.requireCurrent(); currentCoroutineContext().ensureActive()
                 require(progressSnapshot === snapshot && observation === original && original.ready(now()) &&

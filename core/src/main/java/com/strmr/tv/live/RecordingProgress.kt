@@ -31,7 +31,8 @@ data class RecordingProgressIdentity(val recordingId: String, val incarnation: S
     val mappingSha256: String, val durationMs: Long)
 data class RecordingProgressSnapshot(val identity: RecordingProgressIdentity, val revision: RecordingProgressCounter,
     val writerGeneration: RecordingProgressCounter, val positionState: String, val positionMs: Long?,
-    val atDerivedEnd: Boolean?, val validUntil: String)
+    val atDerivedEnd: Boolean?, val validUntil: String, val historyState: String? = null,
+    val historicalPositionMs: Long? = null, val historicalAtDerivedEnd: Boolean? = null)
 data class RecordingProgressResult(val identity: RecordingProgressIdentity, val revision: RecordingProgressCounter,
     val writerGeneration: RecordingProgressCounter, val positionMs: Long, val atDerivedEnd: Boolean,
     val operationId: String, val validUntil: String)
@@ -44,6 +45,13 @@ class RecordingProgressSnapshotObservation private constructor(val original: Rec
     companion object {
         fun accept(original: RecordingDerivedObservation, raw: String, clock: ObservedResponseClock,
             expectedContext: Long, now: Long = System.nanoTime()): RecordingProgressSnapshotObservation {
+            return acceptSnapshot(original, raw, clock, expectedContext, now, false)
+        }
+        fun acceptHistory(original: RecordingDerivedObservation, raw: String, clock: ObservedResponseClock,
+            expectedContext: Long, now: Long = System.nanoTime()): RecordingProgressSnapshotObservation =
+            acceptSnapshot(original, raw, clock, expectedContext, now, true)
+        private fun acceptSnapshot(original: RecordingDerivedObservation, raw: String, clock: ObservedResponseClock,
+            expectedContext: Long, now: Long, history: Boolean): RecordingProgressSnapshotObservation {
             val root = ProgressJson(raw).parse()
             require(root.keys == setOf("schemaVersion", "timeline", "progress") && root["schemaVersion"] == 1L)
             val timeline = root.obj("timeline")
@@ -52,13 +60,20 @@ class RecordingProgressSnapshotObservation private constructor(val original: Rec
             val state = value.text("positionState")
             require(state in setOf("none", "matching", "conflict"))
             val common = setOf("validUntil", "recordingId", "incarnation", "artifactId", "mappingSha256", "durationMs", "revision", "writerGeneration", "positionState")
-            require(value.keys == common + if (state == "matching") setOf("positionMs", "atDerivedEnd") else emptySet())
+            val historicalState = if (history) value.text("historyState").also { require(it in setOf("absent", "unverifiable", "compatible")) } else null
+            val historicalKeys = if (!history) emptySet() else setOf("historyState") +
+                if (historicalState == "compatible") setOf("historicalPositionMs", "historicalAtDerivedEnd") else emptySet()
+            require(value.keys == common + (if (state == "matching") setOf("positionMs", "atDerivedEnd") else emptySet()) + historicalKeys)
             require(progressIdentity(value) == identity)
             val position = if (state == "matching") value.number("positionMs") else null
             val end = if (state == "matching") value.flag("atDerivedEnd") else null
             require(position == null || position in 0..identity.durationMs && end == (position == identity.durationMs))
             val until = value.text("validUntil")
-            val data = RecordingProgressSnapshot(identity, value.counter("revision"), value.counter("writerGeneration"), state, position, end, until)
+            val historicalPosition = if (historicalState == "compatible") value.number("historicalPositionMs") else null
+            val historicalEnd = if (historicalState == "compatible") value.flag("historicalAtDerivedEnd") else null
+            require(historicalPosition == null || historicalPosition in 0..identity.durationMs && historicalEnd == (historicalPosition == identity.durationMs))
+            val data = RecordingProgressSnapshot(identity, value.counter("revision"), value.counter("writerGeneration"), state, position, end, until,
+                historicalState, historicalPosition, historicalEnd)
             val deadline = progressDeadline(original, clock, until)
             return RecordingProgressSnapshotObservation(original, data, expectedContext, deadline, clock).also { require(it.adoptable(now)) }
         }
@@ -83,6 +98,10 @@ class RecordingProgressCommand private constructor(val original: RecordingDerive
         fun resume(snapshot: RecordingProgressSnapshotObservation): RecordingProgressCommand {
             require(snapshot.data.positionState == "matching")
             return claim(snapshot, "resume", requireNotNull(snapshot.data.positionMs))
+        }
+        fun resumeHistory(snapshot: RecordingProgressSnapshotObservation): RecordingProgressCommand {
+            require(snapshot.data.historyState == "compatible")
+            return claim(snapshot, "resume-history", requireNotNull(snapshot.data.historicalPositionMs))
         }
         private fun claim(snapshot: RecordingProgressSnapshotObservation, action: String, result: Long) =
             RecordingProgressCommand(snapshot.original, snapshot.expectedContext, snapshot.data.identity, snapshot.data.revision,

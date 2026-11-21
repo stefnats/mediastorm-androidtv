@@ -113,6 +113,8 @@ fun RecordingDetail(
             OutlinedButton(onClick = { joined.read(r, true) }, enabled = !busy && !joined.busy) { Text("Prepare joined copy") }
             joined.progressMessage?.let { Text(it) }
             OutlinedButton(onClick = { joined.readProgress(r) }, enabled = !busy && !joined.busy && joined.ready(r)) { Text("Read current progress") }
+            if (joined.canCheckEarlier(r)) OutlinedButton(onClick = { joined.checkEarlierProgress(r) }, enabled = !busy && !joined.busy) { Text("Check earlier saved position") }
+            if (joined.canResumeEarlier(r)) OutlinedButton(onClick = { joined.playEarlier(r) }, enabled = !busy && !joined.busy) { Text("Resume earlier copy") }
             if (joined.canResume(r)) OutlinedButton(onClick = { joined.playWithProgress(r, true) }, enabled = !busy && !joined.busy) { Text("Resume joined copy") }
             if (joined.progressAvailable(r)) OutlinedButton(onClick = { joined.playWithProgress(r, false) }, enabled = !busy && !joined.busy) { Text("From start") }
         }
