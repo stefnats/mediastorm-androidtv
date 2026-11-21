@@ -6,6 +6,7 @@ import kotlinx.coroutines.test.*
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.*
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicBoolean
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ReleaseReplacementBufferTest {
@@ -25,10 +26,27 @@ class ReleaseReplacementBufferTest {
         override suspend fun undo(id: String) { }
     }
     private class Loaded(override val targetMs: Long) : PreparedReleaseBuffer {
-        var ready = true; var closes = 0
+        var ready = true; var closes = 0; var closeCalls = 0
         var join: CompletableDeferred<Unit>? = null
+        private val closing = AtomicBoolean(false)
+        private val closed = CompletableDeferred<Unit>()
         override fun isReady() = ready
-        override suspend fun closeAndJoin() { closes++; ready = false; join?.await() }
+        override suspend fun closeAndJoin() {
+            closeCalls++
+            withContext(NonCancellable) {
+                if (closing.compareAndSet(false, true)) {
+                    closes++; ready = false
+                    try {
+                        join?.await()
+                        closed.complete(Unit)
+                    } catch (error: Throwable) {
+                        closed.completeExceptionally(error)
+                        throw error
+                    }
+                }
+                closed.await()
+            }
+        }
     }
     private class Fixture(val scope: TestScope) {
         val gateway = Gateway(); var position = 42_000L; var adopted = 0; var adoptedPosition: Long? = null
@@ -99,5 +117,6 @@ class ReleaseReplacementBufferTest {
         f.flow.close(); runCurrent(); assertEquals(0, f.adopted)
         result.complete(late); runCurrent(); f.flow.take(); f.flow.close(); runCurrent()
         assertEquals(0, f.adopted); assertEquals(1, late.closes); assertEquals(1, f.gateway.cancels)
+        assertEquals(2, late.closeCalls)
     }
 }
