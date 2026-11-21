@@ -203,7 +203,7 @@ class ReplacementBuffer private constructor(
         createSurface()
         preloadThread.start()
         parts = primary.replacementMediaParts(context, candidateSession, ::boundedFactory, callEvents)
-        builder = DefaultPreloadManager.Builder(context, TargetPreloadStatusControl<Int> {
+        builder = DefaultPreloadManager.Builder(context, TargetPreloadStatusControl<Int, DefaultPreloadManager.PreloadStatus> {
             DefaultPreloadManager.PreloadStatus.specifiedRangeLoaded(targetMs, ReplacementBufferBudget.RANGE_MS)
         }).setMediaSourceFactory(parts.sources).setRenderersFactory(RenderersFactory { handler, video, audio, text, metadata ->
             check(android.os.Looper.myLooper() === android.os.Looper.getMainLooper())
