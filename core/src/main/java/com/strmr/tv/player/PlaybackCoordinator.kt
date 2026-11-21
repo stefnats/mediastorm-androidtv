@@ -130,6 +130,35 @@ object PlaybackCoordinator {
         })
     }
 
+    /** Build from the already-prepared release without changing the active player. */
+    internal fun prepareReplacement(original: PlayerSession, status: com.strmr.tv.api.PrequeueStatus,
+        targetMs: Long, carried: CarriedTracks, speed: Float, recovery: Boolean): PlayerSession {
+        val owner = requireNotNull(original.ownership)
+        return owner.use {
+            check(pending === original && original.canOpenPlayer() && original.reportsProgress &&
+                !original.isLive && !original.localFile && original.recordingDerived == null)
+            require(status.status == "ready" && status.prequeueId.isNotBlank() && !status.streamPath.isNullOrBlank() && targetMs >= 0)
+            val path = requireNotNull(status.streamPath)
+            val hints = prequeueSourceHints(status)
+            val request = SourceSwitchRules.resumeAt(original.request.copy(libraryVersion = null), targetMs).copy(speed = speed,
+                audioRecoveryCount = original.request.audioRecoveryCount + if (recovery) 1 else 0)
+            PlayerSession(request, ApiClient.streamUrl(path, request.streamMetadata(path) + StreamInfo.trackerQuery(path, hints)),
+                status.trackSelection, streamPath = path, releaseName = status.releaseTitle,
+                subtitleStreams = status.subtitleTracks.orEmpty(), playback = original.playback,
+                manualTracks = true, carried = carried, prequeueId = status.prequeueId,
+                sourceLabel = StreamInfo.source(path, hints, null), sourceDolbyVision = hints.dolbyVisionProfile,
+                sourceHdr10 = hints.hdr10 == true, ownership = owner)
+        }
+    }
+    /** Called only at the current activity's ready, explicit controller swap. */
+    internal fun commitReplacement(original: PlayerSession, replacement: PlayerSession) {
+        val owner = requireNotNull(original.ownership)
+        owner.use {
+            check(pending === original && original.canOpenPlayer() && replacement.ownership === owner && replacement.canOpenPlayer())
+            pending = replacement
+        }
+    }
+
     /** A trailer full screen, in the same player, without progress. */
     fun playTrailer(url: String, name: String,expectedContext:Long=ProfileDataContext.current) {
         val startedNanos = PlaybackStartupTiming.now()
@@ -291,7 +320,7 @@ object PlaybackCoordinator {
      */
     fun playSession(session: PlayerSession) {
         val startedNanos = PlaybackStartupTiming.now()
-        if (_resolving.value != null || !session.canOpenPlayer()) return
+        if (_resolving.value != null || session.replacementBuffer != null || !session.canOpenPlayer()) return
         RecordingPartQueues.replace(null)
         pending = PlaybackStartupTiming.begin(requireNotNull(session.ownership),StartupInput.DIRECT_INPUT_SUPPLIED,startedNanos).attach(session)
         launchPlayer()

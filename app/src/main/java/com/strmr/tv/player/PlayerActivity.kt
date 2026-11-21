@@ -37,7 +37,11 @@ import com.strmr.tv.ui.StrmrTheme
  */
 @OptIn(UnstableApi::class)
 class PlayerActivity : ComponentActivity() {
-    private var controller: PlayerController? = null
+    private val activeController = androidx.compose.runtime.mutableStateOf<PlayerController?>(null)
+    private var controller: PlayerController?
+        get() = activeController.value
+        set(value) { activeController.value = value }
+    internal val currentController: PlayerController? get() = controller
     private var recordingNext:RecordingPartHandoff?=null
     private var frameRate: FrameRateMatcher? = null
     /** Add Screen: the channel the multiscreen opens with once this player has let go. */
@@ -46,7 +50,7 @@ class PlayerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val session = PlaybackCoordinator.pending
-        if (session == null || !session.canOpenPlayer() || !session.recordingPartReady() || !session.recordingDerivedReady()) {
+        if (session == null || session.replacementBuffer != null || !session.canOpenPlayer() || !session.recordingPartReady() || !session.recordingDerivedReady()) {
             finish()
             return
         }
@@ -60,9 +64,11 @@ class PlayerActivity : ComponentActivity() {
             joined.release(); finish(); return
         }
         controller = c
-        onBackPressedDispatcher.addCallback(this) {c.cancelRecordingParts();finish()}
+        onBackPressedDispatcher.addCallback(this) {controller?.cancelRecordingParts();finish()}
         setContent {
             StrmrTheme {
+                val c = activeController.value ?: return@StrmrTheme
+                val session = c.session
                 val postPlay by c.postPlay.collectAsState()
                 LaunchedEffect(postPlay) { if (postPlay != null) window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
                 val ended by c.ended.collectAsState()
@@ -70,7 +76,7 @@ class PlayerActivity : ComponentActivity() {
                 val switch by c.switchTo.collectAsState()
                 val partNext = c.nextRecordingPart?.collectAsState()?.value
                 LaunchedEffect(ended,partNext) { if (ended) {recordingNext=partNext;finish()} }
-                LaunchedEffect(Unit) {
+                LaunchedEffect(c) {
                     try {
                         val owner=requireNotNull(session.ownership)
                         val style=ApiClient.playbackSettings(owner.epoch).subtitleStyle
@@ -88,8 +94,14 @@ class PlayerActivity : ComponentActivity() {
                 // Switch Source: close this stream (saved at its position) and resume on the other.
                 LaunchedEffect(switch) {
                     switch?.takeIf {session.canOpenPlayer()}?.let {
-                        finish()
-                        PlaybackCoordinator.play(it.request, it.source, carried = it.carried, resolved = it.resolved, prepared = it.prepared,expectedContext=requireNotNull(session.ownership).epoch)
+                        if (it.buffered != null) {
+                            c.adoptBuffered(it)?.let { replacement ->
+                                controller = replacement
+                            }
+                        } else {
+                            finish()
+                            PlaybackCoordinator.play(it.request, it.source, carried = it.carried, resolved = it.resolved, prepared = it.prepared,expectedContext=requireNotNull(session.ownership).epoch)
+                        }
                     }
                 }
                 if (postPlay != null) PostPlayScreen(c) { finish() }
@@ -102,7 +114,7 @@ class PlayerActivity : ComponentActivity() {
                                 // hidden buttons would otherwise swallow D-pad keys.
                                 isFocusable = false
                                 descendantFocusability = android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
-                                player = c.player
+                                c.attachVideoView(this)
                                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                                 setShutterBackgroundColor(android.graphics.Color.BLACK)
                                 // Subtitles are drawn by SubtitleOverlay, as the tvOS overlay draws them.
@@ -111,13 +123,14 @@ class PlayerActivity : ComponentActivity() {
                                 c.videoSurface = videoSurfaceView as? android.view.SurfaceView
                             }
                         },
+                        update = { view -> c.attachVideoView(view) },
                         modifier = Modifier.fillMaxSize().focusProperties { canFocus = false },
                     )
                     val cues by c.cues.collectAsState()
                     val aspect by c.videoAspect.collectAsState()
                     // The device's subtitle style (Settings, or the Subtitles menu's Style picks), live.
                     SubtitleOverlay(cues, SubtitleStyleStore.style, aspect, Modifier.fillMaxSize())
-                    PlayerChrome(c, onExit = { c.cancelRecordingParts();finish() }, onAddScreen = { addScreen(c) }.takeIf { session.liveChannel != null })
+                    androidx.compose.runtime.key(c) { PlayerChrome(c, onExit = { c.cancelRecordingParts();finish() }, onAddScreen = { addScreen(c) }.takeIf { session.liveChannel != null }) }
                     SubtitleStatusToast(c, Modifier.align(androidx.compose.ui.Alignment.TopEnd))
                 }
             }

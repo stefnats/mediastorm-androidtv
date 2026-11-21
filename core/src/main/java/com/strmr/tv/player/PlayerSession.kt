@@ -83,6 +83,8 @@ data class PlayerSession(
     val recordingPart: RecordingPartPlayback? = null,
     /** Exact ephemeral joined recording, with its original response deadline. */
     val recordingDerived: RecordingDerivedPlayback? = null,
+    /** Original actual secondary source/player; never serialized or reused across owners. */
+    val replacementBuffer: ReplacementBuffer? = null,
 ) {
     init {
         recordingDerived?.let { source ->

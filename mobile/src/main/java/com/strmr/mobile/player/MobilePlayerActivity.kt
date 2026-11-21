@@ -53,7 +53,10 @@ import kotlinx.coroutines.launch
  */
 @OptIn(UnstableApi::class)
 class MobilePlayerActivity : ComponentActivity() {
-    private var controller: PlayerController? = null
+    private val activeController = androidx.compose.runtime.mutableStateOf<PlayerController?>(null)
+    private var controller: PlayerController?
+        get() = activeController.value
+        set(value) { activeController.value = value }
     private var recordingNext:RecordingPartHandoff?=null
     private var pip: PictureInPicture? = null
     private val inPip = mutableStateOf(false)
@@ -69,7 +72,7 @@ class MobilePlayerActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         val session = PlaybackCoordinator.pending
-        if (session == null || !session.canOpenPlayer() || !session.recordingPartReady() || !session.recordingDerivedReady()) {
+        if (session == null || session.replacementBuffer != null || !session.canOpenPlayer() || !session.recordingPartReady() || !session.recordingDerivedReady()) {
             finish()
             return
         }
@@ -88,19 +91,15 @@ class MobilePlayerActivity : ComponentActivity() {
             joined.release(); PlaybackCoordinator.playerOpen = false; finish(); return
         }
         controller = c
-        onBackPressedDispatcher.addCallback(this) {c.cancelRecordingParts();finish()}
-        PlayerMediaSession.start(this, c)
-        val p = PictureInPicture(this, c).also { it.register() }
-        pip = p
-        // The PiP window's play / pause action, auto-enter and aspect follow the player.
-        lifecycleScope.launch {
-            combine(c.isPlaying, c.videoAspect, c.error) { _, _, _ -> }.collect { p.update() }
-        }
+        onBackPressedDispatcher.addCallback(this) {controller?.cancelRecordingParts();finish()}
+        bindMobileControls(c)
         lifecycleScope.launch {
             snapshotFlow { PlayerPrefs.orientation }.collect { applyOrientation() }
         }
         setContent {
             MediaStormTheme {
+                val c = activeController.value ?: return@MediaStormTheme
+                val session = c.session
                 val postPlay by c.postPlay.collectAsState()
                 LaunchedEffect(postPlay) { if (postPlay != null) window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
                 val ended by c.ended.collectAsState()
@@ -108,7 +107,7 @@ class MobilePlayerActivity : ComponentActivity() {
                 val switch by c.switchTo.collectAsState()
                 val partNext = c.nextRecordingPart?.collectAsState()?.value
                 LaunchedEffect(ended,partNext) { if (ended) {recordingNext=partNext;finish()} }
-                LaunchedEffect(Unit) {
+                LaunchedEffect(c) {
                     try {
                         val owner=requireNotNull(session.ownership)
                         val style=ApiClient.playbackSettings(owner.epoch).subtitleStyle
@@ -126,8 +125,15 @@ class MobilePlayerActivity : ComponentActivity() {
                 // Switch Source: close this stream (saved at its position) and resume on the other.
                 LaunchedEffect(switch) {
                     switch?.takeIf {session.canOpenPlayer()}?.let {
-                        finish()
-                        PlaybackCoordinator.play(it.request, it.source, carried = it.carried, resolved = it.resolved, prepared = it.prepared,expectedContext=requireNotNull(session.ownership).epoch)
+                        if (it.buffered != null) {
+                            c.adoptBuffered(it)?.let { replacement ->
+                                controller = replacement
+                                bindMobileControls(replacement)
+                            }
+                        } else {
+                            finish()
+                            PlaybackCoordinator.play(it.request, it.source, carried = it.carried, resolved = it.resolved, prepared = it.prepared,expectedContext=requireNotNull(session.ownership).epoch)
+                        }
                     }
                 }
                 if (postPlay != null && !inPip.value) PostPlayScreen(c) { finish() }
@@ -136,9 +142,21 @@ class MobilePlayerActivity : ComponentActivity() {
                     inPip = inPip.value,
                     tablet = tablet,
                     onExit = { c.cancelRecordingParts();finish() },
-                    onPictureInPicture = { p.enter(); Unit }.takeIf { p.supported },
+                    onPictureInPicture = { pip?.enter(); Unit }.takeIf { pip?.supported == true },
                 )
             }
+        }
+    }
+
+    private var pipWatch: kotlinx.coroutines.Job? = null
+    private fun bindMobileControls(current: PlayerController) {
+        pipWatch?.cancel()
+        pip?.unregister()
+        PlayerMediaSession.start(this, current)
+        val replacement = PictureInPicture(this, current).also { it.register() }
+        pip = replacement
+        pipWatch = lifecycleScope.launch {
+            combine(current.isPlaying, current.videoAspect, current.error) { _, _, _ -> }.collect { replacement.update() }
         }
     }
 
@@ -146,6 +164,12 @@ class MobilePlayerActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (PlaybackCoordinator.pending?.let {it.canOpenPlayer() && it.recordingPartReady() && it.recordingDerivedReady()}==true && controller != null) {
+            val current = requireNotNull(controller)
+            // The media notification returns to this same already-adopted player.
+            if (current.session.replacementBuffer != null && PlaybackCoordinator.pending === current.session) {
+                hideSystemBars()
+                return
+            }
             AppLog.i("Player", "new playback over the open player; restarting")
             relaunch = true
             finish()

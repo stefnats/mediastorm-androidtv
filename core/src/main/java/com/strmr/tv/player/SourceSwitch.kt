@@ -22,6 +22,9 @@ data class SourceSwitchRequest(
     val resolved: Pair<String, TrackSelection?>? = null,
     /** A server-prepared replacement retains its report binding and verified track metadata. */
     val prepared: com.strmr.tv.api.PrequeueStatus? = null,
+    /** Actual loaded source/paused decoder, separate from descriptive server status. */
+    val buffered: ReplacementBuffer? = null,
+    val discardPreviousProgress: Boolean = false,
 )
 
 /**

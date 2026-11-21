@@ -53,7 +53,7 @@ fun PlayerScreen(
             factory = { context ->
                 PlayerView(context).apply {
                     useController = false
-                    player = controller.player
+                    controller.attachVideoView(this)
                     setShutterBackgroundColor(android.graphics.Color.BLACK)
                     // Subtitles are drawn by PhoneSubtitleOverlay, as on the TV.
                     subtitleView?.visibility = android.view.View.GONE
@@ -61,7 +61,7 @@ fun PlayerScreen(
                     controller.videoSurface = videoSurfaceView as? android.view.SurfaceView
                 }
             },
-            update = { it.resizeMode = aspectMode.resizeMode },
+            update = { controller.attachVideoView(it); it.resizeMode = aspectMode.resizeMode },
             modifier = Modifier.fillMaxSize(),
         )
         val cues by controller.cues.collectAsState()

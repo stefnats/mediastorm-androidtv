@@ -45,6 +45,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 @OptIn(UnstableApi::class)
 class PlayerController(context: Context, val session: PlayerSession, private val onVideoFormat: (Format) -> Unit) {
+    private val applicationContext = context.applicationContext
+    internal var standby = session.replacementBuffer != null; private set
     val request = session.request
     val nextRecordingPart get() = session.recordingPart?.next
     fun cancelRecordingParts() {session.recordingPart?.cancel()}
@@ -83,11 +85,11 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     internal var audioPreferenceSave: Job? = null
     internal var audioPreferenceFailed = false
     val vodDenied=MutableStateFlow<com.strmr.tv.api.VodAccessDenial?>(null)
-    val canReportRelease get() = vodDenied.value==null && !session.isLive && !session.localFile && session.reportsProgress && session.prequeueId != null
+    val canReportRelease get() = !standby && vodDenied.value==null && !session.isLive && !session.localFile && session.reportsProgress && session.prequeueId != null
 
     private val recoveryContext = ServerReleaseReportGateway(dataContext)
     private val audioRecoveryPolicy = AudioRecoveryPolicy()
-    private val decodedAudio = DecodedAudioObservation()
+    private val decodedAudio = session.replacementBuffer?.parts?.decodedAudio ?: DecodedAudioObservation()
     private val decodedAudioPolicy = DecodedAudioSilencePolicy()
     val audioRecovery by lazy { AudioRecoveryAssistant(scope, { createReleaseReports(true) }, { recoveryContext.isCurrent() }) }
     val audioRecoveryActive get() = audioRecovery.active
@@ -109,6 +111,21 @@ class PlayerController(context: Context, val session: PlayerSession, private val
                 val next = SourceSwitchRules.resumeAt(request, offset).copy(speed = speed.value,
                     audioRecoveryCount = request.audioRecoveryCount + if (recovery) 1 else 0)
                 switchTo.value = SourceSwitchRequest(next, source, carried, prepared = status)
+            }, prepareLocal = { status, target, deadline ->
+                ReplacementBuffer.prepare(applicationContext, this, status, target, deadline, recovery).also { buffer ->
+                    buffer.onAbandoned { recoveryContext.cancel(status.prequeueId) }
+                }
+            }, adoptLocal = { status, offset, wrong, handle ->
+                val buffer = handle as? ReplacementBuffer ?: error("Actual replacement source missing")
+                check(buffer.isReady() && buffer.targetMs == offset)
+                requireReplacementOwner()
+                val source = SourceResult.from(kotlinx.serialization.json.buildJsonObject {
+                    put("title", kotlinx.serialization.json.JsonPrimitive(status.selectedResult?.title ?: status.displayName ?: "Prepared alternative"))
+                    put("serviceType", kotlinx.serialization.json.JsonPrimitive(status.serviceType ?: ""))
+                }, 0)!!
+                val next = buffer.candidateSession.request
+                switchTo.value = SourceSwitchRequest(next, source, replacementCarriedTracks(), prepared = status,
+                    buffered = buffer, discardPreviousProgress = wrong)
             }, denialTitleId=request.title.titleId,denialContext=dataContext,beforeOptions = { vodDenied.value?.let {throw com.strmr.tv.api.ApiError.AccessDenied(it)}; audioPreferenceSave?.join(); check(!audioPreferenceFailed) { "Audio preference could not be saved" } })
 
     fun closeReleaseReports() {
@@ -161,7 +178,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     private var startApplied = false
     private var audioRetried = false
     /** The playback's main-thread scope, cancelled shortly after [release]. */
-    val scope = MainScope()
+    val scope = MainScope().also { session.replacementBuffer?.retainActualScope(it) }
     private val progress: ProgressReporter
     /** A downloaded or translated subtitle, drawn in place of ExoPlayer's cues while selected. */
     val external = ExternalSubtitles(scope, { player.currentPosition }) { cues.value = it }
@@ -169,10 +186,65 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     private val autoSwitch = AutoSwitch(this)
 
     /** Seek previews, for a resolved stream (not trailers, live or a downloaded file). */
-    val thumbnails: PlaybackThumbnails? =
-        session.streamPath?.takeIf { !session.isLive && session.reportsProgress && !session.localFile }?.let { PlaybackThumbnails(it, request,ownership,context) }
+    private fun createThumbnails(): PlaybackThumbnails? =
+        session.streamPath?.takeIf { !session.isLive && session.reportsProgress && !session.localFile }?.let { PlaybackThumbnails(it, request, ownership, applicationContext) }
+    var thumbnails: PlaybackThumbnails? = if (standby) null else createThumbnails(); private set
     /** The video surface, set by the player screen's PlayerView: credits detection reads frames from it. */
     var videoSurface: android.view.SurfaceView? = null
+    private var attachedView: androidx.media3.ui.PlayerView? = null
+    /** The activity supplies its actual retained view; a standby cannot steal it. */
+    fun attachVideoView(view: androidx.media3.ui.PlayerView) {
+        check(!standby && !released && PlaybackCoordinator.pending === session)
+        if (view.player !== player) view.player = player
+        attachedView = view
+        videoSurface = view.videoSurfaceView as? android.view.SurfaceView
+    }
+
+    /** Consume the actual loaded source once, on the current activity's main looper. */
+    fun adoptBuffered(request: SourceSwitchRequest): PlayerController? {
+        val buffer = request.buffered ?: return null
+        var changedView: androidx.media3.ui.PlayerView? = null
+        try {
+            check(android.os.Looper.myLooper() === android.os.Looper.getMainLooper())
+            return ownership.use {
+                requireReplacementOwner()
+                check(switchTo.value === request && request.prepared?.prequeueId == buffer.candidateSession.prequeueId)
+                val view = requireNotNull(attachedView) { "Player surface is unavailable" }
+                check(view.player === player && videoSurface?.holder?.surface?.isValid == true)
+                val candidate = buffer.transfer(this)
+                // Same view, same loaded source, same frozen position: no new seek or resolution.
+                check(candidate.player.currentPosition == buffer.targetMs)
+                view.player = candidate.player
+                changedView = view
+                candidate.prepareReplacementActivation()
+                buffer.promote(this)
+                PlaybackCoordinator.commitReplacement(session, candidate.session)
+                candidate.attachedView = view
+                candidate.videoSurface = videoSurface
+                candidate.activateReplacement()
+                if (request.discardPreviousProgress) progress.discardFuture()
+                autoSwitch.cancel()
+                switchTo.value = null
+                attachedView = null; videoSurface = null
+                runCatching { release() }.onFailure {
+                    candidate.notice.value = "The source switched. Previous player cleanup is still pending."
+                }
+                candidate
+            }
+        } catch (error: Exception) {
+            if (PlaybackCoordinator.pending === session) {
+                changedView?.let { view ->
+                    view.player = player
+                    runCatching { player.setAudioAttributes(player.audioAttributes, true) }
+                }
+                switchTo.value = null
+                notice.value = "Could not switch to the buffered alternative. Playback continues."
+                buffer.close()
+                return null
+            }
+            throw error
+        }
+    }
     /** A recording still recording, over its growing HLS session (set as the player is built). */
     private var recordingHls: RecordingHls? = null
     /** A live channel: its server session, and tuning it again when the source drops (set as the player is built). */
@@ -184,12 +256,14 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     val postPlay = MutableStateFlow<PlaybackRequest?>(null)
     private val postPlayOffer = PostPlayOffer(dataContext)
 
-    val upNext: UpNext? = if (session.reportsProgress && !session.isLive) {
+    private fun createUpNext(): UpNext? = if (session.reportsProgress && !session.isLive) {
         UpNext(request, session.streamPath?.takeIf { !session.localFile }, scope, { videoSurface }, onSkip = { seekTo(it) },onDenied={denyVod(it)},expectedContext=dataContext) { next ->
             report(ended = true)
             advanceTo.value = next.copy(speed = speed.value)
         }
     } else null
+
+    var upNext: UpNext? = if (standby) null else createUpNext(); private set
 
     private val stallLog by lazy { StallLog(player) }
 
@@ -203,11 +277,11 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         error.value = "Joined recording cannot open at the confirmed position. Return and read progress again."
     }
     private val backendMediaHeaders=ApiClient.inContext(dataContext) {ApiClient.mediaHeaders}
-    private val mediaAccess=VodMediaAccess(ApiClient.inContext(dataContext) {ApiClient.baseUrl},
+    private val mediaAccess=session.replacementBuffer?.parts?.access ?: VodMediaAccess(ApiClient.inContext(dataContext) {ApiClient.baseUrl},
         enabled=session.reportsProgress && !session.isLive && !session.localFile,backendHeaders=backendMediaHeaders,denialTitleId=request.title.titleId,context=dataContext,requireCurrent=ownership::requireCurrent,profileId=profileId)
 
     private val derivedMediaAccess = derivedSource?.let { RecordingDerivedMediaAccess(ApiClient.inContext(dataContext) {ApiClient.baseUrl}, it, backendMediaHeaders) }
-    internal fun canUsePlayerAux(): Boolean = !released && ownership.isCurrent() && vodDenied.value == null
+    internal fun canUsePlayerAux(): Boolean = !standby && !released && ownership.isCurrent() && vodDenied.value == null
 
     internal fun denyVod(denial:com.strmr.tv.api.VodAccessDenial,attempt:com.strmr.tv.api.VodAttempt?=null) {
         if(released || dataContext!=ProfileDataContext.current || vodDenied.value!=null)return
@@ -223,10 +297,11 @@ class PlayerController(context: Context, val session: PlayerSession, private val
 
     private val startup = PlaybackStartupPlayer(session) { !released && session.canOpenPlayer() && vodDenied.value == null }
     private val listener = object : Player.Listener {
-        override fun onRenderedFirstFrame() { startup.firstFrame() }
+        override fun onRenderedFirstFrame() { if (!standby) startup.firstFrame() }
 
         override fun onIsPlayingChanged(playing: Boolean) {
             isPlaying.value = playing
+            if (standby) return
             if (playing) {
                 liveRetune?.playing()
                 progress.start()
@@ -235,6 +310,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
 
         override fun onPlaybackStateChanged(state: Int) {
             buffering.value = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
+            if (standby) return
             if (state == Player.STATE_READY) {
                 val start = recordingStart
                 if (start != null && !start.started) {
@@ -296,11 +372,11 @@ class PlayerController(context: Context, val session: PlayerSession, private val
                     player.trackSelectionParameters = carried.apply(next, player.trackSelectionParameters)
                     AppLog.i("SourceSwitch", "carried tracks applied: $carried")
                 }
-                online.tracksReady(next, prefs.subtitlePick)
+                if (!standby) online.tracksReady(next, prefs.subtitlePick)
             }
             next.ofType(C.TRACK_TYPE_VIDEO).firstOrNull { it.selected }?.let {
                 videoFormat.value = it.format
-                onVideoFormat(it.format)
+                if (!standby) onVideoFormat(it.format)
             }
             audioFormat.value = next.ofType(C.TRACK_TYPE_AUDIO).firstOrNull { it.selected }?.format
         }
@@ -320,6 +396,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         }
 
         override fun onPlayerError(e: PlaybackException) {
+            if (standby) { error.value = "Prepared replacement could not decode on this device."; return }
             if (derivedSource != null) {
                 startup.end(StartupOutcome.FAILED)
                 derivedSource.deny(); recordingProgress?.discard(); progress.discardFuture(); player.stop()
@@ -368,8 +445,12 @@ class PlayerController(context: Context, val session: PlayerSession, private val
             if (derivedSource != null) throw RecordingDerivedRetired()
             throw IllegalArgumentException("This local file requires its original verified context.")
         }
+        session.replacementBuffer?.let { buffer ->
+            check(!buffer.closing && !buffer.transferred && buffer.controller == null &&
+                session.ownership === buffer.candidateSession.ownership && session.url == buffer.candidateSession.url)
+        }
         // Passthrough only where the output takes it (not Bluetooth); PCM otherwise.
-        val renderers = PassthroughGuard.renderersFactory(context, decodedAudio.takeIf { audioRecoveryEligible(session, true, true) })
+        val renderers = session.replacementBuffer?.parts?.renderers ?: PassthroughGuard.renderersFactory(context, decodedAudio.takeIf { audioRecoveryEligible(session, true, true) })
             // Platform decoders first; the FFmpeg extension (TrueHD, DTS…) when none can.
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true)
@@ -380,17 +461,19 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         val http = OkHttpDataSource.Factory(mediaHttp).setDefaultRequestProperties(backendMediaHeaders)
         // HTTP(S) through OkHttp as before; `file://` (a phone's downloaded copy) from disk.
         val dataSource = derivedMediaAccess?.dataSourceFactory(http) ?: DefaultDataSource.Factory(context, http)
-        player = ExoPlayer.Builder(context, renderers)
+        val playerBuilder = ExoPlayer.Builder(context, renderers)
             // Dolby Vision Profile 7 rewritten for this box's decoders (player/dv7).
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource, Dv7Playback.extractorsFactory()).setLoadErrorHandlingPolicy(derivedMediaAccess?.loadPolicy ?: mediaAccess.loadPolicy))
+            .setMediaSourceFactory(session.replacementBuffer?.parts?.sources ?: DefaultMediaSourceFactory(dataSource, Dv7Playback.extractorsFactory()).setLoadErrorHandlingPolicy(derivedMediaAccess?.loadPolicy ?: mediaAccess.loadPolicy))
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
-                true,
+                !standby,
             )
             .setHandleAudioBecomingNoisy(true)
             .setSeekBackIncrementMs(10_000)
             .setSeekForwardIncrementMs(10_000)
-            .build()
+        player = session.replacementBuffer?.buildActualPlayer(playerBuilder) ?: playerBuilder.build()
+        session.replacementBuffer?.retainActualPlayer(player)
+        if (standby) player.volume = 0f
         player.addListener(listener)
         player.addListener(stallLog)
         progress = ProgressReporter(player, session, scope, context = dataContext) { autoSwitch.trigger(it) }
@@ -413,7 +496,8 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         // Debug builds log every player event under the EventLogger tag.
         if (AppBuild.DEBUG) player.addAnalyticsListener(androidx.media3.exoplayer.util.EventLogger())
         // A growing recording's playlist plays from its start (0), not its live edge.
-        recordingHls?.let { player.setMediaItem(it.mediaItem(session.url), 0) }
+        session.replacementBuffer?.let { player.setMediaSource(it.loadedSource, it.targetMs) }
+            ?: recordingHls?.let { player.setMediaItem(it.mediaItem(session.url), 0) }
             ?: if (derivedSource != null) {
                 val item = androidx.media3.common.MediaItem.Builder().setUri(session.url)
                     .setMimeType(androidx.media3.common.MimeTypes.VIDEO_MATROSKA).build()
@@ -423,23 +507,76 @@ class PlayerController(context: Context, val session: PlayerSession, private val
                 } else player.setMediaItem(item, 0)
             }
             else player.setMediaItem(Timeshift.mediaItem(session.url, timeshift.value))
-        request.startPosition?.let { player.seekTo((it * 1000).toLong()) }
+        if (!standby) request.startPosition?.let { player.seekTo((it * 1000).toLong()) }
         // Up Next / Switch Source: the previous playback's speed (live always plays at 1x).
-        session.explicitAudioLanguage?.let { rememberAudioLanguage(it) }
+        if (!standby) session.explicitAudioLanguage?.let { rememberAudioLanguage(it) }
         if (request.speed != 1f && !session.isLive) setSpeed(request.speed)
-        player.playWhenReady = recordingStart == null
+        player.playWhenReady = !standby && recordingStart == null
         player.prepare()
         if (recordingStart != null) recordingStartTimeout = scope.launch {
             delay(15_000)
             if (!recordingStart.started && !released) failRecordingProgressStart()
         }
+        if (!standby) startActiveHelpers()
+
+    }
+
+    private fun startActiveHelpers() {
         autoSwitch.start()
-        AppLog.i("Player", "play ${request.displayTitle} start=${request.start?.label ?: "0"}")
         thumbnails?.start(scope) {
             val video = tracks.value.ofType(C.TRACK_TYPE_VIDEO).firstOrNull { it.selected }?.format
             PlaybackThumbnails.Context(duration.value, player.currentPosition, buffering.value,
-                                       hdr = video?.isHdr == true, dolbyVision = video?.isDolbyVision == true)
+                hdr = video?.isHdr == true, dolbyVision = video?.isDolbyVision == true)
         }
+    }
+    internal fun prepareReplacementActivation() {
+        check(standby && !released && player.playbackState == Player.STATE_READY && player.playerError == null)
+        ownership.requireCurrent()
+        player.setAudioAttributes(player.audioAttributes, true)
+        player.volume = 1f
+    }
+    internal fun activateReplacement() {
+        val buffer = requireNotNull(session.replacementBuffer)
+        check(standby && buffer.transferred && PlaybackCoordinator.pending === session && !released)
+        ownership.requireCurrent()
+        decodedAudio.restart(); decodedAudioPolicy.reset()
+        standby = false
+        runCatching {
+            upNext = createUpNext(); thumbnails = createThumbnails()
+            videoFormat.value?.let(onVideoFormat)
+            online.tracksReady(player.currentTracks, prefs.subtitlePick)
+            startActiveHelpers()
+        }.onFailure { notice.value = "The source switched. Some playback helpers are unavailable." }
+        runCatching { player.playWhenReady = true }.onFailure {
+            error.value = "The buffered source could not start. Choose another source."
+        }
+    }
+    internal fun requireReplacementOwner() {
+        check(canUsePlayerAux() && PlaybackCoordinator.pending === session && session.reportsProgress &&
+            !session.isLive && !session.localFile && session.recordingDerived == null)
+        ownership.requireCurrent()
+    }
+    internal fun replacementCarriedTracks() = CarriedTracks.capture(player.currentTracks, player.trackSelectionParameters,
+        external.selected.value).copy(audioLanguage = null)
+    internal fun replacementController(context: Context, replacement: PlayerSession) = PlayerController(context, replacement, onVideoFormat)
+    internal fun replacementMediaParts(context: Context, replacement: PlayerSession,
+        bounded: (androidx.media3.datasource.DataSource.Factory) -> androidx.media3.datasource.DataSource.Factory,
+        callEvents: okhttp3.EventListener.Factory): ReplacementMediaParts {
+        requireReplacementOwner(); check(replacement.ownership === ownership)
+        val headers = ownership.use { ApiClient.mediaHeaders }
+        val access = VodMediaAccess(ownership.use { ApiClient.baseUrl }, true, headers,
+            replacement.request.title.titleId, dataContext, ownership::requireCurrent, profileId)
+        val client = ApiClient.http.withoutAutomaticReplay().newBuilder().followRedirects(true).followSslRedirects(false)
+            .addInterceptor(access.interceptor).addNetworkInterceptor(access.requestInterceptor).eventListenerFactory(callEvents).build()
+        val source = bounded(DefaultDataSource.Factory(context, OkHttpDataSource.Factory(client).setDefaultRequestProperties(headers)))
+        val observation = DecodedAudioObservation()
+        val renderers = PassthroughGuard.renderersFactory(context, observation)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setEnableDecoderFallback(true).setMediaCodecSelector(AudioDecoderFallback.selector)
+        val capabilityRenderers = PassthroughGuard.renderersFactory(context)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setEnableDecoderFallback(true).setMediaCodecSelector(AudioDecoderFallback.selector)
+        return ReplacementMediaParts(DefaultMediaSourceFactory(source, Dv7Playback.extractorsFactory()).setLoadErrorHandlingPolicy(access.loadPolicy), renderers, capabilityRenderers, access, observation)
     }
 
     /** Retire the entire old scope before queued helpers can read a replacement identity. */
@@ -452,6 +589,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     /** Position for the chrome, skip segments and up next. */
     private val clock: Job = scope.launch {
         while (isActive) {
+            if (standby) { delay(250); continue }
             if(!session.playbackAllowed() || session.recordingPart?.wasReplaced()==true) {cancelRecordingParts();startup.end(StartupOutcome.OWNER_LOST);progress.discardFuture();player.stop();ended.value=true;break}
             if (postPlay.value != null) { delay(250); continue }
             position.value = player.currentPosition
@@ -517,6 +655,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     }
 
     fun report(paused: Boolean = false, ended: Boolean = false, closing: Boolean = false) {
+        if (standby) return
         val recording = recordingProgress
         if (recording != null) {
             val positionMs = if (ended) requireNotNull(derivedSource?.observation?.descriptor?.durationMs) else player.currentPosition
@@ -546,6 +685,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
 
     /** Saves the position and lets go of the player; returns the last report, still finishing. */
     fun release(): Job? {
+        if (released) return progress.lastReport
         startup.end(StartupOutcome.RELEASED)
         released=true
         decodedAudio.close(); decodedAudioPolicy.reset()
@@ -573,6 +713,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         player.removeListener(listener)
         player.removeListener(stallLog)
         player.release()
+        session.replacementBuffer?.takeUnless { it.closing }?.close()
         session.recordingPart?.release(partPosition)
         if (recordingClosing == null) derivedSource?.release()
         // The dedicated recording actor owns its actual completion independently of this scope.

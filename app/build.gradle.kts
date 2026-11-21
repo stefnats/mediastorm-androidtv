@@ -17,6 +17,7 @@ android {
         // Android 7.1: Fire OS 6, the first Fire TV Stick 4K.
         minSdk = 25
         targetSdk = 36
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // The release script passes the published build + 1 (scripts/build-release.sh), so the
         // repo stays clean; local builds are 1 and never look newer than a published one.
         versionCode = (project.findProperty("strmrVersionCode") as String?)?.toInt() ?: 1
@@ -69,6 +70,8 @@ dependencies {
     // code is compiled ahead of time on a sideloaded install instead of interpreted at first.
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
     // The FFmpeg audio decoders (TrueHD, DTS…), the same build the React Native app ships;
     // scripts/sync-vendor.sh copies it to core/libs. ExoPlayer loads it by name, so builds without it
     // still work, minus those codecs.

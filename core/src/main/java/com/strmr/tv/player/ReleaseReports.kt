@@ -20,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -126,6 +127,13 @@ enum class ReleaseProblem(val key: String, val label: String) {
 fun languageLabel(code: String): String = if (code.isBlank()) "Unknown language" else
     runCatching { java.util.Locale.forLanguageTag(code).getDisplayLanguage(java.util.Locale.getDefault()).ifBlank { code } }.getOrDefault(code)
 
+/** Local preparation DATA; only the concrete player owner may adopt its actual source. */
+interface PreparedReleaseBuffer {
+    val targetMs: Long
+    fun isReady(): Boolean
+    suspend fun closeAndJoin()
+}
+
 data class ReleaseReportState(
     val options: ReleaseReportOptions? = null,
     val problem: ReleaseProblem? = null,
@@ -151,6 +159,9 @@ class ReleaseReports(
     private val pollAttempts: Int = 120,
     private val denialTitleId:String?=null,
     private val denialContext:Long=ProfileDataContext.current,
+    private val prepareLocal: (suspend (PrequeueStatus, Long, Long) -> PreparedReleaseBuffer)? = null,
+    private val adoptLocal: ((PrequeueStatus, Long, Boolean, PreparedReleaseBuffer) -> Unit)? = null,
+    private val monotonicNanos: () -> Long = System::nanoTime,
 ) {
     private val mutable = MutableStateFlow(ReleaseReportState())
     val state: StateFlow<ReleaseReportState> = mutable
@@ -158,6 +169,12 @@ class ReleaseReports(
     private var pending: String? = null
     private var closed = false
     private var loadStarted = false
+    private var localJob: Job? = null
+    private var local: PreparedReleaseBuffer? = null
+    val bufferedPreparation: PreparedReleaseBuffer? get() = local
+    private var serverReady: PrequeueStatus? = null
+    private var localDeadline: Long? = null
+    private var rangeAttempt = 0L
     private fun checkCurrent() { check(!closed && gateway.isCurrent()) { "Playback context changed. Reopen this menu." } }
 
     suspend fun load() {
@@ -183,7 +200,38 @@ class ReleaseReports(
             mutable.value = mutable.value.copy(track = index)
         }
     }
-    fun resume(mode: ReleaseResume) { mutable.value = mutable.value.copy(resume = mode) }
+    fun resume(mode: ReleaseResume) {
+        if (closed || mode == mutable.value.resume) return
+        mutable.value = mutable.value.copy(resume = mode)
+        serverReady?.takeIf { prepareLocal != null }?.let(::startLocal)
+    }
+
+    private fun startLocal(status: PrequeueStatus) {
+        val prepare = prepareLocal ?: return
+        val previous = localJob
+        previous?.cancel()
+        val attempt = ++rangeAttempt
+        val target = mutable.value.resume.position(position(), mutable.value.problem?.wrongContent == true, status.duration)
+        val deadline = localDeadline ?: (monotonicNanos() + 15_000_000_000L).also { localDeadline = it }
+        mutable.value = mutable.value.copy(ready = null, busy = true, message = "Buffering the alternative at ${target / 1000}s. Playback continues.")
+        localJob = scope.launch {
+            var owned: PreparedReleaseBuffer? = null
+            try {
+                previous?.cancelAndJoin()
+                local?.closeAndJoin(); local = null
+                checkCurrent(); check(monotonicNanos() < deadline) { "Alternative buffering timed out. Playback continues." }
+                owned = prepare(status, target, deadline)
+                checkCurrent(); check(attempt == rangeAttempt && owned.targetMs == target && owned.isReady())
+                local = owned; owned = null
+                mutable.value = mutable.value.copy(ready = status, busy = false,
+                    message = "Alternative buffered at ${target / 1000}s. Switch to this saved position.")
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                if (!closed && attempt == rangeAttempt) mutable.value = mutable.value.copy(ready = null, busy = false,
+                    message = "Could not buffer the alternative. Playback continues. Choose another position or source.")
+            } finally { withContext(NonCancellable) { owned?.closeAndJoin() } }
+        }
+    }
 
     fun submit(reporting: Boolean, prepare: Boolean) {
         if (mutable.value.busy || pending != null || closed || mutable.value.denial!=null) return
@@ -229,7 +277,9 @@ class ReleaseReports(
                     }
                     error("The alternative took too long. Try another source manually.")
                 }
-                mutable.value = mutable.value.copy(busy = false, ready = ready, message = "Alternative ready. Choose where to start, then switch.")
+                serverReady = ready
+                if (prepareLocal != null) startLocal(ready)
+                else mutable.value = mutable.value.copy(busy = false, ready = ready, message = "Alternative ready. Choose where to start, then switch.")
             } catch (e: TimeoutCancellationException) {
                 cleanup()
                 mutable.value = mutable.value.copy(busy = false, message = "Preparation timed out. The current source is unchanged.")
@@ -251,10 +301,23 @@ class ReleaseReports(
             return
         }
         val wrong = state.problem?.wrongContent == true
-        val offset = state.resume.position(position(), wrong, ready.duration)
+        val buffered = local
+        if (prepareLocal != null && (buffered == null || !buffered.isReady())) {
+            mutable.value = state.copy(ready = null, message = "The buffered alternative is no longer ready. Playback continues.")
+            return
+        }
+        val offset = buffered?.targetMs ?: state.resume.position(position(), wrong, ready.duration)
+        if (buffered != null) {
+            try { requireNotNull(adoptLocal)(ready, offset, wrong, buffered) }
+            catch (error: Exception) {
+                mutable.value = state.copy(ready = null, message = "Could not switch. Playback continues.")
+                return
+            }
+            local = null
+        }
         pending = null // ownership is transferred to playback before the menu is disposed
         closed = true
-        adopt(ready, offset, wrong)
+        if (buffered == null) adopt(ready, offset, wrong)
     }
 
     fun undo() {
@@ -272,6 +335,8 @@ class ReleaseReports(
     }
 
     private suspend fun cleanup() {
+        serverReady = null
+        withContext(NonCancellable) { local?.closeAndJoin(); local = null }
         val id = pending ?: return
         pending = null
         withContext(NonCancellable) { withTimeoutOrNull(5_000) { runCatching { gateway.cancel(id) } } }
@@ -280,6 +345,8 @@ class ReleaseReports(
         if (closed) return
         closed = true
         job?.cancel()
-        scope.launch { cleanup() }
+        val bufferedWork = localJob
+        bufferedWork?.cancel()
+        scope.launch { withContext(NonCancellable) { bufferedWork?.join(); cleanup() } }
     }
 }
