@@ -94,5 +94,5 @@ val PrequeueStatus.releaseTitle: String?
 
 /** File facts beside the prepared source's track pills, without changing its release title. */
 val PrequeueStatus.observedQualityLabel: String?
-    get() = observedQualityRows(resultAttributes.orEmpty()).takeIf { it.isNotEmpty() }
+    get() = observedResolutionRows(resultAttributes.orEmpty()).takeIf { it.isNotEmpty() }
         ?.joinToString(" · ") { (label, value) -> "$label: $value" }
