@@ -63,7 +63,11 @@ data class PlaybackResolution(
     val queueId: Long? = null,
     val webdavPath: String? = null,
     val trackSelection: TrackSelection? = null,
+    /** Observed quality of this resolved file; never written back to the search candidate. */
+    val qualityAttributes: Map<String, String>? = null,
 )
+
+data class ResolvedManualSource(val path: String, val tracks: TrackSelection?, val qualityAttributes: Map<String, String> = emptyMap())
 
 // Tracks
 

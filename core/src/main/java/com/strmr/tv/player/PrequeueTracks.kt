@@ -85,9 +85,14 @@ val PrequeueStatus.trackLists: TrackProbe.Tracks
  */
 val PrequeueStatus.releaseTitle: String?
     get() {
-        val attributes = resultAttributes ?: selectedResult?.attributes
+        val attributes = selectedResult?.attributes.orEmpty() + resultAttributes.orEmpty()
         val passthrough = passthroughName ?: attributes?.get("raw_name")?.takeIf { attributes["passthrough_format"] == "true" }
         val file = streamPath?.substringBefore('?')?.substringAfterLast('/')
         return listOf(passthrough, attributes?.get("raw_title"), selectedResult?.title, file, displayName)
             .firstNotNullOfOrNull { name -> name?.lineSequence()?.firstOrNull()?.trim()?.ifEmpty { null } }
     }
+
+/** File facts beside the prepared source's track pills, without changing its release title. */
+val PrequeueStatus.observedQualityLabel: String?
+    get() = observedQualityRows(resultAttributes.orEmpty()).takeIf { it.isNotEmpty() }
+        ?.joinToString(" · ") { (label, value) -> "$label: $value" }

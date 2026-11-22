@@ -15,6 +15,16 @@ internal suspend fun resolveManualSource(
     poll:suspend (Long,Map<String,String>)->PlaybackResolution,
     pause:suspend ()->Unit={delay(1_000)},now:()->Long=System::currentTimeMillis,
 ):Pair<String,TrackSelection?> {
+    val resolved = resolveManualSourceWithQuality(result, titleId, startOffset, profile, client, expected, post, poll, pause, now)
+    return resolved.path to resolved.tracks
+}
+
+internal suspend fun resolveManualSourceWithQuality(
+    result:SourceResult,titleId:String,startOffset:Double?,profile:String,client:String,expected:Long,
+    post:suspend (JsonObject)->PlaybackResolution,
+    poll:suspend (Long,Map<String,String>)->PlaybackResolution,
+    pause:suspend ()->Unit={delay(1_000)},now:()->Long=System::currentTimeMillis,
+):ResolvedManualSource {
     suspend fun check() {currentCoroutineContext().ensureActive();ProfileDataContext.requireCurrent(expected)}
     check()
     val body=buildJsonObject {
@@ -30,5 +40,5 @@ internal suspend fun resolveManualSource(
         pause();check()
         resolution=poll(id,query);check()
     }
-    return requireNotNull(resolution.webdavPath) to resolution.trackSelection
+    return ResolvedManualSource(requireNotNull(resolution.webdavPath), resolution.trackSelection, resolution.qualityAttributes.orEmpty())
 }

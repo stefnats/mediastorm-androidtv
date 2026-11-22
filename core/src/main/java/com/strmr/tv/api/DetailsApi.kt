@@ -76,8 +76,14 @@ suspend fun ApiClient.sourceHealth(token: String, expectedContext: Long = Profil
  * title, so manual picks get the same preference as prequeue.
  */
 suspend fun ApiClient.resolveSource(result: SourceResult, titleId: String, startOffset: Double?, expectedContext:Long=ProfileDataContext.current): Pair<String, TrackSelection?> {
+    val resolved = resolveSourceWithQuality(result, titleId, startOffset, expectedContext)
+    return resolved.path to resolved.tracks
+}
+
+/** Playback retains this file's observed quality through automatic source switching too. */
+suspend fun ApiClient.resolveSourceWithQuality(result: SourceResult, titleId: String, startOffset: Double?, expectedContext:Long=ProfileDataContext.current): ResolvedManualSource {
     val (profile,client)=inContext(expectedContext) {profileId to Config.clientId}
-    return resolveManualSource(result,titleId,startOffset,profile,client,expectedContext,
+    return resolveManualSourceWithQuality(result,titleId,startOffset,profile,client,expectedContext,
         post={body->send<PlaybackResolution>("POST","/api/playback/resolve",body=body,timeoutMs=90_000,expectedContext=expectedContext)},
         poll={id,query->send<PlaybackResolution>("GET","/api/playback/queue/$id",query,timeoutMs=60_000,expectedContext=expectedContext)})
 }

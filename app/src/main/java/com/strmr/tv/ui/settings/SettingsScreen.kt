@@ -301,6 +301,7 @@ private fun SettingsList(server: HttpUrl?, remote: Boolean, health: String?, che
             )
         }
         trackSettingRows()
+        item { PlaybackQualityRows() }
         item {
             val enabled = DolbyVisionSettings.profile7Enabled
             ListItem(

@@ -15,6 +15,7 @@ import com.strmr.tv.player.ManualTracks
 import com.strmr.tv.player.PrequeuePick
 import com.strmr.tv.player.WarmPrequeue
 import com.strmr.tv.player.trackLists
+import com.strmr.tv.player.observedQualityLabel
 
 /** A result's track probe for the panel: null while it runs. */
 data class ProbeState(val probe: TrackProbe?)
@@ -123,6 +124,7 @@ class PrequeueTracks(
             else -> chosen.subtitle
         }
         val parts = mutableListOf<String>()
+        status.observedQualityLabel?.let { parts += it }
         (lists.audio.firstOrNull { it.index == audioIndex } ?: lists.audio.firstOrNull())?.let { a ->
             parts += ManualTracks.languageName(a.language)
             a.codec.ifBlank { null }?.let { parts += it.uppercase() }

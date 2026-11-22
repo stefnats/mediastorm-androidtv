@@ -85,6 +85,8 @@ data class PlayerSession(
     val recordingDerived: RecordingDerivedPlayback? = null,
     /** Original actual secondary source/player; never serialized or reused across owners. */
     val replacementBuffer: ReplacementBuffer? = null,
+    /** Display data for this actual file; provider claims remain in the search result. */
+    val sourceAttributes: Map<String, String> = emptyMap(),
 ) {
     init {
         recordingDerived?.let { source ->

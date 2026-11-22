@@ -3,7 +3,8 @@ package com.strmr.tv.player
 import androidx.media3.common.Player
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.SourceResult
-import com.strmr.tv.api.resolveSource
+import com.strmr.tv.api.resolveSourceWithQuality
+import com.strmr.tv.api.ResolvedManualSource
 import com.strmr.tv.api.rethrowVodDenial
 import com.strmr.tv.api.vodDenial
 import kotlinx.coroutines.CancellationException
@@ -89,7 +90,7 @@ class AutoSwitch(private val controller: PlayerController) {
                     requirePlaybackContext(controller.dataContext)
                     if(controller.releaseReportOpen || controller.audioRecoveryActive || controller.switchTo.value!=null || controller.ended.value || controller.vodDenied.value!=null)throw CancellationException("Source action changed")
                     tried+=keys(candidate)
-                    val resolved=ApiClient.resolveSource(candidate,request.title.titleId,controller.player.currentPosition/1000.0,controller.dataContext)
+                    val resolved=ApiClient.resolveSourceWithQuality(candidate,request.title.titleId,controller.player.currentPosition/1000.0,controller.dataContext)
                     requirePlaybackContext(controller.dataContext)
                     if(controller.releaseReportOpen || controller.audioRecoveryActive || controller.switchTo.value!=null || controller.ended.value || controller.vodDenied.value!=null)throw CancellationException("Source action changed")
                     resolved
@@ -103,7 +104,7 @@ class AutoSwitch(private val controller: PlayerController) {
         }
     }
 
-    private fun switchTo(source: SourceResult, resolved: Pair<String, com.strmr.tv.api.TrackSelection?>, tried: Set<String>) {
+    private fun switchTo(source: SourceResult, resolved: ResolvedManualSource, tried: Set<String>) {
         val player = controller.player
         val carried = CarriedTracks.capture(player.currentTracks, player.trackSelectionParameters, controller.external.selected.value)
         AppLog.i(TAG, "-> \"${source.title}\" (${source.serviceType}) at ${player.currentPosition / 1000}s carried=$carried")

@@ -90,6 +90,7 @@ fun PlaybackSettingsPage() {
             ) { i -> CreditsDetectionSettings.set(i?.let { it == 1 }) }
         }
         SettingsSection("Sources") {
+            PlaybackQualityRows()
             SwitchRow(
                 "Auto Switch Sources", AutoSwitchSettings.enabled, "Move to another source when the current one fails or keeps stalling",
             ) { AutoSwitchSettings.set(it) }

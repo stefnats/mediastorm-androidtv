@@ -9,7 +9,7 @@ import androidx.media3.common.util.UnstableApi
 import com.strmr.tv.api.DetailsTarget
 import com.strmr.tv.api.SourceResult
 import com.strmr.tv.api.StartPoint
-import com.strmr.tv.api.TrackSelection
+import com.strmr.tv.api.ResolvedManualSource
 
 /**
  * What Switch Source hands the coordinator: the same title at the current position, on another
@@ -19,7 +19,7 @@ data class SourceSwitchRequest(
     val request: PlaybackRequest,
     val source: SourceResult,
     val carried: CarriedTracks,
-    val resolved: Pair<String, TrackSelection?>? = null,
+    val resolved: ResolvedManualSource? = null,
     /** A server-prepared replacement retains its report binding and verified track metadata. */
     val prepared: com.strmr.tv.api.PrequeueStatus? = null,
     /** Actual loaded source/paused decoder, separate from descriptive server status. */

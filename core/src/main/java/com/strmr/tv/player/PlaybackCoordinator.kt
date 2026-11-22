@@ -7,9 +7,9 @@ import com.strmr.tv.api.DetailsTarget
 import com.strmr.tv.api.PlaybackSettings
 import com.strmr.tv.api.PrequeueStatus
 import com.strmr.tv.api.SourceResult
-import com.strmr.tv.api.TrackSelection
 import com.strmr.tv.api.playbackSettings
-import com.strmr.tv.api.resolveSource
+import com.strmr.tv.api.resolveSourceWithQuality
+import com.strmr.tv.api.ResolvedManualSource
 import com.strmr.tv.api.rethrowVodDenial
 import com.strmr.tv.api.VodDenialEvents
 import com.strmr.tv.api.vodDenial
@@ -101,7 +101,7 @@ object PlaybackCoordinator {
      */
     fun play(
         request: PlaybackRequest, source: SourceResult, manual: ManualSourceTracks? = null, carried: CarriedTracks? = null,
-        resolved: Pair<String, TrackSelection?>? = null,
+        resolved: ResolvedManualSource? = null,
         prepared: com.strmr.tv.api.PrequeueStatus? = null,expectedContext:Long=ProfileDataContext.current,
         startup: PlaybackStartupIntent? = null,
     ) {
@@ -115,9 +115,10 @@ object PlaybackCoordinator {
                 return@begin ResolvedStream(requireNotNull(prepared.streamPath), prepared.trackSelection, prepared.displayName,
                     prepared.subtitleTracks.orEmpty(), manualTracks = true, source = prequeueSourceHints(prepared), prequeueId = prepared.prequeueId)
             }
-            val (path, tracks) = resolved ?: ApiClient.resolveSource(source, request.title.titleId, request.startPosition,expected)
+            val resolution = resolved ?: ApiClient.resolveSourceWithQuality(source, request.title.titleId, request.startPosition,expected)
+            val (path, tracks) = resolution
             val hints = SourceHints(source.serviceType.ifEmpty { null }, indexer = source.indexer.ifEmpty { null },
-                                    attributes = source.attributes)
+                                    attributes = source.attributes + resolution.qualityAttributes)
             if (manual == null || manual.choice.isEmpty) {
                 ResolvedStream(path, tracks, source.title, source = hints)
             } else {
@@ -147,7 +148,7 @@ object PlaybackCoordinator {
                 subtitleStreams = status.subtitleTracks.orEmpty(), playback = original.playback,
                 manualTracks = true, carried = carried, prequeueId = status.prequeueId,
                 sourceLabel = StreamInfo.source(path, hints, null), sourceDolbyVision = hints.dolbyVisionProfile,
-                sourceHdr10 = hints.hdr10 == true, ownership = owner)
+                sourceHdr10 = hints.hdr10 == true, sourceAttributes = hints.attributes, ownership = owner)
         }
     }
     /** Called only at the current activity's ready, explicit controller swap. */
@@ -400,7 +401,8 @@ object PlaybackCoordinator {
                                   playback = settings, manualTracks = r.manualTracks, carried = carried, prequeueId = r.prequeueId, explicitAudioLanguage = r.explicitAudioLanguage,
                                   pickTracksOnDevice = r.pickTracksOnDevice,
                                   sourceLabel = StreamInfo.source(r.path, r.source, selectedRequest.libraryVersion?.origin),
-                                  sourceDolbyVision = r.source?.dolbyVisionProfile, sourceHdr10 = r.source?.hdr10 == true,ownership=ownership)
+                                  sourceDolbyVision = r.source?.dolbyVisionProfile, sourceHdr10 = r.source?.hdr10 == true,
+                                  sourceAttributes = r.source?.attributes.orEmpty(), ownership=ownership)
                 }
                 fun publish() {
                     ownership.requireCurrent()

@@ -14,7 +14,15 @@ fun streamInfoRows(session: PlayerSession, video: Format?, audio: Format?): List
         v?.let { StreamInfo.dynamicRange(it, session.sourceDolbyVision, session.releaseName, session.sourceHdr10) }?.let { "Dynamic range" to it },
         a?.let(StreamInfo::audio)?.let { "Audio" to it },
         session.sourceLabel?.let { "Source" to it },
-    )
+    ) + observedQualityRows(session.sourceAttributes)
+}
+
+/** Both native Info panels show the file probe separately from the unchanged release name. */
+internal fun observedQualityRows(attributes: Map<String, String>): List<Pair<String, String>> {
+    if (attributes["resolutionSource"] != "file_probe") return emptyList()
+    val resolution = attributes["resolution"]?.takeIf { Regex("[0-9]{3,4}p").matches(it) } ?: return emptyList()
+    val advertised = attributes["advertisedResolution"]?.takeIf { it.isNotBlank() && it != resolution }
+    return listOfNotNull("File quality" to "$resolution (file probe)", advertised?.let { "Advertised quality" to it })
 }
 
 @OptIn(UnstableApi::class)
