@@ -221,9 +221,10 @@ class ReleaseReports(
         mutable.value.options?.audioLanguageCheckAvailable == true && currentAudioTrack != null
 
     /** Explicit observation only: never enters submit/report/replacement/history paths. */
-    fun checkAudioLanguage(): Job? {
+    fun checkAudioLanguage(requireAutomaticPreference: Boolean = false): Job? {
         if (!canCheckAudioLanguage || mutable.value.busy || mutable.value.denial != null) return null
         val original = mutable.value.options ?: return null
+        if (requireAutomaticPreference && !original.autoCheckAudioLanguage) return null
         val attempt = ++spokenSequence
         mutable.value = mutable.value.copy(busy = true, audioLanguageCheckBusy = true,
             audioLanguageCheckMessage = null, audioLanguageCheckResult = null, message = "Checking two short audio samples; nothing will be changed.")
@@ -237,7 +238,7 @@ class ReleaseReports(
                 currentCoroutineContext().ensureActive(); checkCurrent()
                 check(attempt == spokenSequence && refreshed.sourceVersion == original.sourceVersion &&
                     TrackPreferences.sameLanguage(refreshed.audioLanguage, original.audioLanguage))
-                check(refreshed.audioLanguageCheckAvailable)
+                check(refreshed.audioLanguageCheckAvailable && (!requireAutomaticPreference || refreshed.autoCheckAudioLanguage))
                 val track = currentAudioTrack?.invoke(refreshed) ?: error("Current audio track cannot be mapped safely")
                 val input = SpokenAudioInput(refreshed.sourceVersion, track, position().coerceAtLeast(0) / 1000.0)
                 val reply = withTimeout(100_000) { gateway.checkAudioLanguage(sourceId, input) }

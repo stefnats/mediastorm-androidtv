@@ -95,6 +95,10 @@ data class CarriedTracks(
     }
 }
 
+/** Consumed before manual source resolution; clearing a library pointer cannot clear this fence. */
+internal fun catalogueSourceRequest(request: PlaybackRequest): PlaybackRequest? =
+    request.takeUnless { it.fileOnly }?.copy(libraryVersion = null)
+
 /** The Switch Source list's rules, pure for tests. */
 object SourceSwitchRules {
     /**

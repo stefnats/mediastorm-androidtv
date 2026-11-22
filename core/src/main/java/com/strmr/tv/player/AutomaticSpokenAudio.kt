@@ -64,7 +64,7 @@ internal class AutomaticSpokenAudio(
                 flow.load()
                 val options = flow.state.value.options ?: return@launch
                 if (!eligible() || !options.autoCheckAudioLanguage || !options.audioLanguageCheckAvailable) return@launch
-                val check = flow.checkAudioLanguage() ?: return@launch
+                val check = flow.checkAudioLanguage(requireAutomaticPreference = true) ?: return@launch
                 check.join()
                 if (!eligible()) return@launch
                 val reply = flow.state.value.audioLanguageCheckResult ?: return@launch

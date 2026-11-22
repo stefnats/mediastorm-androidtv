@@ -7,11 +7,16 @@ import com.strmr.tv.api.SpokenAudioReply
 /** No language or type-order guess may turn a different container track into this check. */
 internal fun spokenAudioContainerIndex(format: Format?, typeIndex: Int?, options: ReleaseReportOptions): Int? {
     val selected = format ?: return null
-    val container = selected.id?.toIntOrNull()?.takeIf { it > 0 }?.minus(1) ?: return null
+    return spokenAudioContainerIndex(selected.id, selected.language, typeIndex, options)
+}
+
+/** The actual adapter above delegates to this Android-independent evidence check. */
+internal fun spokenAudioContainerIndex(formatId: String?, language: String?, typeIndex: Int?, options: ReleaseReportOptions): Int? {
+    val container = formatId?.toIntOrNull()?.takeIf { it > 0 }?.minus(1) ?: return null
     val ordered = typeIndex?.takeIf { it >= 0 }?.let { options.audioTracks.getOrNull(it) } ?: return null
     if (ordered.index != container) return null
     val matches = options.audioTracks.filter { it.index == container }
-    return container.takeIf { matches.size == 1 && TrackPreferences.sameLanguage(selected.language, matches.single().language) }
+    return container.takeIf { matches.size == 1 && TrackPreferences.sameLanguage(language, matches.single().language) }
 }
 
 internal enum class SpokenAudioAssessment { UNKNOWN, LIKELY_MATCH, LIKELY_MISMATCH }

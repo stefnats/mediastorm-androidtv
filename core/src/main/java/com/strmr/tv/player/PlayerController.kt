@@ -149,11 +149,15 @@ class PlayerController(
             { createReleaseReports(false, automatic = true) }, { audioRecovery.suggest(AudioRecoveryHint.LANGUAGE) })
     }
 
+    private val playbackMenus = PlaybackMenuGate { automaticSpokenAudio.cancel() }
+    fun openPlaybackMenu(): java.io.Closeable = playbackMenus.acquire()
+    suspend fun awaitAutomaticAudioRetirement() { automaticSpokenAudio.cancelAndJoin() }
+
     private fun spokenAudioSourceEligible() = session.playback?.autoCheckAudioLanguage == true &&
         canUsePlayerAux() && canReportRelease && recoveryContext.isCurrent()
 
     private fun canCheckSpokenAudioAutomatically() = spokenAudioSourceEligible() &&
-        !releaseReportOpen && !audioRecovery.active && !autoSwitch.preparing &&
+        !playbackMenus.active && !releaseReportOpen && !audioRecovery.active && !autoSwitch.preparing &&
         switchTo.value == null && advanceTo.value == null && !ended.value && player.playerError == null &&
         player.isPlaying && player.playbackState == Player.STATE_READY
 
@@ -778,6 +782,7 @@ class PlayerController(
      * request; the activity closes this playback (saving the position) and starts the other.
      */
     fun switchSource(source: SourceResult) {
+        if (request.fileOnly) return
         cancelAudioLanguageCheck()
         if(vodDenied.value!=null || dataContext!=ProfileDataContext.current)return
         audioRecovery.dismiss()

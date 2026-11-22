@@ -48,6 +48,7 @@ class CombinedLibraryPlaybackTest {
         assertFalse(selected.episodeOrderKnown)
         assertFalse(selected.title.hasCatalogIds)
         assertTrue(selected.isUnmatchedLibraryFile)
+        assertTrue(selected.fileOnly)
         assertEquals(playback.streamPath,selected.title.titleId)
         assertEquals(version,selected.libraryVersion)
         val versions = selected.library!!
@@ -63,6 +64,26 @@ class CombinedLibraryPlaybackTest {
         for (key in listOf("titleId","seriesId","tmdb","imdb","tvdb","seasonNumber","episodeNumber")) assertNull(key,metadata[key])
         assertEquals(second,request.episode)
         assertEquals(450.0,request.startPosition!!,0.0)
+    }
+
+    @Test fun combinedFileCannotBecomeACatalogueSourceAfterResumeOrLibraryPointerRemoval() {
+        val file = libraryPlaybackRequest(request, version, playback)
+        val resumed = SourceSwitchRules.resumeAt(file, 900_000)
+        for (candidate in listOf(file, resumed, resumed.copy(libraryVersion = null), resumed.copy(library = null, libraryVersion = null))) {
+            assertTrue(candidate.fileOnly)
+            assertNull(catalogueSourceRequest(candidate))
+            assertNull(candidate.episode)
+            assertNull(candidate.nextEpisode)
+            assertEquals(playback.streamPath, candidate.progressItemId)
+        }
+        // Existing single-episode library handoff still preserves its episode and resume identity.
+        val ordinary = request.copy(libraryVersion = version)
+        val handoff = catalogueSourceRequest(ordinary)!!
+        assertNull(handoff.libraryVersion)
+        assertFalse(handoff.fileOnly)
+        assertEquals(second, handoff.episode)
+        assertEquals("episode-2", handoff.progressItemId)
+        assertEquals(450.0, handoff.startPosition!!, 0.0)
     }
 
     @Test fun decliningTheFileNeverReturnsAnEpisodeOrAPlayableRequest() = runTest {

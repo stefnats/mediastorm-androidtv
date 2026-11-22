@@ -43,6 +43,8 @@ data class PlaybackRequest(
     val episodeOrderKnown: Boolean = false,
     /** Intent survives Up Next; a resolved preference or server capability never does. */
     val sourceSelection: SourceSelection = SourceSelection.AUTOMATIC,
+    /** Explicit combined-file progress may not be carried onto an unrelated catalogue source. */
+    val fileOnly: Boolean = false,
 ) {
     enum class SourceSelection { AUTOMATIC, SEARCH_ONLY }
 

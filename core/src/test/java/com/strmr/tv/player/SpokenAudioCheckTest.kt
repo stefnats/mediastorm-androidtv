@@ -1,6 +1,5 @@
 package com.strmr.tv.player
 
-import androidx.media3.common.Format
 import com.strmr.tv.api.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.test.*
@@ -131,11 +130,12 @@ class SpokenAudioCheckTest {
 
     @Test fun currentAudioMappingRequiresBothContainerNumberAndContainerOrder() {
         val options = ReleaseReportOptions("original", audioTracks = listOf(ProbedAudioTrack(2, "eng", "aac"), ProbedAudioTrack(4, "spa", "aac")))
-        val format = Format.Builder().setId("3").setLanguage("eng").build()
-        assertEquals(2, spokenAudioContainerIndex(format, 0, options))
-        assertNull(spokenAudioContainerIndex(format, 1, options))
-        assertNull(spokenAudioContainerIndex(format.buildUpon().setId("audio-group").build(), 0, options))
-        assertNull(spokenAudioContainerIndex(format.buildUpon().setLanguage("spa").build(), 0, options))
+        val formatId = "3"
+        val language = "eng"
+        assertEquals(2, spokenAudioContainerIndex(formatId, language, 0, options))
+        assertNull(spokenAudioContainerIndex(formatId, language, 1, options))
+        assertNull(spokenAudioContainerIndex("audio-group", language, 0, options))
+        assertNull(spokenAudioContainerIndex(formatId, "spa", 0, options))
         assertNull(spokenAudioContainerIndex(null, 0, options))
     }
 }

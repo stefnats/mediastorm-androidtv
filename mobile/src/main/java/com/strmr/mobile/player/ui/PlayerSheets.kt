@@ -22,6 +22,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
+import com.strmr.tv.player.rememberPlaybackMenuReady
 import com.strmr.tv.player.releaseReportChoices
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -56,7 +57,9 @@ fun PlayerSheetHost(
     aspectMode: AspectMode,
     onAspectMode: (AspectMode) -> Unit,
 ) {
+    val menuReady = rememberPlaybackMenuReady(controller, ui.sheet)
     val sheet = ui.sheet ?: return
+    if (!menuReady) return
     val live = controller.session.isLive
     val done = { ui.sheet = null }
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = sheet != PlayerSheet.SOURCES)

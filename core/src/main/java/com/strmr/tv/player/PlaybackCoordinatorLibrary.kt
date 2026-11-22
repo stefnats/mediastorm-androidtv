@@ -31,7 +31,7 @@ internal fun libraryPlaybackRequest(request: PlaybackRequest, version: LibraryVe
             titleId = playback.streamPath, name = version.item.fileName?.takeIf { it.isNotBlank() } ?: "${request.title.name} (combined episode file)",
             isMovie = true, tmdbId = null, imdbId = null, tvdbId = null, fromLibrary = true,
         ),
-        episode = null, start = null, following = emptyList(), episodeOrderKnown = false,
+        episode = null, start = null, following = emptyList(), episodeOrderKnown = false, fileOnly = true,
         library = com.strmr.tv.library.LibraryVersions(listOf(version), emptyMap()),
     )
 }

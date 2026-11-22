@@ -42,6 +42,7 @@ class AutomaticSpokenAudioTest {
     private class Gateway : ReleaseReportGateway {
         var current = true
         var optedIn = true
+        var optOutOnRefresh = false
         var available = true
         var checks = 0
         var optionsReads = 0
@@ -52,7 +53,7 @@ class AutomaticSpokenAudioTest {
         override suspend fun options(id: String): ReleaseReportOptions {
             optionsReads++
             return ReleaseReportOptions("original", audioLanguage = "eng", audioLanguageCheckAvailable = available,
-                autoCheckAudioLanguage = optedIn, audioTracks = listOf(ProbedAudioTrack(2, "eng", "aac")))
+                autoCheckAudioLanguage = optedIn && !(optOutOnRefresh && optionsReads > 1), audioTracks = listOf(ProbedAudioTrack(2, "eng", "aac")))
         }
         override suspend fun checkAudioLanguage(id: String, input: SpokenAudioInput): SpokenAudioReply {
             assertEquals("source", id); assertEquals(2, input.audioTrackIndex)
@@ -111,6 +112,60 @@ class AutomaticSpokenAudioTest {
             assertTrue(closing.isCompleted); assertEquals(0, offers)
             eligible = true; qualify(automatic); advanceUntilIdle(); assertEquals(1, gateway.checks)
         }
+    }
+
+    @Test fun refreshedOptOutPreventsAutomaticPostButKeepsAnExplicitButtonAvailable() = runTest {
+        val gateway = Gateway().apply { optOutOnRefresh = true }
+        val automatic = AutomaticSpokenAudio(this, { true }, { flow(gateway, this) }, { fail("Opted-out automatic result published") })
+        qualify(automatic); advanceUntilIdle()
+        assertEquals(2, gateway.optionsReads)
+        assertEquals(0, gateway.checks)
+        automatic.cancelAndJoin()
+        val explicit = flow(gateway, this)
+        explicit.load()
+        assertFalse(explicit.state.value.options!!.autoCheckAudioLanguage)
+        assertTrue(explicit.canCheckAudioLanguage)
+        explicit.checkAudioLanguage(); advanceUntilIdle()
+        assertEquals(1, gateway.checks)
+        explicit.close()
+    }
+
+    @Test fun menuLeaseRetiresAndJoinsTheActualCheckBeforeCompetingControlsProceed() = runTest {
+        val gateway = Gateway().apply { gate = CompletableDeferred() }
+        var offers = 0
+        lateinit var automatic: AutomaticSpokenAudio
+        val menus = PlaybackMenuGate { automatic.cancel() }
+        automatic = AutomaticSpokenAudio(this, { !menus.active }, { flow(gateway, this) }, { offers++ })
+        qualify(automatic); runCurrent(); assertEquals(1, gateway.checks)
+        val lease = menus.acquire()
+        val ready = launch { automatic.cancelAndJoin() }
+        runCurrent(); assertFalse(ready.isCompleted)
+        gateway.gate!!.complete(Unit); advanceUntilIdle()
+        assertTrue(ready.isCompleted); assertEquals(0, offers)
+        assertTrue(menus.active)
+        lease.close()
+        qualify(automatic); advanceUntilIdle()
+        assertEquals(1, gateway.checks) // A canceled attempt is still spent for this active source.
+    }
+
+    @Test fun nestedAndRetiredMenusCannotClearAnotherLeaseOrReuseAnOldObservationWindow() = runTest {
+        val gateway = Gateway()
+        lateinit var automatic: AutomaticSpokenAudio
+        val menus = PlaybackMenuGate { automatic.cancel() }
+        automatic = AutomaticSpokenAudio(this, { !menus.active }, { flow(gateway, this) }, { })
+        for (second in 0..20) automatic.observe(sample(second * 1_000L))
+        val audio = menus.acquire()
+        val sources = menus.acquire()
+        audio.close(); audio.close()
+        assertTrue(menus.active)
+        for (second in 21..60) automatic.observe(sample(second * 1_000L))
+        runCurrent(); assertEquals(0, gateway.optionsReads)
+        sources.close(); assertFalse(menus.active)
+        for (second in 61..105) automatic.observe(sample(second * 1_000L))
+        runCurrent(); assertEquals(0, gateway.checks)
+        automatic.observe(sample(106_000)); advanceUntilIdle()
+        assertEquals(1, gateway.checks)
+        automatic.cancelAndJoin()
     }
 
     @Test fun languageSuggestionWaitsForExplicitReviewWithoutLoadingOrPreparing() = runTest {

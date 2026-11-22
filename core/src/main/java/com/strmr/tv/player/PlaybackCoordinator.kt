@@ -110,8 +110,13 @@ object PlaybackCoordinator {
         val startedNanos = PlaybackStartupTiming.now()
         val expected=expectedContext
         if(expected!=ProfileDataContext.current) { startup?.finish(StartupOutcome.OWNER_LOST); return }
-        // A stream picked over a library copy (Switch Source) is no longer that copy.
-        begin(request.copy(libraryVersion = null), "Preparing…", carried = carried, expectedContext=expected, startedNanos=startedNanos,
+        // A combined file must retain its own progress; it has no verified episode offsets.
+        val selectedRequest = catalogueSourceRequest(request) ?: run {
+            startup?.finish(StartupOutcome.NOT_STARTED)
+            return
+        }
+        // A stream picked over an ordinary library copy is no longer that copy.
+        begin(selectedRequest, "Preparing…", carried = carried, expectedContext=expected, startedNanos=startedNanos,
             input=startupInput(prepared, resolved != null), startup = startup, resolve = {
             if (prepared != null) {
                 return@begin ResolvedStream(requireNotNull(prepared.streamPath), prepared.trackSelection, prepared.displayName,
@@ -138,7 +143,7 @@ object PlaybackCoordinator {
         targetMs: Long, carried: CarriedTracks, speed: Float, recovery: Boolean): PlayerSession {
         val owner = requireNotNull(original.ownership)
         return owner.use {
-            check(pending === original && original.canOpenPlayer() && original.reportsProgress &&
+            check(!original.request.fileOnly && pending === original && original.canOpenPlayer() && original.reportsProgress &&
                 !original.isLive && !original.localFile && original.recordingDerived == null)
             require(status.status == "ready" && status.prequeueId.isNotBlank() && !status.streamPath.isNullOrBlank() && targetMs >= 0)
             val path = requireNotNull(status.streamPath)

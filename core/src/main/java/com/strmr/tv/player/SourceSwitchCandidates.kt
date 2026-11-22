@@ -28,7 +28,9 @@ class SourceSwitchCandidates(private val controller: PlayerController) {
 
     /** Searches, then polls pending health until complete; run in the menu's effect. */
     suspend fun load() {
-        if(controller.vodDenied.value!=null)return
+        if(controller.vodDenied.value!=null || controller.request.fileOnly)return
+        controller.awaitAutomaticAudioRetirement()
+        if (!controller.canUsePlayerAux() || controller.request.fileOnly) return
         val request = controller.request
         val query = SourceSwitchRules.query(request)
         var attempt=com.strmr.tv.api.VodDenialEvents.begin(request.title.titleId,controller.dataContext)
@@ -61,6 +63,7 @@ class SourceSwitchCandidates(private val controller: PlayerController) {
 
     /** The menu's rows; picking the playing one just closes the menu. */
     fun choices(onDone: () -> Unit): List<MenuChoice> {
+        if (controller.request.fileOnly) return emptyList()
         val list = results
         return buildList {
             // The playing release heads the list when the search doesn't return it (as Expo keeps it in its candidates).
