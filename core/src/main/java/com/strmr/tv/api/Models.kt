@@ -31,6 +31,9 @@ data class Profile(
     val kidsMode: String? = null,
     val kidsAllowedLists: List<String>? = null,
     @kotlinx.serialization.Transient val offlineVerification:ProfileReadVerification?=null,
+    val kidsMaxRating: String? = null,
+    val kidsMaxMovieRating: String? = null,
+    val kidsMaxTVRating: String? = null,
 ) {
     val offlineAdultVerified get()=isKidsProfile==false && offlineVerification?.isCurrent(id)==true
     val requiresPin get() = hasPin == true

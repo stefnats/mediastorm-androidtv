@@ -4,6 +4,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Dashboard
@@ -30,8 +33,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.strmr.mobile.ui.onboarding.ProfileAvatar
+import com.strmr.tv.api.kidsAgeProfile
 import com.strmr.tv.app.AppSession
 import com.strmr.tv.auth.ServerAddress
 import com.strmr.tv.ui.settings.BadgeSettings
@@ -53,6 +58,48 @@ fun SettingsScreen(asPage: Boolean) {
     val server by session.serverUrl.collectAsState()
     val remote by session.isRemote.collectAsState()
     val scope = rememberCoroutineScope()
+    val ageContext = com.strmr.tv.library.ProfileDataContext.current
+    var ageRefresh by remember(profile?.id, server, ageContext) { mutableStateOf(0) }
+    var ageSummary by remember(profile?.id, server, ageContext) { mutableStateOf<com.strmr.tv.api.KidsAgeSummary?>(null) }
+    var ageLoading by remember(profile?.id, server, ageContext) { mutableStateOf(true) }
+    var ageError by remember(profile?.id, server, ageContext) { mutableStateOf<String?>(null) }
+    var showingAgeRules by remember(profile?.id, server, ageContext) { mutableStateOf(false) }
+    val ageEditor = com.strmr.tv.api.kidsAgeEditorUrl(server, profile?.id.orEmpty(), remote)
+    val ageAndroidContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(profile?.id, server, ageContext, ageRefresh) {
+        ageSummary = null
+        ageError = null
+        ageLoading = true
+        val selected = profile?.id
+        if (selected == null) { ageLoading = false; return@LaunchedEffect }
+        try {
+            val current = com.strmr.tv.api.ApiClient.kidsAgeProfile(selected, ageContext)
+            com.strmr.tv.library.ProfileDataContext.requireCurrent(ageContext)
+            ageSummary = com.strmr.tv.api.kidsAgeSummary(current)
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            if (com.strmr.tv.library.ProfileDataContext.current == ageContext) ageError = "Current rules could not be read. Refresh or open the server Web UI."
+        } finally {
+            if (com.strmr.tv.library.ProfileDataContext.current == ageContext) ageLoading = false
+        }
+    }
+    val ageMessage = (if (ageLoading) "Loading current profile rules…" else ageError ?: ageSummary?.let { it.headline + "\n\n" + it.detail } ?: "Rule unavailable.") +
+        "\n\nChanges require the existing parent confirmation in the server Web UI. Sign in there separately, then return and select Refresh." +
+        if (ageEditor != null) "\n\n$ageEditor" else "\n\nOpen the server Web UI on a device connected to the server. The app's remote link cannot open this page in a browser."
+    if (showingAgeRules) {
+        AlertDialog(onDismissRequest = { showingAgeRules = false }, title = { Text("Child age rules") },
+            text = { Text(ageMessage, Modifier
+                .heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.4f).dp)
+                .verticalScroll(rememberScrollState())) },
+            confirmButton = { Column {
+                if (!ageLoading) TextButton(onClick = { ageRefresh++ }) { Text("Refresh") }
+                if (ageEditor != null) TextButton(onClick = {
+                    runCatching { ageAndroidContext.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(ageEditor.toString()))) }
+                        .onFailure { ageError = "No browser is available. Open the address below on another device." }
+                }) { Text("Edit in server Web UI") }
+            } }, dismissButton = { TextButton(onClick = { showingAgeRules = false }) { Text("Close") } })
+    }
     var confirmingSignOut by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { runCatching { loadTrackDefaults() } }
     LaunchedEffect(Unit) { runCatching { SpoilerSettings.refresh() } }
@@ -76,6 +123,8 @@ fun SettingsScreen(asPage: Boolean) {
                 SettingsRow("Switch Profile") { scope.launch { session.switchProfile() } }
                 RowDivider()
                 SettingsRow("Starting interests", "Saved for this profile") { tasteSetup() }
+                RowDivider()
+                SettingsRow("Child age rules", if (ageLoading) "Loading current rules…" else ageError ?: ageSummary?.headline ?: "Unavailable") { showingAgeRules = true }
             }
         }
         SettingsSection("Preferences", "Stored on this device. Choices left at Default follow the server's settings for this profile.") {
