@@ -59,7 +59,8 @@ class ListGridModel(
         get() = optionState
         set(value) {
             if (!isCurrent) return
-            val next = value.canonical() ?: return
+            val canonical = value.canonical() ?: return
+            val next = if (shown.storedMediaEligible(query)) canonical else canonical.copy(storedMedia = StoredMediaFilters())
             if (next == optionState) return
             optionState = next; selection++; invalidateRows()
         }
@@ -111,6 +112,8 @@ class ListGridModel(
     fun openSavedPublicList(producer: Job, selected: () -> Boolean): BrowseList.TMDBPublicListCached? =
         if (!canOpenSavedPublicList) null else BrowseList.TMDBPublicListCached.open(list, query, dataContext, producer, selected, clientIdentity)
 
+    private var mediaSupport by mutableStateOf(false)
+    val storedMediaFilterSupported get() = isCurrent && shown.storedMediaEligible(query) && mediaSupport
     private var languageSupport by mutableStateOf(false)
     private var hiddenLegacyMode: Boolean? = null
     val originalLanguageFilterSupported get() = isCurrent && shown.originalLanguageEligible && languageSupport
@@ -152,7 +155,7 @@ class ListGridModel(
         scope.launch {
             ProfileDataContext.changes.collect {
                 if (!isCurrent) {
-                    invalidateRows(); languageSupport = false; genres = emptyList(); letters = emptyList()
+                    invalidateRows(); mediaSupport = false; languageSupport = false; genres = emptyList(); letters = emptyList()
                     loadError = "Profile changed. Reopen this list."
                 }
             }
@@ -275,12 +278,14 @@ class ListGridModel(
             if (hiddenLegacyMode != null && hiddenLegacyMode != mode) throw ManagementPageFailure()
             hiddenLegacyMode = mode
         }
+        if (read.options.storedMedia.active && (!read.list.storedMediaEligible(extra) || !page.storedMediaFilterSupported || page.storedMediaFilterBasis != StoredMediaFilters.BASIS)) throw StoredMediaFilterUnavailable()
         return page
     }
+    private class StoredMediaFilterUnavailable : Exception("This server cannot apply saved library media filters. Clear the media filters or reload this list.")
     private class LanguageFilterUnavailable : Exception("This server cannot apply the original language filter. Clear the filter or reload this list.")
     private fun failed(read: Read, error: Exception) {
         if (!current(read)) return
-        if (error is LanguageFilterUnavailable || error is ManagementPageFailure || read.list == BrowseList.Hidden || read.list == BrowseList.LovedStored || read.list is BrowseList.CollectionCached || read.list is BrowseList.ContinueWatchingCached || read.list is BrowseList.RecentlyWatchedCached || read.list is BrowseList.PopularOnServerCached || read.list is BrowseList.SimilarCached || read.list is BrowseList.TMDBPublicListCached) {
+        if (error is StoredMediaFilterUnavailable || error is LanguageFilterUnavailable || error is ManagementPageFailure || read.list == BrowseList.Hidden || read.list == BrowseList.LovedStored || read.list is BrowseList.CollectionCached || read.list is BrowseList.ContinueWatchingCached || read.list is BrowseList.RecentlyWatchedCached || read.list is BrowseList.PopularOnServerCached || read.list is BrowseList.SimilarCached || read.list is BrowseList.TMDBPublicListCached) {
             if (read.list is BrowseList.SimilarCached || read.list is BrowseList.TMDBPublicListCached) invalidateRows()
             // Preserve selected intent and its clear controls; never replace it with an unfiltered page.
             entries = emptyList(); fetched = 0; total = null; blockedGeneration = generation
@@ -316,6 +321,7 @@ class ListGridModel(
                 catch (error: Exception) { failed(requested, error) }
             }
             if (fetched == 0) { genres = page.genres; letters = page.letters }
+            mediaSupport = requested.list.storedMediaEligible(query) && page.storedMediaFilterSupported
             languageSupport = requested.list.originalLanguageEligible && page.originalLanguageFilterSupported
             fetched += page.entries.size
             val seen = entries.map { HomeCard.from(it).id }.toMutableSet()
@@ -352,6 +358,7 @@ class ListGridModel(
             val seen = mutableSetOf<String>()
             publishedRatingVersion = requested.ratingVersion ?: publishedRatingVersion
             entries = result.filter { seen.add(HomeCard.from(it).id) }; fetched = result.size; total = size
+            mediaSupport = requested.list.storedMediaEligible(query) && first?.storedMediaFilterSupported == true
             genres = first?.genres.orEmpty(); letters = first?.letters.orEmpty(); languageSupport = requested.list.originalLanguageEligible && first?.originalLanguageFilterSupported == true
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) { failed(requested, error) }

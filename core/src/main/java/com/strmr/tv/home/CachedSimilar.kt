@@ -61,7 +61,7 @@ internal fun decodeCachedSimilarPage(raw: String, list: BrowseList.SimilarCached
         if (!Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2})").matches(raw)) throw ManagementPageFailure()
         return java.time.OffsetDateTime.parse(raw).toInstant().toEpochMilli()
     }
-    val root = obj(ApiJson.parseToJsonElement(raw), setOf("source", "items", "total", "alphabetBuckets", "originalLanguageFilterSupported", "similar"))
+    val root = obj(ApiJson.parseToJsonElement(raw), setOf("source", "items", "total", "alphabetBuckets", "originalLanguageFilterSupported", "storedMediaFilterSupported", "storedMediaFilterBasis", "similar"))
     if (text(root["source"]) != "similar-cached" || root["originalLanguageFilterSupported"] != JsonPrimitive(true)) throw ManagementPageFailure()
     val total = number(root["total"])
     val rows = root["items"] as? JsonArray ?: throw ManagementPageFailure()
@@ -95,5 +95,5 @@ internal fun decodeCachedSimilarPage(raw: String, list: BrowseList.SimilarCached
             if (list.distinct().size != list.size || list.any { it != "#" && !Regex("[A-Z]").matches(it) }) throw ManagementPageFailure()
         }
     }.orEmpty()
-    BrowsePage(entries, total.toInt(), letters = letters, originalLanguageFilterSupported = true, similar = observation)
+    BrowsePage(entries, total.toInt(), letters = letters, originalLanguageFilterSupported = true, similar = observation).withStoredMediaCapability(root)
 } catch (_: Exception) { throw ManagementPageFailure() }

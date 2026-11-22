@@ -78,7 +78,7 @@ internal fun decodeRecentActivityPage(raw: String, limit: Int, offset: Int): Bro
     fun text(value: JsonElement?): String = (value as? JsonPrimitive)?.takeIf { it.isString }?.content ?: throw ManagementPageFailure()
     fun number(value: JsonElement?): Long = (value as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull ?: throw ManagementPageFailure()
     fun boolean(value: JsonElement?): Boolean = (value as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull ?: throw ManagementPageFailure()
-    val root = obj(ApiJson.parseToJsonElement(raw), setOf("source", "items", "total", "alphabetBuckets", "originalLanguageFilterSupported"))
+    val root = obj(ApiJson.parseToJsonElement(raw), setOf("source", "items", "total", "alphabetBuckets", "originalLanguageFilterSupported", "storedMediaFilterSupported", "storedMediaFilterBasis"))
     if (text(root["source"]) != "recently-watched-cached" || !boolean(root["originalLanguageFilterSupported"])) throw ManagementPageFailure()
     val total = number(root["total"])
     val rows = root["items"] as? JsonArray ?: throw ManagementPageFailure()
@@ -95,7 +95,7 @@ internal fun decodeRecentActivityPage(raw: String, limit: Int, offset: Int): Bro
             if (list.distinct().size != list.size || list.any { it != "#" && !Regex("[A-Z]").matches(it) }) throw ManagementPageFailure()
         }
     }.orEmpty()
-    BrowsePage(entries, total.toInt(), letters = letters, originalLanguageFilterSupported = true)
+    BrowsePage(entries, total.toInt(), letters = letters, originalLanguageFilterSupported = true).withStoredMediaCapability(root)
 } catch (_: Exception) { throw ManagementPageFailure() }
 
 /** The two activity APIs expose only primary-bound stored title fields. */
@@ -207,7 +207,7 @@ internal fun decodePopularActivityPage(raw: String, limit: Int, offset: Int): Br
     } ?: throw ManagementPageFailure()
     fun text(value: JsonElement?): String = (value as? JsonPrimitive)?.takeIf { it.isString }?.content ?: throw ManagementPageFailure()
     fun number(value: JsonElement?): Long = (value as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull ?: throw ManagementPageFailure()
-    val root = obj(ApiJson.parseToJsonElement(raw), setOf("source", "items", "total", "alphabetBuckets", "originalLanguageFilterSupported"))
+    val root = obj(ApiJson.parseToJsonElement(raw), setOf("source", "items", "total", "alphabetBuckets", "originalLanguageFilterSupported", "storedMediaFilterSupported", "storedMediaFilterBasis"))
     if (text(root["source"]) != "popular-on-server-cached" || root["originalLanguageFilterSupported"] != JsonPrimitive(true)) throw ManagementPageFailure()
     val total = number(root["total"])
     val rows = root["items"] as? JsonArray ?: throw ManagementPageFailure()
@@ -227,5 +227,5 @@ internal fun decodePopularActivityPage(raw: String, limit: Int, offset: Int): Br
             if (list.distinct().size != list.size || list.any { it != "#" && !Regex("[A-Z]").matches(it) }) throw ManagementPageFailure()
         }
     }.orEmpty()
-    BrowsePage(entries, total.toInt(), letters = letters, originalLanguageFilterSupported = true)
+    BrowsePage(entries, total.toInt(), letters = letters, originalLanguageFilterSupported = true).withStoredMediaCapability(root)
 } catch (_: Exception) { throw ManagementPageFailure() }

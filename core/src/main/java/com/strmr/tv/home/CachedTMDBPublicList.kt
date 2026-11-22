@@ -99,7 +99,7 @@ internal fun decodeCachedTMDBPublicListPage(raw: String, list: BrowseList.TMDBPu
         if (!Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2})").matches(raw)) throw ManagementPageFailure()
         return java.time.OffsetDateTime.parse(raw).toInstant().toEpochMilli()
     }
-    val root = obj(ApiJson.parseToJsonElement(raw), setOf("source", "items", "total", "alphabetBuckets", "originalLanguageFilterSupported", "publicList"))
+    val root = obj(ApiJson.parseToJsonElement(raw), setOf("source", "items", "total", "alphabetBuckets", "originalLanguageFilterSupported", "storedMediaFilterSupported", "storedMediaFilterBasis", "publicList"))
     if (text(root["source"]) != "tmdb-public-list-cached" || root["originalLanguageFilterSupported"] != JsonPrimitive(true)) throw ManagementPageFailure()
     val total = number(root["total"])
     val rows = root["items"] as? JsonArray ?: throw ManagementPageFailure()
@@ -133,5 +133,5 @@ internal fun decodeCachedTMDBPublicListPage(raw: String, list: BrowseList.TMDBPu
             if (list.distinct().size != list.size || list.any { it != "#" && !Regex("[A-Z]").matches(it) }) throw ManagementPageFailure()
         }
     }.orEmpty()
-    BrowsePage(entries, total.toInt(), letters = letters, originalLanguageFilterSupported = true, publicList = observation)
+    BrowsePage(entries, total.toInt(), letters = letters, originalLanguageFilterSupported = true, publicList = observation).withStoredMediaCapability(root)
 } catch (_: Exception) { throw ManagementPageFailure() }

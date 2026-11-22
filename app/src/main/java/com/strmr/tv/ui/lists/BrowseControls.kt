@@ -27,6 +27,8 @@ import androidx.tv.material3.FilterChip
 import androidx.tv.material3.Icon
 import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
+import com.strmr.tv.home.StoredMediaFilterMenu
+import com.strmr.tv.home.StoredMediaFilters
 import com.strmr.tv.home.BrowseOriginalLanguageMenu
 import com.strmr.tv.home.BrowseKind
 import com.strmr.tv.home.BrowseList
@@ -41,7 +43,7 @@ import com.strmr.tv.ui.DialogChoice
 import com.strmr.tv.ui.MultiPickerDialog
 import com.strmr.tv.ui.PickerDialog
 
-private enum class Panel { SORT, RATING, KIND, WATCH, GENRES, LANGUAGE, PART, MANAGE }
+private enum class Panel { SORT, RATING, KIND, WATCH, GENRES, LANGUAGE, MEDIA, PART, MANAGE }
 
 /**
  * Sort, filter and random-pick buttons over a list grid; each shows its current choice and
@@ -62,8 +64,10 @@ fun BrowseControls(
     onRename: (() -> Unit)?,
     onDelete: (() -> Unit)?,
     originalLanguageFilterSupported: Boolean = false,
+    storedMediaFilterSupported: Boolean = false,
 ) {
     var panel by remember { mutableStateOf<Panel?>(null) }
+    var mediaField by remember { mutableStateOf<StoredMediaFilterMenu.Field?>(null) }
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         if (parts.size > 1) Control(parts.getOrElse(part) { "" }) { panel = Panel.PART }
         if (list.sorts.isNotEmpty() && (list != BrowseList.Hidden && list != BrowseList.LovedStored && list !is BrowseList.CollectionCached && list !is BrowseList.ContinueWatchingCached && list !is BrowseList.RecentlyWatchedCached && list !is BrowseList.PopularOnServerCached && list !is BrowseList.SimilarCached && list !is BrowseList.TMDBPublicListCached || originalLanguageFilterSupported)) {
@@ -81,6 +85,7 @@ fun BrowseControls(
             }
         }
         if (originalLanguageFilterSupported) Control(BrowseOriginalLanguageMenu.label(options)) { panel = Panel.LANGUAGE }
+        if (storedMediaFilterSupported) Control(if (options.storedMedia.active) "Saved media: filtered" else "Saved media filters") { mediaField = null; panel = Panel.MEDIA }
         onRandom?.let { random ->
             OutlinedButton(onClick = random) {
                 if (picking) CircularProgressIndicator(Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
@@ -117,6 +122,22 @@ fun BrowseControls(
             val codes = BrowseOriginalLanguageMenu.codes(options)
             MultiPickerDialog("Original language (catalogue, max 32)", BrowseOriginalLanguageMenu.labels(codes), BrowseOriginalLanguageMenu.selected(options, codes),
                 onToggle = { onOptions(BrowseOriginalLanguageMenu.toggle(options, codes, it)) }, onDismiss = { panel = null })
+        }
+        Panel.MEDIA -> if (storedMediaFilterSupported) {
+            val field = mediaField
+            if (field == null) ChoiceDialog(
+                title = "Saved library versions",
+                message = "One matching file is enough, including a series episode. These stored facts do not guarantee a future playback source.",
+                dismissOnChoice = false,
+                choices = StoredMediaFilterMenu.Field.entries.map { f -> DialogChoice(StoredMediaFilterMenu.label(f, options.storedMedia)) { mediaField = f } } +
+                    DialogChoice("Clear media filters") { onOptions(options.copy(storedMedia = StoredMediaFilters())); panel = null },
+                onDismiss = { panel = null })
+            else {
+                val choices = StoredMediaFilterMenu.choices(field, options.storedMedia)
+                PickerDialog(field.label, choices.map { it.label }, choices.indexOfFirst { it.value == StoredMediaFilterMenu.value(field, options.storedMedia) },
+                    onPick = { onOptions(options.copy(storedMedia = StoredMediaFilterMenu.choose(field, choices[it].value, options.storedMedia))); mediaField = null },
+                    onDismiss = { mediaField = null })
+            }
         }
         Panel.PART -> PickerDialog("List", parts, part, onPick = onPart, onDismiss = { panel = null })
         Panel.MANAGE -> ChoiceDialog(

@@ -37,6 +37,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.strmr.tv.home.BrowseOriginalLanguageMenu
+import com.strmr.tv.home.StoredMediaFilterMenu
+import com.strmr.tv.home.StoredMediaFilters
+import com.strmr.tv.home.storedMediaEligible
 import com.strmr.tv.home.BrowseKind
 import com.strmr.tv.home.BrowseList
 import com.strmr.tv.home.BrowseOptions
@@ -49,7 +52,7 @@ import com.strmr.tv.ui.lists.ListGridModel
 
 /** Whether a list shows the filter chip row at all. */
 fun BrowseList.hasChips(): Boolean =
-    filters || this == BrowseList.Hidden || this == BrowseList.LovedStored || this is BrowseList.CollectionCached || this is BrowseList.ContinueWatchingCached || this is BrowseList.RecentlyWatchedCached || this is BrowseList.PopularOnServerCached || this is BrowseList.SimilarCached || this is BrowseList.TMDBPublicListCached || this is BrowseList.Library || (this as? BrowseList.Service)?.parts.orEmpty().size > 1
+    storedMediaEligible() || filters || this == BrowseList.Hidden || this == BrowseList.LovedStored || this is BrowseList.CollectionCached || this is BrowseList.ContinueWatchingCached || this is BrowseList.RecentlyWatchedCached || this is BrowseList.PopularOnServerCached || this is BrowseList.SimilarCached || this is BrowseList.TMDBPublicListCached || this is BrowseList.Library || (this as? BrowseList.Service)?.parts.orEmpty().size > 1
 
 /**
  * The list's filters as chips, each opening a menu: a streaming service's lists, the rating
@@ -61,7 +64,7 @@ fun BrowseFilterChips(model: ListGridModel, modifier: Modifier = Modifier) {
     val list = model.list
     val options = model.options
     val set: (BrowseOptions) -> Unit = { model.options = it }
-    if (!list.filters && list !is BrowseList.Service && !model.originalLanguageFilterSupported) return
+    if (!list.filters && list !is BrowseList.Service && !model.originalLanguageFilterSupported && !model.storedMediaFilterSupported) return
     Row(
         modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -90,6 +93,18 @@ fun BrowseFilterChips(model: ListGridModel, modifier: Modifier = Modifier) {
             if (model.genres.isNotEmpty()) GenreChip(model.genres, options.genres) { set(options.copy(genres = it)) }
         }
         if (model.originalLanguageFilterSupported) OriginalLanguageChip(options, set)
+        if (model.storedMediaFilterSupported) {
+            Text("Saved versions · at least one file", Modifier.align(Alignment.CenterVertically))
+            StoredMediaFilterMenu.Field.entries.forEach { field ->
+                val choices = remember(field, options.storedMedia) { StoredMediaFilterMenu.choices(field, options.storedMedia) }
+                val value = StoredMediaFilterMenu.value(field, options.storedMedia)
+                MenuChip(StoredMediaFilterMenu.label(field, options.storedMedia), options.storedMedia.active,
+                    choices.map { it.label }, choices.indexOfFirst { it.value == value }) {
+                    set(options.copy(storedMedia = StoredMediaFilterMenu.choose(field, choices[it].value, options.storedMedia)))
+                }
+            }
+            if (options.storedMedia.active) TextButton(onClick = { set(options.copy(storedMedia = StoredMediaFilters())) }) { Text("Clear media filters") }
+        }
     }
 }
 

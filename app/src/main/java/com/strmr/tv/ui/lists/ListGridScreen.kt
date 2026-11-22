@@ -148,13 +148,14 @@ fun ListGridScreen(list: BrowseList, query: Map<String, String> = emptyMap(), cu
                         val parts = (list as? BrowseList.Service)?.parts.orEmpty()
                         // The card size button ends the controls row; a list without controls has it alone.
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            if (list.sorts.isNotEmpty() || list.filters || list.offersRandom || parts.size > 1) {
+                            if (list.sorts.isNotEmpty() || list.filters || list.offersRandom || parts.size > 1 || model.storedMediaFilterSupported) {
                                 BrowseControls(
                                     list, options, { model.options = it }, model.genres, parts, model.part, { model.part = it }, model.picking,
                                     onRandom = if (list.offersRandom) ::pickRandom else null,
                                     onRename = if (manageable) { { if (operations.isCurrent) renaming = true } } else null,
                                     onDelete = if (manageable) { { if (operations.isCurrent) deleting = true } } else null,
                                     originalLanguageFilterSupported = model.originalLanguageFilterSupported,
+                                    storedMediaFilterSupported = model.storedMediaFilterSupported,
                                 )
                             }
                             if (list == BrowseList.ContinueWatching) androidx.tv.material3.OutlinedButton(onClick = {

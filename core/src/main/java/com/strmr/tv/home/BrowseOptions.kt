@@ -44,13 +44,14 @@ data class BrowseOptions(
     /** Catalogue metadata only; these do not describe a selected release's spoken audio. */
     val originalLanguages: Set<String> = emptySet(),
     val includeUnknownOriginalLanguage: Boolean = false,
+    val storedMedia: StoredMediaFilters = StoredMediaFilters(),
 ) {
     val originalLanguageActive: Boolean get() = originalLanguages.isNotEmpty() || includeUnknownOriginalLanguage
-    val isFiltered: Boolean get() = kind != null || watch != WatchFilter.ALL || genres.isNotEmpty() || originalLanguageActive
+    val isFiltered: Boolean get() = kind != null || watch != WatchFilter.ALL || genres.isNotEmpty() || originalLanguageActive || storedMedia.active
     fun canonical(): BrowseOptions? {
         val languages = originalLanguages.map { SourceFilterLanguages.canonical(it) ?: return null }.toSet()
         if (languages.size > 32) return null
-        return copy(genres = genres.toSet(), originalLanguages = languages)
+        return copy(genres = genres.toSet(), originalLanguages = languages, storedMedia = storedMedia.canonical() ?: return null)
     }
     val originalLanguageLabel: String get() = when {
         !originalLanguageActive -> "Any original language"
@@ -66,7 +67,8 @@ data class BrowseOptions(
         return if (sort != BrowseSort.NAME) next.copy(letter = null) else next
     }
 
-    fun query(list: BrowseList): Map<String, String> = buildMap {
+    fun query(list: BrowseList, extra: Map<String, String> = emptyMap()): Map<String, String> = buildMap {
+        if (list.storedMediaEligible(extra)) putAll(storedMedia.query())
         if (list is BrowseList.RecentlyWatchedCached || list is BrowseList.PopularOnServerCached || list is BrowseList.SimilarCached || list is BrowseList.TMDBPublicListCached) {
             require(watch == WatchFilter.ALL && genres.isEmpty() && ratingSource == RatingSource.IMDB && sort in list.sorts) { "Unsupported saved activity options" }
             if (sort != BrowseSort.DEFAULT || ascending) { put("sortBy", sort.value); put("sortDirection", if (ascending) "asc" else "desc") }

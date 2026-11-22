@@ -272,17 +272,21 @@ suspend fun ApiClient.browsePage(
     val raw = sendRaw("GET", path, query, timeoutMs = timeout, expectedContext = expectedContext)
     currentCoroutineContext().ensureActive()
     ProfileDataContext.requireCurrent(expectedContext)
-    return decodeBrowsePage(raw, list)
+    return decodeBrowsePage(raw, list, extra)
 
 }
 
 /** Additive malformed capability never discards the containing legacy page. */
-internal fun decodeBrowsePage(raw: String, list: BrowseList): BrowsePage {
+internal fun decodeBrowsePage(raw: String, list: BrowseList, extra: Map<String, String> = emptyMap()): BrowsePage {
     val root = ApiJson.parseToJsonElement(raw)
     val marker = ((root as? JsonObject)?.get("originalLanguageFilterSupported") as? JsonPrimitive)
     val supported = list.filters && marker?.isString == false && marker.booleanOrNull == true
+    val mediaMarker = ((root as? JsonObject)?.get("storedMediaFilterSupported") as? JsonPrimitive)
+    val mediaSupport = list.storedMediaEligible(extra) && mediaMarker?.isString == false && mediaMarker.booleanOrNull == true
+    val mediaBasis = ((root as? JsonObject)?.get("storedMediaFilterBasis") as? JsonPrimitive)?.takeIf { it.isString }?.content
     fun <T> page(value: DisplayListPage<T>, entry: (T) -> BrowseEntry) = BrowsePage(
-        value.items.map(entry), maxOf(if (supported) value.total else value.sourceTotal ?: value.total, value.items.size), value.genres.orEmpty(), value.alphabetBuckets.orEmpty(), supported,
+        value.items.map(entry), maxOf(if (supported || mediaSupport) value.total else value.sourceTotal ?: value.total, value.items.size), value.genres.orEmpty(), value.alphabetBuckets.orEmpty(), supported,
+        storedMediaFilterSupported = mediaSupport, storedMediaFilterBasis = mediaBasis,
     )
     return when {
         list == BrowseList.PermanentPrequeue -> page(ApiJson.decodeFromJsonElement<DisplayListPage<JsonElement>>(root)) { row ->
@@ -298,7 +302,7 @@ internal fun decodeBrowsePage(raw: String, list: BrowseList): BrowsePage {
 
 /** Actual display-list query builder shared with portable request-contract tests. */
 internal fun browseQuery(list: BrowseList, limit: Int, offset: Int, extra: Map<String, String> = emptyMap(), options: BrowseOptions? = null, phase: ShelfPhase? = null): MutableMap<String, String> =
-    (list.query + extra + options?.query(list).orEmpty()).toMutableMap().apply {
+    (list.query + extra + options?.query(list, extra).orEmpty()).toMutableMap().apply {
         put("limit", limit.toString()); put("offset", offset.toString())
         if (phase != null && list.loadsProgressively) putAll(phase.query)
     }
@@ -381,7 +385,7 @@ internal fun decodeHiddenManagementPage(raw: String): BrowsePage = try {
     val alphabet = root["alphabetBuckets"]?.takeUnless { it == JsonNull }?.let { value ->
         (value as? JsonArray ?: throw ManagementPageFailure()).map { (it as? JsonPrimitive)?.takeIf { it.isString }?.content ?: throw ManagementPageFailure() }
     }.orEmpty()
-    BrowsePage(items.map { BrowseEntry.ItemEntry(it) }, total, letters = alphabet, originalLanguageFilterSupported = true)
+    BrowsePage(items.map { BrowseEntry.ItemEntry(it) }, total, letters = alphabet, originalLanguageFilterSupported = true).withStoredMediaCapability(root)
 } catch (_: Exception) { throw ManagementPageFailure() }
 
 private fun decodeHiddenRows(value: JsonElement?): List<WatchlistItem> {
@@ -461,7 +465,7 @@ internal fun decodeStoredLovedPage(raw: String, limit: Int? = null, offset: Int 
     val alphabet = root["alphabetBuckets"]?.takeUnless { it == JsonNull }?.let { value ->
         (value as? JsonArray ?: throw ManagementPageFailure()).map(::text)
     }.orEmpty()
-    BrowsePage(entries, total, letters = alphabet, originalLanguageFilterSupported = true)
+    BrowsePage(entries, total, letters = alphabet, originalLanguageFilterSupported = true).withStoredMediaCapability(root)
 } catch (_: Exception) { throw ManagementPageFailure() }
 
 /** Local menu-only membership. A failed read is not a successful empty membership snapshot. */
@@ -618,7 +622,7 @@ internal fun decodeCachedCollectionPage(raw: String, expectedID: Int, limit: Int
         BrowseEntry.TitleEntry(Title(id, name, year = year, mediaType = kind))
     }
     val alphabet = root["alphabetBuckets"]?.takeUnless { it == JsonNull }?.let { (it as? JsonArray ?: throw ManagementPageFailure()).map(::text) }.orEmpty()
-    BrowsePage(entries, total, letters = alphabet, originalLanguageFilterSupported = true, collection = observed)
+    BrowsePage(entries, total, letters = alphabet, originalLanguageFilterSupported = true, collection = observed).withStoredMediaCapability(root)
 } catch (_: Exception) { throw ManagementPageFailure() }
 
 internal data class CachedWatchingRequest(val path: String, val query: Map<String,String>)
@@ -664,7 +668,7 @@ internal fun decodeCachedWatchingPage(raw: String, clock: com.strmr.tv.api.Obser
         optional(row,"airDateTimeUTC")?.let(::date)
         return CachedWatchingEpisode(season, episode, absolute, optional(row,"episodeId")?.let(::token), optional(row,"itemId")?.let(::token), optional(row,"tvdbId")?.let(::token), optional(row,"title"), optional(row,"airDate"), optional(row,"airDateTimeUTC"), numbering)
     }
-    val root = obj(ApiJson.parseToJsonElement(raw), setOf("source","items","total","alphabetBuckets","originalLanguageFilterSupported","pool"))
+    val root = obj(ApiJson.parseToJsonElement(raw), setOf("source","items","total","alphabetBuckets","originalLanguageFilterSupported","storedMediaFilterSupported","storedMediaFilterBasis","pool"))
     if (text(root["source"]) != "continue-watching-cached" || !bool(root["originalLanguageFilterSupported"])) throw ManagementPageFailure()
     val pool = obj(root["pool"], setOf("id","observedAt","expiresAt","complete"))
     val id = text(pool["id"]); val observed = text(pool["observedAt"]); val expires = text(pool["expiresAt"])
@@ -695,5 +699,5 @@ internal fun decodeCachedWatchingPage(raw: String, clock: com.strmr.tv.api.Obser
         BrowseEntry.CachedWatchingEntry(CachedWatchingItem(work,text(row["seriesTitle"]),kind,year,aliases.toMap(),updated,next,last,resume,percent("percentWatched"),percent("resumePercent")))
     }
     val alphabet = root["alphabetBuckets"]?.let { (it as? JsonArray ?: throw ManagementPageFailure()).map(::text) }.orEmpty()
-    BrowsePage(entries,total,letters=alphabet,originalLanguageFilterSupported=true,watching=observation)
+    BrowsePage(entries,total,letters=alphabet,originalLanguageFilterSupported=true,watching=observation).withStoredMediaCapability(root)
 } catch (_: Exception) { throw ManagementPageFailure() }

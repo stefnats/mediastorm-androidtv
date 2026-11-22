@@ -358,6 +358,8 @@ data class BrowsePage(val entries: List<BrowseEntry>, val total: Int, val genres
     val watching: CachedWatchingObservation? = null,
     val similar: CachedSimilarObservation? = null,
     val publicList: CachedTMDBPublicListObservation? = null,
+    val storedMediaFilterSupported: Boolean = false,
+    val storedMediaFilterBasis: String? = null,
 ) {
     /**
      * The list's size once [fetched] items have been read, this page's included. Servers return
