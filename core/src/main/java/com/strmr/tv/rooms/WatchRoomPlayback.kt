@@ -32,8 +32,10 @@ class WatchRoomPlayback(
     initial: WatchRoom,
     private val scope: CoroutineScope = MainScope(),
     private val now: () -> Instant = Instant::now,
+    private val monotonicNanos: () -> Long = System::nanoTime,
 ) {
     private var room = initial.checked()
+    private var receivedNanos = monotonicNanos()
     val roomId get() = room.id
     val request = WatchRoomTarget.request(initial)
     private var port: WatchRoomPlayerPort? = null
@@ -136,7 +138,7 @@ class WatchRoomPlayback(
             }
         }
     }
-    /** Already projected by the server; anchorUpdatedAt is deliberately not added again. */
+    /** Server projection plus local receipt age only; never reuse the remote anchor delta. */
     internal fun target(sample: RoomMediaState): Long? {
         if (!sample.seekable || sample.durationMs <= 0) {
             mutableNotice.value = "Waiting for a seekable copy…"
@@ -146,7 +148,13 @@ class WatchRoomPlayback(
             mutableNotice.value = "These copies have different durations. Leave the room to choose another edition."
             return null
         }
-        val position = roomMilliseconds(room.position)
+        val elapsed = if (room.status == "playing" && !room.waitingForReady)
+            (monotonicNanos() - receivedNanos).coerceAtLeast(0) else 0L
+        if (elapsed > 30_000_000_000L) {
+            mutableNotice.value = "The room state is old. Waiting for a current update…"
+            return null
+        }
+        val position = roomMilliseconds(room.position + elapsed / 1_000_000_000.0)
         if (position >= sample.durationMs) {
             mutableNotice.value = "The room position is outside this copy. Waiting to resync…"
             return null
@@ -202,7 +210,7 @@ class WatchRoomPlayback(
         check(value.id == room.id && value.itemId == room.itemId && value.params == room.params) {
             "The room's original title changed. Leave and join again."
         }
-        if (value.revision >= room.revision) room = value
+        if (value.revision >= room.revision) { room = value; receivedNanos = monotonicNanos() }
     }
     private fun fail(message: String) {
         if (closed) return
@@ -223,10 +231,8 @@ class WatchRoomPlayback(
             resolving?.cancelAndJoin()
             mutation?.join()
             finalProgress?.join()
-            if (gateway.current()) {
-                try { gateway.leave(room.id) }
-                catch (_: Exception) { mutableNotice.value = "Leaving the room was not confirmed. Refresh before retrying." }
-            }
+            try { gateway.cleanupKnown(room.id) }
+            catch (_: Exception) { mutableNotice.value = "Leaving the room was not confirmed. Refresh before retrying." }
         }.also { closing = it }
     }
 }

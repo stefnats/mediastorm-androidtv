@@ -38,7 +38,7 @@ class WatchRoomPlaybackTest {
         assertNull(request.libraryVersion); assertNull(request.start); assertTrue(request.following.isEmpty())
     }
     @Test fun sourceFailureNeverMarksReady() = runTest {
-        val api = FakeRooms(); val actor = WatchRoomPlayback(api, api.room, this)
+        val api = FakeRooms(); val actor = WatchRoomPlayback(api, api.room, this, monotonicNanos = { 0L })
         val source = launch { CompletableDeferred<Unit>().await() }
         actor.watchResolution(source); runCurrent()
         api.room = api.room.copy(status = "ended")
@@ -49,7 +49,7 @@ class WatchRoomPlaybackTest {
     }
     @Test fun initialAndRebufferStartWaitForReady() = runTest {
         val api = FakeRooms(); api.room = api.room.copy(waitingForReady = true)
-        val player = FakeRoomPlayer(); val actor = WatchRoomPlayback(api, api.room, this)
+        val player = FakeRoomPlayer(); val actor = WatchRoomPlayback(api, api.room, this, monotonicNanos = { 0L })
         actor.bind(player); runCurrent(); assertFalse(player.sample.playing)
         api.room = api.room.copy(waitingForReady = false, status = "playing")
         advanceTimeBy(2001); runCurrent(); assertTrue(player.sample.playing)
@@ -57,7 +57,7 @@ class WatchRoomPlaybackTest {
     }
     @Test fun remoteApplyNeverWritesState() = runTest {
         val api = FakeRooms(); api.room = api.room.copy(status = "playing")
-        val player = FakeRoomPlayer(); val actor = WatchRoomPlayback(api, api.room, this)
+        val player = FakeRoomPlayer(); val actor = WatchRoomPlayback(api, api.room, this, monotonicNanos = { 0L })
         actor.bind(player); runCurrent()
         assertEquals(40000L to true, player.applies.last())
         assertFalse(api.calls.contains("state")); actor.close().join()
@@ -65,27 +65,27 @@ class WatchRoomPlaybackTest {
     @Test fun outOfRangePausesWithoutClampOrEcho() = runTest {
         val api = FakeRooms(); api.room = api.room.copy(status = "playing")
         val player = FakeRoomPlayer(); player.end = 10000
-        val actor = WatchRoomPlayback(api, api.room, this)
+        val actor = WatchRoomPlayback(api, api.room, this, monotonicNanos = { 0L })
         actor.bind(player); runCurrent()
         assertTrue(player.applies.isEmpty()); assertFalse(player.sample.playing)
         assertFalse(api.calls.contains("state")); actor.close().join()
     }
     @Test fun userCommandCarriesExactRevision() = runTest {
         val api = FakeRooms(); val player = FakeRoomPlayer()
-        val actor = WatchRoomPlayback(api, api.room, this); actor.bind(player); runCurrent()
+        val actor = WatchRoomPlayback(api, api.room, this, monotonicNanos = { 0L }); actor.bind(player); runCurrent()
         actor.command(true, 45000); runCurrent()
         assertEquals(4L, api.lastRevision); assertEquals(45.0, api.room.position, 0.0)
         assertEquals(1, api.calls.count { it == "state" }); actor.close().join()
     }
     @Test fun conflictResyncNeverReplays() = runTest {
         val api = FakeRooms(); api.stateFailure = ApiError.Http(HttpFailure(409, "{}"))
-        val actor = WatchRoomPlayback(api, api.room, this); actor.bind(FakeRoomPlayer()); runCurrent()
+        val actor = WatchRoomPlayback(api, api.room, this, monotonicNanos = { 0L }); actor.bind(FakeRoomPlayer()); runCurrent()
         actor.command(true); runCurrent()
         assertEquals(1, api.calls.count { it == "state" })
         assertEquals(2, api.calls.count { it == "read" }); actor.close().join()
     }
     @Test fun pollHeartbeatBoundedAndJoined() = runTest {
-        val api = FakeRooms(); val actor = WatchRoomPlayback(api, api.room, this)
+        val api = FakeRooms(); val actor = WatchRoomPlayback(api, api.room, this, monotonicNanos = { 0L })
         actor.bind(FakeRoomPlayer()); runCurrent(); advanceTimeBy(5001); runCurrent()
         assertEquals(1, api.calls.count { it == "heartbeat" })
         actor.close().join(); val count = api.calls.size
@@ -94,7 +94,7 @@ class WatchRoomPlaybackTest {
     @Test fun endExpiryContextChangeStopsOriginalPlayer() = runTest {
         for (end in listOf("ended", "expiry", "context")) {
             val api = FakeRooms(); val player = FakeRoomPlayer()
-            val actor = WatchRoomPlayback(api, api.room, this)
+            val actor = WatchRoomPlayback(api, api.room, this, monotonicNanos = { 0L })
             actor.bind(player); runCurrent()
             when (end) {
                 "ended" -> api.room = api.room.copy(status = "ended")
@@ -107,7 +107,7 @@ class WatchRoomPlaybackTest {
     }
     @Test fun lateCleanupCannotStopReplacement() = runTest {
         val api = FakeRooms(); api.stateGate = CompletableDeferred()
-        val old = WatchRoomPlayback(api, api.room, this); val first = FakeRoomPlayer()
+        val old = WatchRoomPlayback(api, api.room, this, monotonicNanos = { 0L }); val first = FakeRoomPlayer()
         old.bind(first); runCurrent(); old.command(true); runCurrent()
         val close = old.close(); runCurrent(); assertFalse(close.isCompleted)
         val replacement = FakeRoomPlayer()
@@ -125,7 +125,7 @@ class WatchRoomPlaybackTest {
         assertTrue(WatchRoomTarget.request(RoomFixtures.room()).following.isEmpty())
     }
     @Test fun heldFinalReportJoinsRoomCloseWithoutNewAdmission() = runTest {
-        val api = FakeRooms(); val actor = WatchRoomPlayback(api, api.room, this)
+        val api = FakeRooms(); val actor = WatchRoomPlayback(api, api.room, this, monotonicNanos = { 0L })
         actor.bind(FakeRoomPlayer()); runCurrent()
         var nanos = 0L
         val drain = RoomProgressDrain(actor) { nanos }
@@ -143,5 +143,23 @@ class WatchRoomPlaybackTest {
         gate.discard(); assertFalse(gate.accepts)
         nanos = 5_000_000_000L; assertFalse(drain.allowed())
         nanos = 0L; api.valid = false; assertFalse(drain.allowed())
+    }
+    @Test fun deferredProducerFinishesBeforeFinalSnapshotAndLeave() = runTest {
+        val events = mutableListOf<String>()
+        val api = object : FakeRooms() {
+            override suspend fun leave(id: String) { super.leave(id); events += "leave" }
+        }
+        val actor = WatchRoomPlayback(api, api.room, this, monotonicNanos = { 0L })
+        actor.bind(FakeRoomPlayer()); runCurrent()
+        val drain = RoomProgressDrain(actor) { 0L }; assertTrue(drain.begin())
+        val gate = ProgressWriteGate { drain.allowed() }
+        val admitPrevious = CompletableDeferred<Unit>()
+        // The producer exists, but has not registered its child in the actual gate.
+        val previous = launch { admitPrevious.await(); gate.write { events += "old" } }
+        val final = launch { gate.joinExisting(previous); gate.write { events += "final" } }
+        val close = actor.close(final); runCurrent()
+        assertTrue(events.isEmpty()); assertFalse(close.isCompleted)
+        admitPrevious.complete(Unit); close.join()
+        assertEquals(listOf("old", "final", "leave"), events)
     }
 }

@@ -145,8 +145,8 @@ class WatchRoomModel(
             polling?.cancelAndJoin()
             operation?.join()
             val room = knownRoom
-            if (!transferred && room != null && gateway.current()) {
-                try { if (abandonedCreate) gateway.end(room.id) else gateway.leave(room.id) }
+            if (!transferred && room?.member(gateway.profileId, gateway.clientId) != null) {
+                try { gateway.cleanupKnown(room.id, abandonedCreate) }
                 catch (_: Exception) { mutable.value = mutable.value.copy(notice = "Room cleanup was not confirmed. Refresh before retrying.") }
             }
         }.also { closing = it }
