@@ -118,6 +118,21 @@ object ApiClient {
 
     private val nonReplayingHttp by lazy { http.withoutAutomaticReplay() }
 
+    /** Fixed original room credentials; room mutations never refresh, prompt or replay. */
+    fun watchRoomGateway(expected: Long = ProfileDataContext.current): com.strmr.tv.rooms.WatchRoomGateway {
+        val context = requestContexts.capture(expected)
+        return context.use {
+            val original = requireNotNull(storedSession) { "Sign in before opening Watch Together." }
+            val headers = buildMap {
+                put("Authorization", "Bearer " + original.token)
+                put("X-Client-ID", Config.clientId)
+                unlocks.token(profileId)?.let { put(UNLOCK_HEADER, it) }
+                remoteCredential?.let { put("X-Remote-Access-Credential", it) }
+            }
+            com.strmr.tv.rooms.WatchRoomTransport(context, baseUrl, headers, profileId, Config.clientId, nonReplayingHttp)
+        }
+    }
+
     const val UNLOCK_HEADER = "X-Profile-Unlock"
     private val jsonType = "application/json".toMediaType()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
