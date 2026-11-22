@@ -54,7 +54,7 @@ internal class CatalogPlaybackResolver(
     private val prequeue: suspend (PlaybackRequest, Boolean, Long) -> PrequeueStatus,
     private val library: suspend (LibraryVersion, Long) -> ResolvedStream = { version, expected ->
         val playback = ApiClient.libraryPlayback(version.id, expected)
-        ResolvedStream(playback.streamPath, null, version.releaseName, pickTracksOnDevice = true, libraryVersion = version)
+        ResolvedStream(playback.streamPath, null, version.releaseName, pickTracksOnDevice = true, libraryVersion = version, libraryPlayback = playback)
     },
     private val legacyPreference: suspend (PlaybackRequest, Long) -> Boolean? = ::legacyContentPreference,
 ) {

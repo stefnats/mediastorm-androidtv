@@ -55,6 +55,7 @@ object PlaybackCoordinator {
     val detail = MutableStateFlow<String?>(null)
     val errorMessage = MutableStateFlow<String?>(null)
     val recordingInterruption = RecordingInterruptionConsent()
+    val combinedLibraryFile = CombinedLibraryFileConsent()
     /** Bumped whenever a playback session ends, so screens can refresh progress. */
     val sessionsEnded = MutableStateFlow(0)
     /** The player is on screen (log uploads hold off). */
@@ -395,7 +396,8 @@ object PlaybackCoordinator {
                         return@launch
                     }
                     expectedContext?.let(ProfileDataContext::requireCurrent)
-                    val selectedRequest = r.libraryVersion?.let { request.copy(libraryVersion = it) } ?: request
+                    val selectedRequest = resolvedLibraryRequest(request, r, combinedLibraryFile, expectedContext ?: ProfileDataContext.current)
+                    expectedContext?.let(ProfileDataContext::requireCurrent)
                     val claimed = if (expectedContext == null) streamClaim?.invoke(selectedRequest, r)
                         else ApiClient.inContext(expectedContext) { streamClaim?.invoke(selectedRequest, r) }
                     if (claimed == true) {

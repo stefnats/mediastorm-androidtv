@@ -138,7 +138,20 @@ data class LibraryMatch(val libraryId: String, val libraryName: String = "", val
 
 /** `GET /api/library/items/{id}/playback`: the file's stream path, played like any other. */
 @Serializable
-data class LibraryPlaybackInfo(val itemId: String, val streamPath: String, val durationSeconds: Double? = null)
+data class LibraryPlaybackInfo(
+    val itemId: String,
+    val streamPath: String,
+    val durationSeconds: Double? = null,
+    val combinedEpisodes: List<LibraryFileEpisode> = emptyList(),
+    val progressScope: String? = null,
+    val playbackNotice: String? = null,
+) {
+    /** The server cannot provide individual episode offsets for this file. */
+    val requiresFilePlayback: Boolean get() = progressScope == "file" || combinedEpisodes.size > 1
+}
+
+@Serializable
+data class LibraryFileEpisode(val seasonNumber: Int, val episodeNumber: Int)
 
 /** A library title in a grid or Home row, with the library it came from. */
 data class LibraryEntry(val library: LibraryRef, val group: LibraryGroup) {
