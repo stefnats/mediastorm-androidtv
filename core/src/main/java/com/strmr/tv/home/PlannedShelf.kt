@@ -107,6 +107,7 @@ data class PlannedShelf(
                 HomeShelf(id, config.title, items.take(cap).map { it.card }, cap)
             }
             HomeSource.Dashboard -> HomeShelf(id, config.title, context.dashboard().mapNotNull { it.card() }, cap)
+            HomeSource.WatchRooms -> HomeShelf(id, config.title, listOf(watchRoomInboxCard(context.rooms().size)), cap)
             is HomeSource.WatchSomething -> {
                 // Search waits on the Search tab; the AI cards need an AI key on the server.
                 if (!s.hasAI) return null
@@ -155,7 +156,7 @@ data class PlannedShelf(
         const val FIRST_PAGE = 30
 
         /**
-         * The enabled shelves in order, minus those the app can't show yet (watch rooms) and
+         * The enabled shelves in order, minus unsupported sources and
          * those a kids profile doesn't get. A curated kids profile gets a row
          * per allowed list instead of the open-ended ones (trending, Top 10, services).
          */
@@ -255,6 +256,7 @@ class HomeContext internal constructor(
     internal suspend fun lists() = read { access.lists(dataContext) }
     internal suspend fun items(id: String) = read { access.items(id, dataContext) }
     internal suspend fun dashboard() = read { access.dashboard(dataContext) }
+    internal suspend fun rooms() = read { access.rooms(dataContext) }
     internal suspend fun hub(links: List<HomeSource.HubLink>, cap: Int) = read { access.hub(links, cap, dataContext) }
     internal suspend fun liveFavorites(cap: Int) = read { access.liveFavorites(cap, dataContext) }
     internal suspend fun library(id: String, count: Int) = read { access.library(id, count, settings.filter.mediaType, dataContext) }
@@ -268,6 +270,7 @@ internal interface HomeShelfReads {
     suspend fun lists(expected: Long): List<CustomList>
     suspend fun items(id: String, expected: Long): List<WatchlistItem>
     suspend fun dashboard(expected: Long): List<DashboardStream>
+    suspend fun rooms(expected: Long): List<com.strmr.tv.rooms.WatchRoom> = emptyList()
     suspend fun hub(links: List<HomeSource.HubLink>, cap: Int, expected: Long): List<HomeCard>
     suspend fun liveFavorites(cap: Int, expected: Long): List<HomeCard>
     suspend fun library(id: String, count: Int, mediaType: String?, expected: Long): com.strmr.tv.api.LibraryGroupPage
@@ -277,6 +280,7 @@ private object ServerHomeShelfReads : HomeShelfReads {
     override suspend fun lists(expected: Long) = ApiClient.customLists(expected)
     override suspend fun items(id: String, expected: Long) = ApiClient.customListItems(id, expected)
     override suspend fun dashboard(expected: Long) = ApiClient.dashboardStreams(expected)
+    override suspend fun rooms(expected: Long) = ApiClient.watchRoomGateway(expected).inbox()
     override suspend fun hub(links: List<HomeSource.HubLink>, cap: Int, expected: Long) = HubCards.cards(links, cap, expected)
     override suspend fun liveFavorites(cap: Int, expected: Long) = ApiClient.favoriteChannelCards(cap, expected)
     override suspend fun library(id: String, count: Int, mediaType: String?, expected: Long) = ApiClient.libraryGroups(id, count, sort = "created", mediaType = mediaType, expectedContext = expected)

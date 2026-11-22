@@ -172,6 +172,7 @@ fun MainShell() {
                 MainTab.RECORDINGS -> RecordingsScreen()
                 MainTab.SPORTS -> SportsScreen()
                 MainTab.SEARCH -> SearchScreen()
+                MainTab.WATCH_ROOMS -> com.strmr.tv.ui.rooms.WatchRoomsScreen()
                 MainTab.SETTINGS -> SettingsScreen()
             }
         }

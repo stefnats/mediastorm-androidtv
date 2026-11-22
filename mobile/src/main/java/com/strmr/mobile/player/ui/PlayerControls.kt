@@ -99,7 +99,7 @@ fun PlayerControls(
         ui.sheet = sheet
     }
     // playWhenReady, not isPlaying: a tap while buffering (a live join, a seek) must pause.
-    fun togglePlay() = if (controller.player.playWhenReady) controller.player.pause() else controller.player.play()
+    fun togglePlay() = controller.userPlay(!controller.player.playWhenReady)
 
     Box(
         Modifier.fillMaxSize().pointerInput(Unit) {
@@ -167,8 +167,13 @@ fun PlayerControls(
         }
 
         notice?.let { text ->
-            LaunchedEffect(text) { delay(4_000); controller.notice.value = null }
+            LaunchedEffect(text) { if (controller.session.room == null) { delay(4_000); controller.notice.value = null } }
             StatusPill(text, Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(top = 64.dp))
+        }
+        if (controller.session.room != null && visible) {
+            androidx.compose.material3.TextButton(onClick = onExit, modifier = Modifier.align(Alignment.BottomEnd).safeDrawingPadding()) {
+                androidx.compose.material3.Text("Leave room")
+            }
         }
         SubtitleStatus(controller, Modifier.align(Alignment.TopEnd).safeDrawingPadding().padding(top = 64.dp, end = 16.dp))
         if (recoveryMessage != null && error == null && ui.sheet == null) {

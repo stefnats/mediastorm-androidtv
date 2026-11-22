@@ -91,8 +91,17 @@ data class PlayerSession(
     val sourceAttributes: Map<String, String> = emptyMap(),
     /** Per-stream lip-sync preference key; null derives the VOD identity. */
     val audioOffsetKey: String? = null,
+    /** Actual original native room owner; never serialized or accepted as media authority. */
+    val room: com.strmr.tv.rooms.WatchRoomPlayback? = null,
 ) {
     init {
+        room?.let {
+            require(it.belongsTo(requireNotNull(ownership)) && reportsProgress && !isLive && !localFile &&
+                recordingDerived == null && recordingPart == null && replacementBuffer == null &&
+                !request.fileOnly && request.following.isEmpty() && request.start == null && request.speed == 1f) {
+                "Room playback requires its original catalogue viewer and independent source."
+            }
+        }
         recordingDerived?.let { source ->
             require(ownership === source.owner && !reportsProgress && !isLive && !localFile && streamPath == null &&
                 prequeueId == null && recordingPart == null && progressSink == null && liveSessionId == null &&
@@ -121,4 +130,4 @@ data class ResolvedStream(
 )
 
 /** Local-file callers must supply a live owner check at every player entry. */
-fun PlayerSession.playbackAllowed():Boolean = ownership?.isCurrent()!=false && recordingDerived?.allowed()!=false && (!localFile || runCatching {localFileAccess?.invoke()==true}.getOrDefault(false))
+fun PlayerSession.playbackAllowed():Boolean = ownership?.isCurrent()!=false && room?.current()!=false && recordingDerived?.allowed()!=false && (!localFile || runCatching {localFileAccess?.invoke()==true}.getOrDefault(false))

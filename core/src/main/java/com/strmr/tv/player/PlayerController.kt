@@ -58,6 +58,7 @@ class PlayerController(
     private val ownership=requireNotNull(session.ownership) {"Playback context is unavailable"}.also {it.requireCurrent();session.recordingPart?.claim();session.recordingDerived?.claim()}
     val dataContext = ownership.epoch
     private var released=false
+    private var roomDisplayReady = false
     private var audioOffsetKey = AudioOffsetKeys.of(session)
     private val programmeClock = session.liveStream?.programmeLimit?.let { KidsProgrammeClock(it, android.os.SystemClock::elapsedRealtime, ::stopChildProgramme) }
     private var programmeTimer: Job? = null
@@ -93,7 +94,7 @@ class PlayerController(
     internal var audioPreferenceSave: Job? = null
     internal var audioPreferenceFailed = false
     val vodDenied=MutableStateFlow<com.strmr.tv.api.VodAccessDenial?>(null)
-    val canReportRelease get() = !standby && vodDenied.value==null && !session.isLive && !session.localFile && session.reportsProgress && session.prequeueId != null
+    val canReportRelease get() = session.room == null && !standby && vodDenied.value==null && !session.isLive && !session.localFile && session.reportsProgress && session.prequeueId != null
 
     private val recoveryContext = ServerReleaseReportGateway(dataContext)
     private val audioRecoveryPolicy = AudioRecoveryPolicy()
@@ -172,7 +173,7 @@ class PlayerController(
         releaseReportOpen = false
         audioRecovery.dismiss()
     }
-    private fun canPrepareAudioAlternative() = vodDenied.value==null && audioRecoveryEligible(session, AutoSwitchSettings.enabled, recoveryContext.isCurrent()) &&
+    private fun canPrepareAudioAlternative() = session.room == null && vodDenied.value==null && audioRecoveryEligible(session, AutoSwitchSettings.enabled, recoveryContext.isCurrent()) &&
         !releaseReportOpen && !audioRecovery.active && !autoSwitch.preparing && switchTo.value == null && advanceTo.value == null && !ended.value
 
     private fun observeAudioAvailability() {
@@ -231,7 +232,7 @@ class PlayerController(
     val online = OnlineSubtitles(this, scope)
     private val autoSwitch = AutoSwitch(this)
     private val startBarrier = PlaybackStartBarrier(
-        { canUsePlayerAux() && session.canOpenPlayer() && recordingStart?.started != false &&
+        { session.room == null && canUsePlayerAux() && session.canOpenPlayer() && recordingStart?.started != false &&
             error.value == null && !ended.value && enforceProgrammeLimit() },
         { player.play() },
     )
@@ -317,7 +318,7 @@ class PlayerController(
     val postPlay = MutableStateFlow<PlaybackRequest?>(null)
     private val postPlayOffer = PostPlayOffer(dataContext)
 
-    private fun createUpNext(): UpNext? = if (session.reportsProgress && !session.isLive) {
+    private fun createUpNext(): UpNext? = if (session.room == null && session.reportsProgress && !session.isLive) {
         UpNext(request, session.streamPath?.takeIf { !session.localFile }, scope, { videoSurface }, onSkip = { seekTo(it) },onDenied={denyVod(it)},expectedContext=dataContext) { next ->
             report(ended = true)
             advanceTo.value = next.copy(speed = speed.value)
@@ -412,7 +413,7 @@ class PlayerController(
                 val genuine = EpisodeAdvancePolicy.genuineEnd(player.currentPosition, player.duration, player.playerError != null)
                 if (genuine) report(ended = true)
                 if (upNext?.ended(player.currentPosition, player.duration, player.playerError != null) == true) return
-                if (postPlayOffer.offer(request, session.reportsProgress, session.isLive, !progress.acceptsCompletion,
+                if (session.room == null && postPlayOffer.offer(request, session.reportsProgress, session.isLive, !progress.acceptsCompletion,
                         player.currentPosition, player.duration, player.playerError != null || switchTo.value != null || audioRecovery.active || autoSwitch.preparing || releaseReportOpen)) {
                     player.pause()
                     upNext?.cancel()
@@ -508,7 +509,7 @@ class PlayerController(
             }
             audioRecoveryPolicy.terminalFailure(e, canPrepareAudioAlternative())?.let { audioRecovery.suggest(it) }
             AppLog.e("Player", "playback error ${e.errorCodeName}: ${e.message}", e)
-            if (!session.isLive && AutoSwitch.switchesOnError(e.errorCode) &&
+            if (session.room == null && !session.isLive && AutoSwitch.switchesOnError(e.errorCode) &&
                 autoSwitch.trigger("player error ${e.errorCodeName}") { showTerminalError(e) }) return
             showTerminalError(e)
         }
@@ -558,7 +559,7 @@ class PlayerController(
         if (standby) player.volume = 0f
         player.addListener(listener)
         player.addListener(stallLog)
-        progress = ProgressReporter(player, session, scope, context = dataContext) { autoSwitch.trigger(it) }
+        progress = ProgressReporter(player, session, scope, context = dataContext) { if (session.room == null) autoSwitch.trigger(it) }
         if (recordingStart != null) {
             val source = requireNotNull(derivedSource)
             recordingProgress = RecordingProgressReporter(requireNotNull(source.progressResource), requireNotNull(source.progressReceipt),
@@ -600,8 +601,9 @@ class PlayerController(
         if (enforceProgrammeLimit()) {
             player.playWhenReady = false
             player.prepare()
-            if (startGate == null) startBarrier.releaseDisplay()
-            else startGate.invoke(startBarrier::releaseDisplay)
+            val displayReady = { roomDisplayReady = true; startBarrier.releaseDisplay() }
+            if (startGate == null) displayReady()
+            else startGate.invoke(displayReady)
         }
         programmeTimer = programmeClock?.let { clock -> scope.launch { clock.watch() } }
         if (recordingStart != null) recordingStartTimeout = scope.launch {
@@ -609,11 +611,31 @@ class PlayerController(
             if (!recordingStart.started && !released) failRecordingProgressStart()
         }
         if (!standby) startActiveHelpers()
+        session.room?.let { room ->
+            room.bind(object : com.strmr.tv.rooms.WatchRoomPlayerPort {
+                override fun sample() = com.strmr.tv.rooms.RoomMediaState(player.currentPosition,
+                    player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L,
+                    roomDisplayReady && player.playbackState == Player.STATE_READY && player.isCurrentMediaItemSeekable,
+                    player.playbackState != Player.STATE_READY, player.playWhenReady)
+                override fun apply(positionMs: Long, playing: Boolean): Boolean {
+                    if (released || !canUsePlayerAux() || !session.canOpenPlayer() || !sample().seekable ||
+                        positionMs !in 0 until sample().durationMs) return false
+                    if (kotlin.math.abs(player.currentPosition - positionMs) > 2_000) player.seekTo(positionMs)
+                    if (playing) player.play() else player.pause()
+                    return true
+                }
+                override fun pause() { if (!released) player.pause() }
+                override fun stop(message: String) {
+                    if (!released) { notice.value = message; progress.discardFuture(); player.stop(); ended.value = true }
+                }
+            })
+            scope.launch { room.notice.collect { notice.value = it } }
+        }
 
     }
 
     private fun startActiveHelpers() {
-        autoSwitch.start()
+        if (session.room == null) autoSwitch.start()
         thumbnails?.start(scope) {
             val video = tracks.value.ofType(C.TRACK_TYPE_VIDEO).firstOrNull { it.selected }?.format
             PlaybackThumbnails.Context(duration.value, player.currentPosition, buffering.value,
@@ -720,6 +742,7 @@ class PlayerController(
 
     fun seekTo(ms: Long) {
         if (!seekable) return
+        session.room?.let { it.command(player.playWhenReady, ms); return }
         programme?.let { return catchup!!.seek(ms.coerceIn(0, it.availableMs)) }
         val end = duration.value.takeIf { it > 0 } ?: Long.MAX_VALUE
         player.seekTo(ms.coerceIn(0, end))
@@ -727,8 +750,17 @@ class PlayerController(
     }
 
     fun setSpeed(value: Float) {
+        if (session.room != null && value != 1f) { notice.value = "Playback speed is shared at 1x in Watch Together."; return }
         player.setPlaybackSpeed(value)
         speed.value = value
+    }
+
+    /** Causal controls from remote keys, touch, PiP and the media notification. */
+    fun userPlay(playing: Boolean) {
+        if (released || !session.canOpenPlayer()) return
+        val room = session.room
+        if (room != null) room.command(playing)
+        else if (playing) player.play() else player.pause()
     }
 
     /** A percentage resume (Trakt import) once the duration is known. */
@@ -763,6 +795,7 @@ class PlayerController(
 
     fun report(paused: Boolean = false, ended: Boolean = false, closing: Boolean = false) {
         if (standby) return
+        if (session.room?.progressAllowed == false) return
         val recording = recordingProgress
         if (recording != null) {
             val positionMs = if (ended) requireNotNull(derivedSource?.observation?.descriptor?.durationMs) else player.currentPosition
@@ -782,7 +815,7 @@ class PlayerController(
      * request; the activity closes this playback (saving the position) and starts the other.
      */
     fun switchSource(source: SourceResult) {
-        if (request.fileOnly) return
+        if (request.fileOnly || session.room != null) return
         cancelAudioLanguageCheck()
         if(vodDenied.value!=null || dataContext!=ProfileDataContext.current)return
         audioRecovery.dismiss()
@@ -806,7 +839,8 @@ class PlayerController(
             if (ended.value && recordingStart?.started == true) derivedSource?.observation?.descriptor?.durationMs else partPosition,
             afterCleanup = { derivedSource?.release() })
         recordingClosing?.let(PlaybackCoordinator::retainRecordingProgressClose)
-        if (!ended.value && advanceTo.value == null && postPlay.value == null) report(paused = true, closing = true)
+        val roomProgress = if (session.room != null) progress.closeRoom() else null
+        if (session.room == null && !ended.value && advanceTo.value == null && postPlay.value == null) report(paused = true, closing = true)
         closeReleaseReports()
         clock.cancel()
         contextWatch.cancel()
@@ -830,6 +864,9 @@ class PlayerController(
         // The dedicated recording actor owns its actual completion independently of this scope.
         // Let the last catalogue report finish on its own.
         MainScope().launch { delay(5_000); scope.cancel() }
+        val roomClose = session.room?.close(roomProgress)
+        if (roomClose != null) return MainScope().launch { progress.lastReport?.join(); roomClose.join() }
+            .also(PlaybackCoordinator::retainRecordingProgressClose)
         return recordingClosing ?: progress.lastReport
     }
 }

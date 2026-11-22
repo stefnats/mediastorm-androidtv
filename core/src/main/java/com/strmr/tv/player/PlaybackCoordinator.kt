@@ -71,6 +71,22 @@ object PlaybackCoordinator {
      */
     @Volatile var streamClaim: ((PlaybackRequest, ResolvedStream) -> Boolean)? = null
 
+    /** Every room participant resolves a new own source; an armed Cast cannot claim it. */
+    fun playRoom(room: com.strmr.tv.rooms.WatchRoomPlayback, expected: Long): Boolean {
+        return try {
+            ProfileDataContext.requireCurrent(expected)
+            check(room.current() && !playerOpen && _resolving.value == null) { "Close the current player before joining a room." }
+            val request = room.request
+            begin(request, "Finding your copy…", expectedContext = expected, room = room,
+                resolveWithSettings = { settings -> catalog.resolve(request, settings, null, expected) })
+            true
+        } catch (e: Exception) {
+            room.close()
+            errorMessage.value = e.message ?: "The room could not start."
+            false
+        }
+    }
+
     /** The session the player picks up when it starts. */
     @Volatile var pending: PlayerSession? = null
         private set(value) {
@@ -353,8 +369,11 @@ object PlaybackCoordinator {
         resolveJob = null
         _resolving.value = null
         detail.value = null
+        resolvingRoom?.close()
+        resolvingRoom = null
     }
 
+    private var resolvingRoom: com.strmr.tv.rooms.WatchRoomPlayback? = null
     internal fun begin(
         request: PlaybackRequest,
         firstStage: String,
@@ -365,6 +384,7 @@ object PlaybackCoordinator {
         liveLabel: String? = null,
         audioOffsetKey: String? = null,
         expectedContext: Long? = null,
+        room: com.strmr.tv.rooms.WatchRoomPlayback? = null,
         resolveWithSettings: (suspend (PlaybackSettings?) -> ResolvedStream?)? = null,
         startedNanos: Long = PlaybackStartupTiming.now(),
         input: StartupInput = StartupInput.UNKNOWN,
@@ -374,6 +394,7 @@ object PlaybackCoordinator {
         if (_resolving.value != null) { startup?.finish(StartupOutcome.NOT_STARTED); return }
         val adopted = runCatching { PlaybackStartupTiming.adopt(startup, request.title, expectedContext ?: ProfileDataContext.current, input) }.getOrNull()
         val ownership = adopted?.owner ?: PlaybackSessionContext.capture(expectedContext ?: ProfileDataContext.current)
+        resolvingRoom = room
         RecordingPartQueues.replace(null)
         val timing = adopted ?: PlaybackStartupTiming.begin(ownership, input, startedNanos)
         startupAttempt=timing
@@ -401,9 +422,12 @@ object PlaybackCoordinator {
                         return@launch
                     }
                     expectedContext?.let(ProfileDataContext::requireCurrent)
+                    if (room != null) check(r.libraryPlayback?.requiresFilePlayback != true) {
+                        "A combined episode file cannot be synchronized as one episode."
+                    }
                     val selectedRequest = resolvedLibraryRequest(request, r, combinedLibraryFile, expectedContext ?: ProfileDataContext.current)
                     expectedContext?.let(ProfileDataContext::requireCurrent)
-                    val claimed = if (expectedContext == null) streamClaim?.invoke(selectedRequest, r)
+                    val claimed = if (room != null) false else if (expectedContext == null) streamClaim?.invoke(selectedRequest, r)
                         else ApiClient.inContext(expectedContext) { streamClaim?.invoke(selectedRequest, r) }
                     if (claimed == true) {
                         timing.finish(StartupOutcome.EXTERNAL_HANDOFF)
@@ -417,21 +441,25 @@ object PlaybackCoordinator {
                                   pickTracksOnDevice = r.pickTracksOnDevice,
                                   sourceLabel = StreamInfo.source(r.path, r.source, selectedRequest.libraryVersion?.origin),
                                   sourceDolbyVision = r.source?.dolbyVisionProfile, sourceHdr10 = r.source?.hdr10 == true,
-                                  sourceAttributes = r.source?.attributes.orEmpty(), sourceFrameRate = r.source?.frameRate, ownership=ownership)
+                                  sourceAttributes = r.source?.attributes.orEmpty(), sourceFrameRate = r.source?.frameRate, ownership=ownership, room=room)
                 }
                 fun publish() {
                     ownership.requireCurrent()
+                    check(room?.current() != false) { "The original room has ended." }
                     pending = timing.attach(prepared)
+                    resolvingRoom = null
                     stage.value = "Starting…"
                     detail.value = null
                     launchPlayer()
                 }
                 if (expectedContext == null) publish() else ApiClient.inContext(expectedContext) { publish() }
             } catch (e: CancellationException) {
+                room?.close()
                 timing.finish(StartupOutcome.CANCELLED)
                 if (_resolving.value === request) _resolving.value = null
                 throw e
             } catch (e: Exception) {
+                room?.close()
                 timing.finish(StartupOutcome.FAILED)
                 if (_resolving.value === request) {
                     _resolving.value = null
@@ -442,6 +470,7 @@ object PlaybackCoordinator {
                 }
             }
         }
+        room?.watchResolution(requireNotNull(resolveJob))
     }
 
     /**

@@ -60,6 +60,7 @@ fun rememberHomeCardOpener(settings: () -> HomeSettings?): (HomeCard) -> Unit {
 
     val open = rememberCardOpener { action ->
         when (action) {
+            HomeAction.WATCH_ROOMS -> navigator.push(com.strmr.mobile.ui.shell.Route.WatchRooms())
             HomeAction.ASK_AI -> asking = true
             HomeAction.SURPRISE -> if (!finding) {
                 finding = true

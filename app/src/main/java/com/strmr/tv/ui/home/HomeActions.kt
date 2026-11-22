@@ -72,6 +72,7 @@ fun rememberCardHandler(settings: () -> HomeSettings? = { null }): (HomeCard) ->
             is HomeLink.Person -> navigator.open(Page.Person(link.person))
             is HomeLink.Library -> openLibrary(link.entry)
             is HomeLink.Action -> when (link.action) {
+                HomeAction.WATCH_ROOMS -> navigator.open(Page.WatchRooms())
                 HomeAction.ASK_AI -> asking = true
                 HomeAction.SURPRISE -> if (!finding) {
                     finding = true

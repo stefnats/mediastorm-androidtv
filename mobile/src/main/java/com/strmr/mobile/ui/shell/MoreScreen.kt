@@ -17,6 +17,10 @@ fun MoreScreen(sections: List<Section>) {
     val navigator = LocalNavigator.current
     PageScaffold("More", showBack = false) { padding ->
         LazyColumn(contentPadding = padding) {
+            item {
+                ListItem(headlineContent = { Text("Watch Together") },
+                    modifier = Modifier.clickable { navigator.push(Route.WatchRooms()) })
+            }
             items(sections, key = { it.name }) { s ->
                 ListItem(
                     headlineContent = { Text(s.title) },

@@ -63,6 +63,24 @@ object PlayerMediaSession {
  */
 @OptIn(UnstableApi::class)
 private class SessionPlayer(private val controller: PlayerController) : ForwardingPlayer(controller.player) {
+    override fun play() = controller.userPlay(true)
+    override fun pause() = controller.userPlay(false)
+    override fun setPlayWhenReady(playWhenReady: Boolean) = controller.userPlay(playWhenReady)
+    override fun seekTo(positionMs: Long) = controller.seekTo(positionMs)
+    override fun seekBack() = controller.skip(-10_000)
+    override fun seekForward() = controller.skip(10_000)
+    override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
+        if (mediaItemIndex == 0) controller.seekTo(positionMs)
+    }
+    override fun setPlaybackSpeed(speed: Float) = controller.setSpeed(speed)
+    override fun setPlaybackParameters(playbackParameters: androidx.media3.common.PlaybackParameters) =
+        controller.setSpeed(playbackParameters.speed)
+    override fun seekToDefaultPosition() = controller.seekTo(0)
+    override fun seekToDefaultPosition(mediaItemIndex: Int) { if (mediaItemIndex == 0) controller.seekTo(0) }
+    override fun seekToNext() { if (controller.session.room == null) super.seekToNext() }
+    override fun seekToPrevious() { if (controller.session.room == null) super.seekToPrevious() }
+    override fun seekToNextMediaItem() { if (controller.session.room == null) super.seekToNextMediaItem() }
+    override fun seekToPreviousMediaItem() { if (controller.session.room == null) super.seekToPreviousMediaItem() }
     private val metadata: MediaMetadata = controller.request.let { r ->
         val art = r.episode?.imageUrl ?: r.backdrops.firstOrNull() ?: r.title.backdropUrl ?: r.title.posterUrl
         MediaMetadata.Builder()

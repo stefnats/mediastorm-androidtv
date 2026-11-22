@@ -27,7 +27,13 @@ sealed interface HomeLink {
     data class Library(val entry: LibraryEntry) : HomeLink
 }
 
-enum class HomeAction { SURPRISE, ASK_AI }
+enum class HomeAction { SURPRISE, ASK_AI, WATCH_ROOMS }
+
+/** A room inbox entry, never a host's media source disguised as a catalogue card. */
+fun watchRoomInboxCard(count: Int) = HomeCard(
+    id = "__watch_rooms__", link = HomeLink.Action(HomeAction.WATCH_ROOMS),
+    title = "Watch Together", subtitle = if (count > 0) count.toString() + " rooms · Open invitations" else "Rooms and invitations",
+)
 
 /** Which optional card badges show (Settings › Card Badges over the server's `badgeVisibility`). */
 data class BadgeVisibility(

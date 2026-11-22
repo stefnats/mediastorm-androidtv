@@ -53,6 +53,7 @@ sealed interface Page {
     data object SubtitleStyle : Page
     /** Live › More › Recordings (Expo's Live drawer entry); also a menu entry when Settings › Menu shows it. */
     data object Recordings : Page
+    data class WatchRooms(val create: com.strmr.tv.player.PlaybackRequest? = null, val expected: Long = com.strmr.tv.library.ProfileDataContext.current) : Page
     data object Reminders : Page
     /** A Sports hub game's page. */
     data class SportsGame(val id: String) : Page
@@ -138,6 +139,7 @@ fun PageStack(content: @Composable () -> Unit) {
                     Page.TabOrder -> TabOrderSettings()
                     Page.SubtitleStyle -> SubtitleSettings()
                     Page.Recordings -> RecordingsScreen(asPage = true, currentPage = { stack.lastOrNull() === page })
+                    is Page.WatchRooms -> com.strmr.tv.ui.rooms.WatchRoomsScreen(page.create, page.expected)
                     Page.Reminders -> com.strmr.tv.ui.reminders.RemindersScreen()
                     is Page.SportsGame -> SportsGameScreen(page.id)
                     is Page.SportsRace -> SportsRaceScreen(page.weekendId, page.sessionId)

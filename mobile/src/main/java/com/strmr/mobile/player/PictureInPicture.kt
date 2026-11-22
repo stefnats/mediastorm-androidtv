@@ -29,8 +29,8 @@ class PictureInPicture(private val activity: ComponentActivity, private val cont
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.getIntExtra(EXTRA_CONTROL, 0)) {
-                CONTROL_PLAY -> controller.player.play()
-                CONTROL_PAUSE -> controller.player.pause()
+                CONTROL_PLAY -> controller.userPlay(true)
+                CONTROL_PAUSE -> controller.userPlay(false)
                 CONTROL_BACK -> controller.skip(-10_000)
                 CONTROL_FORWARD -> controller.skip(10_000)
             }

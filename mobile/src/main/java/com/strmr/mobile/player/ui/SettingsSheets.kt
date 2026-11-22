@@ -56,7 +56,7 @@ fun SettingsSheet(controller: PlayerController, ui: PlayerUiState, tablet: Boole
     val live = controller.session.isLive
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         SheetTitle("Settings")
-        if (!live) SettingRow(Icons.Filled.Speed, "Playback Speed", speedLabel(speed)) { ui.sheet = PlayerSheet.SPEED }
+        if (!live && controller.session.room == null) SettingRow(Icons.Filled.Speed, "Playback Speed", speedLabel(speed)) { ui.sheet = PlayerSheet.SPEED }
         SettingRow(Icons.Filled.AspectRatio, "Aspect Ratio", aspectMode.title) { ui.sheet = PlayerSheet.ASPECT }
         if (switchable(controller)) SettingRow(Icons.Filled.SwapHoriz, "Switch Source", controller.session.releaseName) { ui.sheet = PlayerSheet.SOURCES }
         if (controller.canReportRelease) SettingRow(Icons.Filled.Info, "Report / change source", "Report a problem or prepare an alternative") { ui.sheet = PlayerSheet.REPORT }
@@ -77,7 +77,7 @@ fun SettingsSheet(controller: PlayerController, ui: PlayerUiState, tablet: Boole
 
 /** Switch Source: a resolved title only (not live TV, trailers, recordings or a downloaded file). */
 fun switchable(controller: PlayerController): Boolean =
-    !controller.request.fileOnly && !controller.session.isLive && controller.session.reportsProgress && controller.session.streamPath != null &&
+    controller.session.room == null && !controller.request.fileOnly && !controller.session.isLive && controller.session.reportsProgress && controller.session.streamPath != null &&
         !controller.session.localFile
 
 @Composable
