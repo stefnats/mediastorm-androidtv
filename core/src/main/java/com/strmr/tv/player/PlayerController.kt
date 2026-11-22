@@ -45,7 +45,11 @@ import kotlinx.coroutines.withTimeoutOrNull
  * choice applied once the tracks are known, the resume point, and progress every 10 s.
  */
 @OptIn(UnstableApi::class)
-class PlayerController(context: Context, val session: PlayerSession, private val onVideoFormat: (Format) -> Unit) {
+class PlayerController(
+    context: Context, val session: PlayerSession,
+    startGate: ((start: () -> Unit) -> Unit)? = null,
+    private val onVideoFormat: (Format) -> Unit,
+) {
     private val applicationContext = context.applicationContext
     internal var standby = session.replacementBuffer != null; private set
     val request = session.request
@@ -54,6 +58,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     private val ownership=requireNotNull(session.ownership) {"Playback context is unavailable"}.also {it.requireCurrent();session.recordingPart?.claim();session.recordingDerived?.claim()}
     val dataContext = ownership.epoch
     private var released=false
+    private var audioOffsetKey = AudioOffsetKeys.of(session)
     private val programmeClock = session.liveStream?.programmeLimit?.let { KidsProgrammeClock(it, android.os.SystemClock::elapsedRealtime, ::stopChildProgramme) }
     private var programmeTimer: Job? = null
     val profileId = ownership.profileId
@@ -188,6 +193,21 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     val external = ExternalSubtitles(scope, { player.currentPosition }) { cues.value = it }
     val online = OnlineSubtitles(this, scope)
     private val autoSwitch = AutoSwitch(this)
+    private val startBarrier = PlaybackStartBarrier(
+        { canUsePlayerAux() && session.canOpenPlayer() && recordingStart?.started != false &&
+            error.value == null && !ended.value && enforceProgrammeLimit() },
+        { player.play() },
+    )
+
+    /** Display resync is not evidence of a source stall. */
+    fun displayModeSwitched() = autoSwitch.resettle()
+
+    fun pauseForSwitch(): () -> Unit {
+        val wasPlaying = player.playWhenReady
+        player.pause()
+        return { if (wasPlaying && canUsePlayerAux() && session.canOpenPlayer() &&
+            error.value == null && !ended.value && enforceProgrammeLimit()) player.play() }
+    }
 
     /** Seek previews, for a resolved stream (not trailers, live or a downloaded file). */
     private fun createThumbnails(): PlaybackThumbnails? =
@@ -313,6 +333,12 @@ class PlayerController(context: Context, val session: PlayerSession, private val
             } else if (player.playbackState == Player.STATE_READY) report(paused = true)
         }
 
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (!playWhenReady && reason != Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) {
+                AppLog.i("Player", "paused by the system (reason=$reason)")
+            }
+        }
+
         override fun onPlaybackStateChanged(state: Int) {
             if (!enforceProgrammeLimit()) return
             buffering.value = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
@@ -323,7 +349,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
                     try {
                         if (start.ready(player.isCurrentMediaItemSeekable, player.duration, player.currentPosition)) {
                             recordingStartTimeout?.cancel(); recordingStartTimeout = null
-                            recordingProgress?.start(); player.playWhenReady = true
+                            recordingProgress?.start(); startBarrier.startIfAllowed()
                         }
                     } catch (_: Exception) { failRecordingProgressStart() }
                 } else applyPercentStart()
@@ -441,10 +467,17 @@ class PlayerController(context: Context, val session: PlayerSession, private val
             }
             audioRecoveryPolicy.terminalFailure(e, canPrepareAudioAlternative())?.let { audioRecovery.suggest(it) }
             AppLog.e("Player", "playback error ${e.errorCodeName}: ${e.message}", e)
-            thumbnails?.cancel()
-            startup.end(StartupOutcome.FAILED)
-            error.value = e.message ?: e.errorCodeName
+            if (!session.isLive && AutoSwitch.switchesOnError(e.errorCode) &&
+                autoSwitch.trigger("player error ${e.errorCodeName}") { showTerminalError(e) }) return
+            showTerminalError(e)
         }
+    }
+
+    private fun showTerminalError(e: PlaybackException) {
+        if (!canUsePlayerAux() || !session.canOpenPlayer()) return
+        thumbnails?.cancel()
+        startup.end(StartupOutcome.FAILED)
+        error.value = e.message ?: e.errorCodeName
     }
 
     init {
@@ -456,8 +489,9 @@ class PlayerController(context: Context, val session: PlayerSession, private val
             check(!buffer.closing && !buffer.transferred && buffer.controller == null &&
                 session.ownership === buffer.candidateSession.ownership && session.url == buffer.candidateSession.url)
         }
+        if (!standby) AudioOffsetStore.activate(audioOffsetKey)
         // Passthrough only where the output takes it (not Bluetooth); PCM otherwise.
-        val renderers = session.replacementBuffer?.parts?.renderers ?: PassthroughGuard.renderersFactory(context, decodedAudio.takeIf { audioRecoveryEligible(session, true, true) })
+        val renderers = session.replacementBuffer?.parts?.renderers ?: PassthroughGuard.renderersFactory(context, decodedAudio.takeIf { audioRecoveryEligible(session, true, true) }) { AudioOffsetStore.value(audioOffsetKey) }
             // Platform decoders first; the FFmpeg extension (TrueHD, DTS…) when none can.
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true)
@@ -497,6 +531,10 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         liveRetune = session.retuneLive?.let {
             LiveRetune(player, scope, session.liveSessionId, session.liveChannel, it, ::liveGaveUp, session.liveStream,tuned = { next ->
                 timeshift.value = next.timeshift
+                liveRetune?.channel?.id?.let { id ->
+                    val key = AudioOffsetKeys.live(id)
+                    if (key != audioOffsetKey) { audioOffsetKey = key; AudioOffsetStore.activate(key) }
+                }
             },expectedContext=dataContext,owner=ownership,playerCurrent=::canUsePlayerAux,onDenied={ reason -> denyVod(reason) },denialTitleId=request.title.titleId)
         }
         catchup = session.liveChannel?.takeIf { session.isLive && session.liveStream?.programmeLimit == null && LiveCatchups.window(it) > 0 }?.let { CatchupJoin(this, it) }
@@ -519,8 +557,10 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         if (!standby) session.explicitAudioLanguage?.let { rememberAudioLanguage(it) }
         if (request.speed != 1f && !session.isLive) setSpeed(request.speed)
         if (enforceProgrammeLimit()) {
-            player.playWhenReady = !standby && recordingStart == null
+            player.playWhenReady = false
             player.prepare()
+            if (startGate == null) startBarrier.releaseDisplay()
+            else startGate.invoke(startBarrier::releaseDisplay)
         }
         programmeTimer = programmeClock?.let { clock -> scope.launch { clock.watch() } }
         if (recordingStart != null) recordingStartTimeout = scope.launch {
@@ -551,13 +591,14 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         ownership.requireCurrent()
         decodedAudio.restart(); decodedAudioPolicy.reset()
         standby = false
+        AudioOffsetStore.activate(audioOffsetKey)
         runCatching {
             upNext = createUpNext(); thumbnails = createThumbnails()
             videoFormat.value?.let(onVideoFormat)
             online.tracksReady(player.currentTracks, prefs.subtitlePick)
             startActiveHelpers()
         }.onFailure { notice.value = "The source switched. Some playback helpers are unavailable." }
-        runCatching { player.playWhenReady = true }.onFailure {
+        runCatching { startBarrier.startIfAllowed() }.onFailure {
             error.value = "The buffered source could not start. Choose another source."
         }
     }
@@ -568,7 +609,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     }
     internal fun replacementCarriedTracks() = CarriedTracks.capture(player.currentTracks, player.trackSelectionParameters,
         external.selected.value).copy(audioLanguage = null)
-    internal fun replacementController(context: Context, replacement: PlayerSession) = PlayerController(context, replacement, onVideoFormat)
+    internal fun replacementController(context: Context, replacement: PlayerSession) = PlayerController(context, replacement, onVideoFormat = onVideoFormat)
     internal fun replacementMediaParts(context: Context, replacement: PlayerSession,
         bounded: (androidx.media3.datasource.DataSource.Factory) -> androidx.media3.datasource.DataSource.Factory,
         callEvents: okhttp3.EventListener.Factory): ReplacementMediaParts {
@@ -580,7 +621,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
             .addInterceptor(access.interceptor).addNetworkInterceptor(access.requestInterceptor).eventListenerFactory(callEvents).build()
         val source = bounded(DefaultDataSource.Factory(context, OkHttpDataSource.Factory(client).setDefaultRequestProperties(headers)))
         val observation = DecodedAudioObservation()
-        val renderers = PassthroughGuard.renderersFactory(context, observation)
+        val renderers = PassthroughGuard.renderersFactory(context, observation) { AudioOffsetStore.value(AudioOffsetKeys.of(replacement)) }
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true).setMediaCodecSelector(AudioDecoderFallback.selector)
         val capabilityRenderers = PassthroughGuard.renderersFactory(context)

@@ -101,12 +101,13 @@ fun TrackMenu(
     onStyle: (() -> Unit)? = null,
     onSearch: (() -> Unit)? = null,
     onTranslate: (() -> Unit)? = null,
+    onAudioOffset: (() -> Unit)? = null,
 ) {
     val tracks by controller.tracks.collectAsState()
     val external by controller.external.track.collectAsState()
     val externalOn by controller.external.selected.collectAsState()
     val translation by controller.online.serverTranslation.collectAsState()
-    val choices = trackMenuChoices(controller, audio, tracks, external, externalOn, translation, onDone, onStyle, onSearch, onTranslate)
+    val choices = trackMenuChoices(controller, audio, tracks, external, externalOn, translation, onDone, onStyle, onSearch, onTranslate, onAudioOffset)
     ChoiceMenu(if (audio) "Audio" else "Subtitles", choices, if (audio) "No audio tracks" else "No subtitles", modifier)
 }
 
@@ -118,6 +119,13 @@ fun TrackMenu(
 fun SubtitleStyleMenu(modifier: Modifier = Modifier) {
     val choices = subtitleStyleChoices()
     ChoiceMenu("Subtitle Style", choices, "", modifier)
+}
+
+/** Audio Offset (lip sync): −50 / +50 / Reset, applied live; the title shows the value. */
+@Composable
+fun AudioOffsetMenu(modifier: Modifier = Modifier) {
+    val offset = AudioOffsetStore.offsetMs
+    ChoiceMenu(audioOffsetTitle(offset), audioOffsetChoices(offset), "", modifier)
 }
 
 /** Playback speed, as the tvOS player's Settings menu offers it. */

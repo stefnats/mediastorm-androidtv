@@ -21,6 +21,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -119,40 +121,44 @@ fun BoxScope.DetailsHeader(
         }
         (model.loadError ?: model.watchedError ?: trailer.errorMessage)?.let { Text(it, fontSize = 12.sp, color = Color(0xFFFF6B6B)) }
 
-        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            PrimaryButton(primary, model, playFocus, onPlay)
-            // Secondary actions are icon-only, as on the Expo details page. Those Customize Buttons
-            // moved to More ([DetailsButtons]) are left out here and listed there instead.
-            if (primary?.start != null && DetailsButtons.inRow(DetailsAction.START_OVER)) {
-                CaptionedIconButton("Start from the beginning", onClick = { onStartOver(primary) }) {
-                    Icon(AppIcons.Restart, contentDescription = "Start Over")
-                }
-            }
-            if (DetailsButtons.inRow(DetailsAction.VERSIONS)) VersionsButton(model, onVersions)
-            if (DetailsButtons.inRow(DetailsAction.CHOOSE_SOURCE)) {
-                IconButton(onClick = onChooseSource, enabled = target.isMovie || model.primaryEpisode != null) {
-                    Icon(Icons.Filled.Search, contentDescription = "Choose Source")
-                }
-            }
-            if (DetailsButtons.inRow(DetailsAction.TRACKS)) PrequeueTracksButton(prequeueTracks, warm)
-            if (trailer.available && DetailsButtons.inRow(DetailsAction.TRAILER)) {
-                IconButton(onClick = { trailer.buttonPressed(target.name) }) {
-                    when {
-                        trailer.preparingFullScreen -> CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
-                        trailer.showing && !trailer.paused -> Icon(AppIcons.Pause, contentDescription = "Pause Trailer")
-                        else -> Icon(AppIcons.Film, contentDescription = "Play Trailer")
+        val infoShown = DetailsInfoLine.of(DetailsInfo.settings, prequeueTracks, warm) != null
+        CompositionLocalProvider(LocalHidesFocusCaptions provides infoShown) {
+            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                PrimaryButton(primary, model, playFocus, onPlay)
+                // Secondary actions are icon-only, as on the Expo details page. Those Customize Buttons
+                // moved to More ([DetailsButtons]) are left out here and listed there instead.
+                if (primary?.start != null && DetailsButtons.inRow(DetailsAction.START_OVER)) {
+                    CaptionedIconButton("Start from the beginning", onClick = { onStartOver(primary) }) {
+                        Icon(AppIcons.Restart, contentDescription = "Start Over")
                     }
                 }
-            }
-            if (DetailsButtons.inRow(DetailsAction.WATCHLIST)) WatchlistButton(model, listOperations)
-            if (DetailsButtons.inRow(DetailsAction.LISTS)) {
-                IconButton(onClick = { listOperations.begin(key = "picker")?.let { CustomListsStore.openPicking(target, it) } }) {
-                    Icon(AppIcons.PlaylistAdd, contentDescription = "Manage Lists")
+                if (DetailsButtons.inRow(DetailsAction.VERSIONS)) VersionsButton(model, onVersions)
+                if (DetailsButtons.inRow(DetailsAction.CHOOSE_SOURCE)) {
+                    IconButton(onClick = onChooseSource, enabled = target.isMovie || model.primaryEpisode != null) {
+                        Icon(Icons.Filled.Search, contentDescription = "Choose Source")
+                    }
                 }
+                if (DetailsButtons.inRow(DetailsAction.TRACKS)) PrequeueTracksButton(prequeueTracks, warm)
+                if (trailer.available && DetailsButtons.inRow(DetailsAction.TRAILER)) {
+                    IconButton(onClick = { trailer.buttonPressed(target.name) }) {
+                        when {
+                            trailer.preparingFullScreen -> CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                            trailer.showing && !trailer.paused -> Icon(AppIcons.Pause, contentDescription = "Pause Trailer")
+                            else -> Icon(AppIcons.Film, contentDescription = "Play Trailer")
+                        }
+                    }
+                }
+                if (DetailsButtons.inRow(DetailsAction.WATCHLIST)) WatchlistButton(model, listOperations)
+                if (DetailsButtons.inRow(DetailsAction.LISTS)) {
+                    IconButton(onClick = { listOperations.begin(key = "picker")?.let { CustomListsStore.openPicking(target, it) } }) {
+                        Icon(AppIcons.PlaylistAdd, contentDescription = "Manage Lists")
+                    }
+                }
+                if (DetailsButtons.inRow(DetailsAction.WATCHED)) WatchedButton(model, listOperations, onWatchState)
+                IconButton(onClick = onMore) { Icon(AppIcons.MoreHoriz, contentDescription = "More") }
             }
-            if (DetailsButtons.inRow(DetailsAction.WATCHED)) WatchedButton(model, listOperations, onWatchState)
-            IconButton(onClick = onMore) { Icon(AppIcons.MoreHoriz, contentDescription = "More") }
         }
+        DetailsInfoRow(prequeueTracks, warm, Modifier.padding(top = 4.dp))
     }
 }
 
@@ -206,8 +212,11 @@ private fun CaptionedIconButton(caption: String, onClick: () -> Unit, icon: @Com
     }
 }
 
+internal val LocalHidesFocusCaptions = compositionLocalOf { false }
+
 @Composable
 internal fun FocusCaption(text: String) {
+    if (LocalHidesFocusCaptions.current) return
     Text(
         text, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.7f), maxLines = 1,
         modifier = Modifier.floatingBelow(),

@@ -102,4 +102,5 @@ internal fun prequeueSourceHints(status: PrequeueStatus) = SourceHints(
     attributes = status.selectedResult?.attributes.orEmpty() + status.resultAttributes.orEmpty(),
     dolbyVisionProfile = status.dolbyVisionProfile?.ifEmpty { null },
     hdr10 = status.hasHdr10,
+    frameRate = FrameRates.parse(status.frameRate),
 )

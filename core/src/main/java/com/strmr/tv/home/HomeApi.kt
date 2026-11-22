@@ -28,6 +28,7 @@ import com.strmr.tv.api.ListedTitle
 import com.strmr.tv.api.LossyListSerializer
 import com.strmr.tv.api.Title
 import com.strmr.tv.app.Config
+import com.strmr.tv.library.HiddenItem
 import java.util.TimeZone
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -108,6 +109,7 @@ suspend fun ApiClient.homeSettings(view: String = HomeViews.ALL, expectedContext
             disableCardExpansion = home.disableTvLandscapeCardExpansion,
             shelfScale = home.homeShelfScale,
             heroScale = home.homeHeroScale,
+            excludeUpcomingFromContinue = home.excludeUpcomingFromContinue,
         ),
         hasAI = listOf(metadata?.aiApiKey, metadata?.geminiApiKey).any { !it.isNullOrEmpty() },
         topShelfMode = TopShelfMode.from(home.tvTopShelfMode),
@@ -178,6 +180,18 @@ internal suspend fun readContinueWatching(
 /** Drops a title from Continue Watching until it is played again. */
 suspend fun ApiClient.hideFromContinueWatching(seriesId: String, expectedContext: Long) {
     val path = inContext(expectedContext) { "$profilePath/history/continue/hide" }
+    sendRaw("POST", path, body = buildJsonObject { put("seriesId", seriesId) }, expectedContext = expectedContext)
+}
+
+/** The titles [hideFromContinueWatching] dropped, newest first (Settings › Hidden Items). Name and art may be missing. */
+suspend fun ApiClient.hiddenFromContinueWatching(expectedContext: Long = ProfileDataContext.current): List<HiddenItem> {
+    val path = inContext(expectedContext) { "$profilePath/history/continue/hidden" }
+    return sendList("GET", path, expectedContext = expectedContext)
+}
+
+/** Undoes [hideFromContinueWatching]: the title returns to Continue Watching if it still qualifies. */
+suspend fun ApiClient.showInContinueWatching(seriesId: String, expectedContext: Long) {
+    val path = inContext(expectedContext) { "$profilePath/history/continue/unhide" }
     sendRaw("POST", path, body = buildJsonObject { put("seriesId", seriesId) }, expectedContext = expectedContext)
 }
 

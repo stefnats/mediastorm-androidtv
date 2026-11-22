@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Style
 import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -125,6 +126,8 @@ fun SettingsScreen(asPage: Boolean) {
                 SettingsRow("Starting interests", "Saved for this profile") { tasteSetup() }
                 RowDivider()
                 SettingsRow("Child age rules", if (ageLoading) "Loading current rules…" else ageError ?: ageSummary?.headline ?: "Unavailable") { showingAgeRules = true }
+                RowDivider()
+                PageRow("Hidden Items", SettingsKeys.HIDDEN, "Hidden from Continue Watching or this profile", Icons.Filled.VisibilityOff)
             }
         }
         SettingsSection("Preferences", "Stored on this device. Choices left at Default follow the server's settings for this profile.") {

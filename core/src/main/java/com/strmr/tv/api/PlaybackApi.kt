@@ -97,6 +97,8 @@ data class PlaybackSettings(
     val automaticLibrarySelectionSupported: Boolean = false,
     /** Internal read result: an unavailable policy must not masquerade as an old server. */
     val sourcePolicyAvailable: Boolean = true,
+    /** Match this device refresh rate to the observed video frame rate. */
+    val matchFrameRate: Boolean = false,
 )
 
 @Serializable
@@ -125,6 +127,7 @@ internal data class PlaybackFields(
     val preferredAudioLanguage: String? = null,
     val allowedTrackLanguages: List<String>? = null,
     val preferLocalFiles: Boolean? = null,
+    val matchFrameRate: Boolean? = null,
 ) {
     /** The `subtitle*` fields of the same object. */
     val style: SubtitleStyle.Server
@@ -191,6 +194,7 @@ internal fun mergePlaybackSettings(
         preferLocalFiles = u?.preferLocalFiles,
         automaticLibrarySelectionSupported = automaticLibrarySelectionSupported,
         sourcePolicyAvailable = sourcePolicyAvailable,
+        matchFrameRate = d?.matchFrameRate ?: u?.matchFrameRate ?: false,
     )
 
 /** Missing optional settings may use legacy defaults; an authorization rejection may not. */

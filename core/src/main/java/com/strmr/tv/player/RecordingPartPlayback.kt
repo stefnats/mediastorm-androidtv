@@ -12,7 +12,7 @@ internal fun recordingPartSession(recording:Recording,part:RecordingPart,url:Str
     val title="${RecordingRules.title(recording)} · Part ${part.index}"
     val request=PlaybackRequest(DetailsTarget("recording:${recording.id}/parts/${part.index}",title,isMovie=true),
         start=partPlayback?.startPositionMs?.takeIf {it>0}?.let {com.strmr.tv.api.StartPoint.Seconds(it/1000.0)})
-    return PlayerSession(request,url,null,reportsProgress=false,sourceLabel=StreamInfo.recording(recording.channelName),ownership=ownership,recordingPart=partPlayback)
+    return PlayerSession(request,url,null,reportsProgress=false,sourceLabel=StreamInfo.recording(recording.channelName),ownership=ownership,recordingPart=partPlayback,audioOffsetKey=AudioOffsetKeys.recording(recording.id))
 }
 
 /** Selected closed files, copied once. Capture wall-clock intervals are never used as media durations. */

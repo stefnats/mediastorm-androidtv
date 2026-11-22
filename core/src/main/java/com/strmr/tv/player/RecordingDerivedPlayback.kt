@@ -63,7 +63,7 @@ internal fun recordingDerivedSession(source: RecordingDerivedPlayback, url: Stri
     val title = RecordingRules.title(source.observation.source.recording) + " · Joined copy"
     return PlayerSession(PlaybackRequest(DetailsTarget("recording-derived:${value.recordingId}/${value.id}", title, true)),
         url, null, reportsProgress = false, sourceLabel = "Recording · Joined copy", ownership = source.owner,
-        recordingDerived = source)
+        recordingDerived = source, audioOffsetKey = AudioOffsetKeys.recording(value.recordingId))
 }
 
 /** Both actual activities check before constructing the decoder; claim happens once there. */

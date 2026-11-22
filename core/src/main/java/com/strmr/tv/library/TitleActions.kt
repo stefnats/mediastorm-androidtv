@@ -11,6 +11,7 @@ import com.strmr.tv.api.WatchedSelection
 import com.strmr.tv.api.vodDenial
 import com.strmr.tv.app.AppLog
 import com.strmr.tv.home.hideFromContinueWatching
+import com.strmr.tv.home.showInContinueWatching
 import com.strmr.tv.ui.AppToast
 import kotlinx.coroutines.CancellationException
 
@@ -48,6 +49,13 @@ object TitleActions {
             false
         }
     }
+
+    /** Settings can explicitly restore an item to Continue Watching. */
+    suspend fun showInContinueWatching(target: DetailsTarget, operation: CustomListOperation) =
+        run("show-continue-watching", target, "Back in Continue Watching", "Failed to show in Continue Watching", operation) {
+            operation.requireTarget(target)
+            checkedListStage(operation.owner, operation) { ApiClient.showInContinueWatching(target.titleId, operation.owner.epoch) }
+        }
 
     /** Actual owned-action publication adapter; legacy non-list actions keep their existing paths. */
     internal suspend fun runOwned(

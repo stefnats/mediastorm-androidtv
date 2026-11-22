@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.ListItem
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import com.strmr.tv.ui.details.DetailsInfo
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.checkHealth
 import com.strmr.tv.api.playbackSettings
@@ -59,9 +60,11 @@ fun SettingsScreen() {
         val settings = ApiClient.playbackSettings()
         TrailerSettings.serverValue = settings.autoPlayTrailers
         CreditsDetectionSettings.serverValue = settings.creditsDetection
+        MatchFrameRateSettings.serverValue = settings.matchFrameRate
     }
     LaunchedEffect(Unit) { loadTrackDefaults() }
     LaunchedEffect(Unit) { SpoilerSettings.refresh() }
+    LaunchedEffect(Unit) { runCatching { DetailsInfo.refresh() } }
     LaunchedEffect(Unit) { BadgeSettings.refresh() }
 
     var health by remember { mutableStateOf<String?>(null) }
@@ -229,6 +232,11 @@ private fun SettingsList(server: HttpUrl?, remote: Boolean, health: String?, che
                 headlineContent = { Text("Child age rules") },
                 supportingContent = { Text(if (ageLoading) "Loading current rules…" else ageError ?: ageSummary?.headline ?: "Unavailable") })
         }
+        item {
+            ListItem(selected = false, onClick = { navigator.open(Page.HiddenItems) },
+                headlineContent = { Text("Hidden Items") },
+                supportingContent = { Text("Titles hidden from Continue Watching or from this profile") })
+        }
         item { Header("Home") }
         item {
             ListItem(
@@ -283,6 +291,8 @@ private fun SettingsList(server: HttpUrl?, remote: Boolean, health: String?, che
         badgeSettingRows()
         item { Header("Spoilers") }
         spoilerSettingRows()
+        item { Header("Details Page") }
+        detailsInfoSettingRows()
         item { Header("Playback") }
         item {
             val editor = rememberEpisodeAutoplayEditor()
@@ -333,6 +343,23 @@ private fun SettingsList(server: HttpUrl?, remote: Boolean, health: String?, che
                         true -> "On"
                         false -> "Off"
                     } + " · finds unknown end credits on screen for Next Episode")
+                },
+            )
+        }
+        item {
+            val override = MatchFrameRateSettings.override
+            val server = MatchFrameRateSettings.serverValue
+            ListItem(
+                selected = false,
+                // Default (follows the server) → On → Off → Default.
+                onClick = { MatchFrameRateSettings.set(when (override) { null -> true; true -> false; false -> null }) },
+                headlineContent = { Text("Match Frame Rate") },
+                supportingContent = {
+                    Text(when (override) {
+                        null -> "Default" + (server?.let { if (it) " (On)" else " (Off)" } ?: "")
+                        true -> "On"
+                        false -> "Off"
+                    } + " · switches the TV's refresh rate to the video's")
                 },
             )
         }

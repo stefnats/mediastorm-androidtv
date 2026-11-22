@@ -33,6 +33,7 @@ fun trackMenuChoices(
     onStyle: (() -> Unit)? = null,
     onSearch: (() -> Unit)? = null,
     onTranslate: (() -> Unit)? = null,
+    onAudioOffset: (() -> Unit)? = null,
 ): List<MenuChoice> {
     val list = tracks.ofType(if (audio) C.TRACK_TYPE_AUDIO else C.TRACK_TYPE_TEXT)
         .filter { it.supported && (controller.session.isLive || !TrackPreferences.isClosedCaption(it.format)) }
@@ -56,6 +57,10 @@ fun trackMenuChoices(
         if (!audio && onTranslate != null && controller.online.available && translationAllowed == true) {
             add(MenuChoice("Translate…", selected = false, onClick = onTranslate))
         }
+        if (audio && onAudioOffset != null && list.isNotEmpty()) {
+            add(MenuChoice("Audio Offset: ${AudioOffset.label(AudioOffsetStore.offsetMs)}", "Delay or advance audio (lip sync)",
+                           selected = false, onClick = onAudioOffset))
+        }
         if (!audio && onStyle != null && (list.isNotEmpty() || ext != null)) {
             add(MenuChoice("Style", SubtitleStyle.sizeName(SubtitleStyleStore.style.size), selected = false, onClick = onStyle))
         }
@@ -78,6 +83,19 @@ fun subtitleStyleChoices(style: SubtitleStyle = SubtitleStyleStore.style): List<
             SubtitleStyleStore.update { it.copy(bottomMargin = v) }
         }
     }
+
+/**
+ * The Audio Offset page: nudge by [AudioOffset.STEP_MS] or reset; each pick applies to the
+ * playing audio at once, for this stream only. Positive = audio later.
+ */
+fun audioOffsetChoices(current: Int = AudioOffsetStore.offsetMs): List<MenuChoice> = listOf(
+    MenuChoice("\u2212${AudioOffset.STEP_MS} ms", "Audio earlier", selected = false) { AudioOffsetStore.step(-AudioOffset.STEP_MS) },
+    MenuChoice("+${AudioOffset.STEP_MS} ms", "Audio later", selected = false) { AudioOffsetStore.step(AudioOffset.STEP_MS) },
+    MenuChoice("Reset", "Now ${AudioOffset.label(current)}", selected = false) { AudioOffsetStore.set(0) },
+)
+
+/** The Audio Offset page's title, with the current value. */
+fun audioOffsetTitle(current: Int = AudioOffsetStore.offsetMs) = "Audio Offset: ${AudioOffset.label(current)}"
 
 /** The Playback Speed menu's rows. */
 fun speedChoices(controller: PlayerController, current: Float, onDone: () -> Unit): List<MenuChoice> =

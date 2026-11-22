@@ -119,7 +119,7 @@ object PlaybackCoordinator {
             val resolution = resolved ?: ApiClient.resolveSourceWithQuality(source, request.title.titleId, request.startPosition,expected)
             val (path, tracks) = resolution
             val hints = SourceHints(source.serviceType.ifEmpty { null }, indexer = source.indexer.ifEmpty { null },
-                                    attributes = source.attributes + resolution.qualityAttributes)
+                                    attributes = source.attributes + resolution.qualityAttributes, frameRate = FrameRates.parse(resolution.frameRate))
             if (manual == null || manual.choice.isEmpty) {
                 ResolvedStream(path, tracks, source.title, source = hints)
             } else {
@@ -149,7 +149,7 @@ object PlaybackCoordinator {
                 subtitleStreams = status.subtitleTracks.orEmpty(), playback = original.playback,
                 manualTracks = true, carried = carried, prequeueId = status.prequeueId,
                 sourceLabel = StreamInfo.source(path, hints, null), sourceDolbyVision = hints.dolbyVisionProfile,
-                sourceHdr10 = hints.hdr10 == true, sourceAttributes = hints.attributes, ownership = owner)
+                sourceHdr10 = hints.hdr10 == true, sourceAttributes = hints.attributes, sourceFrameRate = hints.frameRate, ownership = owner)
         }
     }
     /** Called only at the current activity's ready, explicit controller swap. */
@@ -217,7 +217,7 @@ object PlaybackCoordinator {
         AppLog.i("Recordings", "play ${recording.id} status=${recording.status}")
         if (RecordingRules.isRecording(recording)) {
             begin(request, "Starting…", live = { _, _ -> ApiClient.startRecordingHls(recording, title,expectedContext) }, growing = true, expectedContext=expectedContext,
-                  liveLabel = StreamInfo.recording(recording.channelName), startedNanos = startedNanos)
+                  liveLabel = StreamInfo.recording(recording.channelName), audioOffsetKey = AudioOffsetKeys.recording(recording.id), startedNanos = startedNanos)
             return
         }
         ApiClient.inContext(expectedContext) {
@@ -225,7 +225,7 @@ object PlaybackCoordinator {
             RecordingPartQueues.replace(null)
             val timing = PlaybackStartupTiming.begin(owner, StartupInput.DIRECT_INPUT_SUPPLIED, startedNanos)
             pending = timing.attach(PlayerSession(request, ApiClient.recordingStreamUrl(recording, title,expectedContext), null, reportsProgress = false,
-                                    sourceLabel = StreamInfo.recording(recording.channelName),ownership=owner))
+                                    sourceLabel = StreamInfo.recording(recording.channelName), audioOffsetKey = AudioOffsetKeys.recording(recording.id),ownership=owner))
             launchPlayer()
         }
     }
@@ -308,7 +308,7 @@ object PlaybackCoordinator {
                 ownership.requireCurrent()
                 AppLog.i("Catchup", "archive from ${archive.offsetSeconds}s for ${archive.durationSeconds}s")
                 pending = timing.attach(PlayerSession(request, ApiClient.catchupStreamUrl(archive, channel, program, ownership.epoch), null, reportsProgress = false,
-                                        sourceLabel = listOf("Catch-up", channel.name).joinToString(" · "),ownership=ownership))
+                                        sourceLabel = listOf("Catch-up", channel.name).joinToString(" · "), audioOffsetKey = AudioOffsetKeys.live(channel.id),ownership=ownership))
                 launchPlayer()
             } catch (e: CancellationException) {
                 timing.finish(StartupOutcome.CANCELLED)
@@ -357,6 +357,7 @@ object PlaybackCoordinator {
         growing: Boolean = false,
         liveChannel: LiveChannel? = null,
         liveLabel: String? = null,
+        audioOffsetKey: String? = null,
         expectedContext: Long? = null,
         resolveWithSettings: (suspend (PlaybackSettings?) -> ResolvedStream?)? = null,
         startedNanos: Long = PlaybackStartupTiming.now(),
@@ -384,7 +385,7 @@ object PlaybackCoordinator {
                     PlayerSession(selectedRequest, stream.url, null, reportsProgress = false, liveSessionId = stream.sessionId,
                                   liveStream = stream,
                                   isLive = !growing, growingRestart = if (growing) suspend { live(false, null) } else null,
-                                  retuneLive = live.takeIf { !growing }, liveChannel = liveChannel, sourceLabel = liveLabel,ownership=ownership)
+                                  retuneLive = live.takeIf { !growing }, liveChannel = liveChannel, sourceLabel = liveLabel, audioOffsetKey = audioOffsetKey,ownership=ownership)
                 } else {
                     val settings = try {ApiClient.playbackSettings(expectedContext ?: ProfileDataContext.current)} catch(error:Exception) {error.rethrowVodDenial();null}
                     val r = if (resolveWithSettings != null) resolveWithSettings(settings) else resolve()
@@ -409,7 +410,7 @@ object PlaybackCoordinator {
                                   pickTracksOnDevice = r.pickTracksOnDevice,
                                   sourceLabel = StreamInfo.source(r.path, r.source, selectedRequest.libraryVersion?.origin),
                                   sourceDolbyVision = r.source?.dolbyVisionProfile, sourceHdr10 = r.source?.hdr10 == true,
-                                  sourceAttributes = r.source?.attributes.orEmpty(), ownership=ownership)
+                                  sourceAttributes = r.source?.attributes.orEmpty(), sourceFrameRate = r.source?.frameRate, ownership=ownership)
                 }
                 fun publish() {
                     ownership.requireCurrent()

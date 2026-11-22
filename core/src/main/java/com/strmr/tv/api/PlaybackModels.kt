@@ -65,9 +65,11 @@ data class PlaybackResolution(
     val trackSelection: TrackSelection? = null,
     /** Observed quality of this resolved file; never written back to the search candidate. */
     val qualityAttributes: Map<String, String>? = null,
+    /** Observed file frame rate, for example 24000/1001. */
+    val frameRate: String? = null,
 )
 
-data class ResolvedManualSource(val path: String, val tracks: TrackSelection?, val qualityAttributes: Map<String, String> = emptyMap())
+data class ResolvedManualSource(val path: String, val tracks: TrackSelection?, val qualityAttributes: Map<String, String> = emptyMap(), val frameRate: String? = null)
 
 // Tracks
 
@@ -158,6 +160,8 @@ data class PrequeueStatus(
     val libraryItemId: String? = null,
     val librarySourceType: String? = null,
     val mediaEvidence: MediaEvidence? = null,
+    /** Observed file frame rate, not a release-name claim. */
+    val frameRate: String? = null,
 ) {
     @Serializable
     data class TargetEpisode(

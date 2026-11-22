@@ -101,10 +101,10 @@ class PassthroughGuard(context: Context, delegate: AudioOutputProvider) : Forwar
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(AudioDeviceInfo.TYPE_BLE_BROADCAST)
         }
 
-        /** [DefaultRenderersFactory] whose audio sink goes through [PassthroughGuard]. */
+        /** A sink binds its delay to its own stream, including a muted replacement. */
         fun renderersFactory(context: Context): DefaultRenderersFactory = renderersFactory(context, null)
 
-        internal fun renderersFactory(context: Context, observation: DecodedAudioObservation?): DefaultRenderersFactory = object : DefaultRenderersFactory(context) {
+        internal fun renderersFactory(context: Context, observation: DecodedAudioObservation?, offsetMs: () -> Int = { 0 }): DefaultRenderersFactory = object : DefaultRenderersFactory(context) {
             override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParams: Boolean): AudioSink =
                 DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(enableFloatOutput)
@@ -112,6 +112,7 @@ class PassthroughGuard(context: Context, delegate: AudioOutputProvider) : Forwar
                     .setAudioOutputProvider(PassthroughGuard(context, AudioTrackAudioOutputProvider.Builder(context).build()))
                     .build()
                     .let { sink -> observation?.let { DecodedAudioSink(sink, it) } ?: sink }
+                    .let { sink -> AudioOffsetSink(sink, offsetMs) }
         }
     }
 }

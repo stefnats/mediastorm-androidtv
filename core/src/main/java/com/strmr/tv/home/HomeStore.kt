@@ -132,6 +132,7 @@ class HomeStore internal constructor(
         scope.launch { check(); snapshotFlow { access.layoutIdentity() }.collect { publish() } }
         // Hiding or unhiding a title drops it from, or returns it to, every row.
         scope.launch { check(); snapshotFlow { HiddenItemsStore.revision to HiddenItemsStore.items }.collect { publish() } }
+        scope.launch { check(); snapshotFlow { access.upcomingIdentity() }.drop(1).collect { reloadContinueWatchingRow() } }
     }
 
     /** Reloads the config and every row. Rows already shown stay until their new cards arrive. */
@@ -252,6 +253,15 @@ class HomeStore internal constructor(
         catch (error: Exception) { if (isCurrent && requested == generation) readFailed(error) }
     }
 
+    /** Reload the existing row inside its original profile/context run. */
+    suspend fun reloadContinueWatchingRow() = owned {
+        if (terminalRun || settings == null || loadsRunning > 0) return@owned
+        val requested = generation
+        try { loadRows(plan.filter { it.source == HomeSource.ContinueWatching }, requested) }
+        catch (error: CancellationException) { throw error }
+        catch (error: Exception) { if (isCurrent && requested == generation) readFailed(error) }
+    }
+
     private fun retireDeniedRun() {
         generation++
         terminalRun = true
@@ -276,7 +286,8 @@ class HomeStore internal constructor(
             isLoading = false
             return@supervisorScope
         }
-        val context = access.context(settings, planned, this, dataContext)
+        val effective = settings.copy(excludeUpcomingFromContinue = access.excludeUpcoming(settings.excludeUpcomingFromContinue))
+        val context = access.context(effective, planned, this, dataContext)
         revealed = slots.isNotEmpty()
         // A row already showing cards reloads straight to its complete form.
         val phases = planned.associate { it.id to if (rows[it.id] == null) ShelfPhase.CARDS else ShelfPhase.COMPLETE }
@@ -472,6 +483,8 @@ internal interface HomeStoreAccess {
     fun views(settings: HomeSettings)
     fun layout(settings: HomeSettings, plan: List<PlannedShelf>)
     fun layoutIdentity(): Any
+    fun upcomingIdentity(): Any? = null
+    fun excludeUpcoming(profile: Boolean): Boolean = profile
     fun ordered(plan: List<PlannedShelf>): List<PlannedShelf>
     fun hiddenShelf(id: String): Boolean
     fun log(warning: Boolean, message: String)
@@ -479,6 +492,8 @@ internal interface HomeStoreAccess {
 }
 
 private object ServerHomeStoreAccess : HomeStoreAccess {
+    override fun upcomingIdentity(): Any? = HomeLayoutStore.upcomingInContinue
+    override fun excludeUpcoming(profile: Boolean): Boolean = HomeLayoutStore.excludesUpcoming(profile)
     override suspend fun settings(view: String, expected: Long) = ApiClient.homeSettings(view, expected)
     override suspend fun revision(expected: Long) = ApiClient.homeRevision(expected)
     override suspend fun hidden(expected: Long) { HiddenItemsStore.refresh(expected) }

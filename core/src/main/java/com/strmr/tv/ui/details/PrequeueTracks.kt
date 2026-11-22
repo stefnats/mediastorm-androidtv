@@ -110,6 +110,12 @@ class PrequeueTracks(
 
     /** "English · EAC3 · Subtitles Off", for the picks or else what Play would pick. */
     fun caption(status: PrequeueStatus): String {
+        val picked = selected(status)
+        return listOfNotNull(status.observedQualityLabel, picked.audio, picked.subtitle?.let { "$it Subtitles" } ?: "Subtitles Off").joinToString(" · ")
+    }
+
+    /** Actual selected audio and subtitle labels, separate from observed file quality. */
+    fun selected(status: PrequeueStatus): SelectedTracks {
         val lists = status.trackLists
         val chosen = choiceFor(status)
         val pre = preselected(status)
@@ -123,14 +129,13 @@ class PrequeueTracks(
             ManualTrackChoice.OFF -> null
             else -> chosen.subtitle
         }
-        val parts = mutableListOf<String>()
-        status.observedQualityLabel?.let { parts += it }
-        (lists.audio.firstOrNull { it.index == audioIndex } ?: lists.audio.firstOrNull())?.let { a ->
-            parts += ManualTracks.languageName(a.language)
-            a.codec.ifBlank { null }?.let { parts += it.uppercase() }
+        val audio = (lists.audio.firstOrNull { it.index == audioIndex } ?: lists.audio.firstOrNull())?.let { a ->
+            listOfNotNull(ManualTracks.languageName(a.language), a.codec.ifBlank { null }?.uppercase()).joinToString(" · ")
         }
-        parts += lists.subtitles.firstOrNull { it.index == subtitleIndex }?.let { "${ManualTracks.languageName(it.language)} Subtitles" }
-            ?: "Subtitles Off"
-        return parts.joinToString(" · ")
+        val subtitle = lists.subtitles.firstOrNull { it.index == subtitleIndex }?.let { ManualTracks.languageName(it.language) }
+        return SelectedTracks(audio, subtitle)
     }
 }
+
+/** Labels for the exact tracks Play will select. */
+data class SelectedTracks(val audio: String?, val subtitle: String?)

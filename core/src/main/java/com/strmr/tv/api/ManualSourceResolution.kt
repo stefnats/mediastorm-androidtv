@@ -40,5 +40,5 @@ internal suspend fun resolveManualSourceWithQuality(
         pause();check()
         resolution=poll(id,query);check()
     }
-    return ResolvedManualSource(requireNotNull(resolution.webdavPath), resolution.trackSelection, resolution.qualityAttributes.orEmpty())
+    return ResolvedManualSource(requireNotNull(resolution.webdavPath), resolution.trackSelection, resolution.qualityAttributes.orEmpty(), resolution.frameRate)
 }

@@ -30,7 +30,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.strmr.tv.player.AudioOffsetStore
 import com.strmr.tv.player.MenuChoice
+import com.strmr.tv.player.audioOffsetChoices
+import com.strmr.tv.player.audioOffsetTitle
 import com.strmr.tv.player.PlayerController
 import com.strmr.tv.player.SourceSwitchCandidates
 import com.strmr.tv.player.speedChoices
@@ -38,7 +41,7 @@ import com.strmr.tv.player.subtitleStyleChoices
 import com.strmr.tv.player.trackMenuChoices
 
 /** The player's bottom sheets. */
-enum class PlayerSheet { AUDIO, SUBTITLES, SUBTITLE_STYLE, SUBTITLE_SEARCH, TRANSLATE, SETTINGS, SPEED, ASPECT, ORIENTATION, SOURCES, INFO, REPORT }
+enum class PlayerSheet { AUDIO, SUBTITLES, SUBTITLE_STYLE, SUBTITLE_SEARCH, TRANSLATE, SETTINGS, SPEED, ASPECT, ORIENTATION, SOURCES, INFO, REPORT, AUDIO_OFFSET }
 
 /**
  * The open sheet as a Material bottom sheet; moving from one to another (Subtitles › Style)
@@ -70,8 +73,13 @@ fun PlayerSheetHost(
                     onStyle = { ui.sheet = PlayerSheet.SUBTITLE_STYLE },
                     onSearch = { ui.sheet = PlayerSheet.SUBTITLE_SEARCH }.takeIf { !live },
                     onTranslate = { ui.sheet = PlayerSheet.TRANSLATE }.takeIf { !live },
+                    onAudioOffset = { ui.sheet = PlayerSheet.AUDIO_OFFSET },
                 )
                 ChoiceSheet(if (audio) "Audio" else "Subtitles", choices, if (audio) "No audio tracks" else "No subtitles")
+            }
+            PlayerSheet.AUDIO_OFFSET -> {
+                val offset = AudioOffsetStore.offsetMs
+                ChoiceSheet(audioOffsetTitle(offset), audioOffsetChoices(offset), "")
             }
             PlayerSheet.SUBTITLE_STYLE -> ChoiceSheet("Subtitle Style", subtitleStyleChoices(), "")
             PlayerSheet.SUBTITLE_SEARCH -> SubtitleSearchSheet(controller, done)

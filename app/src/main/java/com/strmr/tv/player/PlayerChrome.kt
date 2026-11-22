@@ -53,7 +53,7 @@ import com.strmr.tv.ui.AppIcons
 import com.strmr.tv.ui.ClockText
 import kotlinx.coroutines.delay
 
-private enum class Menu { INFO, AUDIO, SUBTITLES, SUBTITLE_STYLE, SUBTITLE_SEARCH, SUBTITLE_TRANSLATE, SPEED, SOURCES, REPORT }
+private enum class Menu { INFO, AUDIO, SUBTITLES, SUBTITLE_STYLE, SUBTITLE_SEARCH, SUBTITLE_TRANSLATE, SPEED, SOURCES, REPORT, AUDIO_OFFSET }
 
 /**
  * Media3 has no TV transport UI, so this is the player's chrome in Compose for TV, laid out
@@ -161,6 +161,7 @@ fun PlayerChrome(controller: PlayerController, onExit: () -> Unit, onAddScreen: 
         when {
             // Back from Style returns to the Subtitles menu, as a tvOS submenu does.
             menu == Menu.SUBTITLE_STYLE -> menu = Menu.SUBTITLES
+            menu == Menu.AUDIO_OFFSET -> menu = Menu.AUDIO
             menu != null -> menu = null
             scrub.active -> scrub.cancel()
             visible && error == null -> visible = false
@@ -306,7 +307,9 @@ fun PlayerChrome(controller: PlayerController, onExit: () -> Unit, onAddScreen: 
         }
         val popover = Modifier.align(Alignment.BottomEnd).padding(end = 64.dp, bottom = 190.dp)
         when (menu) {
-            Menu.AUDIO -> TrackMenu(controller, audio = true, onDone = { menu = null }, modifier = popover)
+            Menu.AUDIO -> TrackMenu(controller, audio = true, onDone = { menu = null }, modifier = popover,
+                                    onAudioOffset = { menu = Menu.AUDIO_OFFSET })
+            Menu.AUDIO_OFFSET -> AudioOffsetMenu(popover)
             Menu.SUBTITLES -> TrackMenu(controller, audio = false, onDone = { menu = null }, modifier = popover,
                                         onStyle = { menu = Menu.SUBTITLE_STYLE },
                                         onSearch = { menu = Menu.SUBTITLE_SEARCH }.takeIf { !live },

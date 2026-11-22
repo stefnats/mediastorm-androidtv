@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -29,6 +30,8 @@ import com.strmr.tv.live.LiveStream
 import com.strmr.tv.ui.live.multiscreen.MultiscreenHandover
 import com.strmr.tv.ui.live.multiscreen.MultiscreenLauncher
 import com.strmr.tv.ui.StrmrTheme
+import com.strmr.tv.ui.settings.MatchFrameRateSettings
+import kotlinx.coroutines.launch
 
 /**
  * Full-screen playback, its own activity so the system handles it as a player: the window's
@@ -56,14 +59,26 @@ class PlayerActivity : ComponentActivity() {
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         PlaybackCoordinator.playerOpen = true
-        val matcher = FrameRateMatcher(window, currentDisplay())
+        val matcher = FrameRateMatcher(
+            window, currentDisplay(),
+            onSwitch = { controller?.displayModeSwitched() },
+            pauseForSwitch = { controller?.pauseForSwitch() ?: {} },
+        )
         frameRate = matcher
-        val c = try { PlayerController(this, session) { format -> matcher.match(format.frameRate) } }
+        val c = try {
+            PlayerController(this, session, startGate = { start -> matcher.holdStart(session.sourceFrameRate, start) }) { format ->
+                matcher.onVideoFormat(format, controller?.session?.sourceFrameRate ?: session.sourceFrameRate)
+            }
+        }
         catch (retired: kotlinx.coroutines.CancellationException) {
             val joined = session.recordingDerived ?: throw retired
             joined.release(); finish(); return
         }
         controller = c
+        c.player.setVideoFrameMetadataListener { pts, release, format, mediaFormat ->
+            if (controller === c && c.session.canOpenPlayer()) matcher.onVideoFrameAboutToBeRendered(pts, release, format, mediaFormat)
+        }
+        matchFrameRate(session, matcher)
         onBackPressedDispatcher.addCallback(this) {controller?.cancelRecordingParts();finish()}
         setContent {
             StrmrTheme {
@@ -96,7 +111,13 @@ class PlayerActivity : ComponentActivity() {
                     switch?.takeIf {session.canOpenPlayer()}?.let {
                         if (it.buffered != null) {
                             c.adoptBuffered(it)?.let { replacement ->
+                                matcher.replaceStream()
                                 controller = replacement
+                                replacement.player.setVideoFrameMetadataListener { pts, release, format, mediaFormat ->
+                                    if (controller === replacement && replacement.session.canOpenPlayer()) matcher.onVideoFrameAboutToBeRendered(pts, release, format, mediaFormat)
+                                }
+                                matchFrameRate(replacement.session, matcher)
+                                replacement.videoFormat.value?.let { matcher.onVideoFormat(it, replacement.session.sourceFrameRate) }
                             }
                         } else {
                             finish()
@@ -177,6 +198,27 @@ class PlayerActivity : ComponentActivity() {
         recordingNext?.let(PlaybackCoordinator::continueRecordingParts)
         recordingNext=null
         handover = null
+    }
+
+    /**
+     * Match Frame Rate: this device's setting, else the server's (the session's playback
+     * settings, read now for live TV and recordings). Trailers keep the display as it is.
+     */
+    private fun matchFrameRate(session: PlayerSession, matcher: FrameRateMatcher) {
+        if (session.request.title.titleId == "trailer") return matcher.enable(false)
+        MatchFrameRateSettings.override?.let { return matcher.enable(it) }
+        val owner = requireNotNull(session.ownership)
+        lifecycleScope.launch {
+            try {
+                val server = session.playback?.matchFrameRate ?: ApiClient.playbackSettings(owner.epoch).matchFrameRate
+                owner.use {
+                    if (controller?.session === session) matcher.enable(MatchFrameRateSettings.enabled(server))
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (owner.isCurrent() && controller?.session === session) matcher.enable(false)
+            }
+        }
     }
 
     private fun currentDisplay(): Display? =

@@ -1,6 +1,7 @@
 package com.strmr.tv.player
 
 import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
 import com.strmr.tv.api.ApiClient
 import com.strmr.tv.api.SourceResult
 import com.strmr.tv.api.resolveSourceWithQuality
@@ -31,6 +32,7 @@ class AutoSwitch(private val controller: PlayerController) {
     private var resolving:Job?=null
     private var switching = false
     val preparing get() = switching
+    private var giveUpAfterSwitch: (() -> Unit)? = null
     /** Sources that failed to resolve on an earlier try from this player. */
     private val failed = mutableSetOf<String>()
     private var sources: List<SourceResult>? = null
@@ -51,7 +53,10 @@ class AutoSwitch(private val controller: PlayerController) {
         }
     }
 
+    fun resettle() = watch.reset()
+
     fun cancel() {
+        giveUpAfterSwitch = null
         job?.cancel();resolving?.cancel();switching=false
     }
 
@@ -67,19 +72,25 @@ class AutoSwitch(private val controller: PlayerController) {
     }
 
     /** Resolves the next untried source and switches to it; with none left, stays put. */
-    fun trigger(reason: String) {
+    fun trigger(reason: String, onGiveUp: (() -> Unit)? = null): Boolean {
+        if (switching && onGiveUp != null) {
+            giveUpAfterSwitch = onGiveUp
+            return true
+        }
         if (!AutoSwitchSettings.enabled || !applies || controller.releaseReportOpen || controller.audioRecoveryActive || switching || controller.switchTo.value != null ||
-            controller.advanceTo.value != null || controller.ended.value) return
+            controller.advanceTo.value != null || controller.ended.value) return false
         if (request.autoSwitchCount >= LIMIT) {
             AppLog.i(TAG, "$reason; already switched ${request.autoSwitchCount} times, staying")
             watch.reset()
-            return
+            return false
         }
+        giveUpAfterSwitch = onGiveUp
         switching = true
         val tried = (request.autoSwitchTried + failed + listOfNotNull(key(session.releaseName))).toMutableSet()
         AppLog.i(TAG, "$reason at ${controller.player.currentPosition / 1000}s on \"${session.releaseName}\"")
         controller.online.setStatus("Switching to another source…")
         resolving=controller.scope.launch {
+            var switched = false
             val attempt=com.strmr.tv.api.VodDenialEvents.begin(request.title.titleId,controller.dataContext)
             try {
                 requirePlaybackContext(controller.dataContext)
@@ -95,13 +106,25 @@ class AutoSwitch(private val controller: PlayerController) {
                     if(controller.releaseReportOpen || controller.audioRecoveryActive || controller.switchTo.value!=null || controller.ended.value || controller.vodDenied.value!=null)throw CancellationException("Source action changed")
                     resolved
                 })
-                if(selected!=null) {switchTo(selected.first,selected.second,tried);return@launch}
+                if(selected!=null) {
+                    switchTo(selected.first,selected.second,tried)
+                    switched = true
+                    return@launch
+                }
                 controller.online.setStatus("No other source to switch to",clearAfterMs=4_000);failed+=tried
-            } catch(error:CancellationException) {throw error
+            } catch(error:CancellationException) {giveUpAfterSwitch = null; throw error
             } catch(error:Exception) {
                 error.vodDenial?.let {controller.denyVod(it,attempt)}
-            } finally {watch.reset();switching=false}
+            } finally {
+                watch.reset(); switching = false
+                val giveUp = giveUpAfterSwitch
+                giveUpAfterSwitch = null
+                if (!switched && controller.canUsePlayerAux() && session.canOpenPlayer() &&
+                    !controller.releaseReportOpen && !controller.audioRecoveryActive &&
+                    controller.switchTo.value == null && controller.advanceTo.value == null && !controller.ended.value) giveUp?.invoke()
+            }
         }
+        return true
     }
 
     private fun switchTo(source: SourceResult, resolved: ResolvedManualSource, tried: Set<String>) {
@@ -126,5 +149,9 @@ class AutoSwitch(private val controller: PlayerController) {
         const val CANDIDATES = 5
         /** Stalls this close to the end aren't worth a switch; the credits are rolling. */
         const val END_MARGIN_MS = 60_000L
+
+        /** Reading/container errors may improve on another source; output/DRM errors do not. */
+        fun switchesOnError(errorCode: Int): Boolean =
+            errorCode in 2000..3999 || errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED
     }
 }

@@ -45,8 +45,9 @@ data class PlannedShelf(
         val settings = context.settings
         val result = when (val s = source) {
             HomeSource.ContinueWatching -> {
-                var items = context.continueWatching()
-                if (settings.excludeUpcomingFromContinue) items = items.filterNot { it.isUpcoming }
+                // Upcoming shows go to My Upcoming, or, when shown here, only those airing within a week.
+                val now = System.currentTimeMillis()
+                val items = context.continueWatching().filter { it.keptInContinueWatching(settings.excludeUpcomingFromContinue, now) }
                 row(items.map(HomeCard::from), list = BrowseList.ContinueWatching)
             }
             HomeSource.Upcoming -> {
