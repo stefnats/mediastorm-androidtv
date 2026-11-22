@@ -67,6 +67,8 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveScreen(asPage: Boolean) {
+    val profile by com.strmr.tv.app.AppSession.profile.collectAsState()
+    if (profile?.isKidsProfile == true) { KidsLiveScreen(asPage); return }
     val scope = rememberCoroutineScope()
     val context by ProfileDataContext.changes.collectAsState()
     val store = rememberProfileLiveStore(context)

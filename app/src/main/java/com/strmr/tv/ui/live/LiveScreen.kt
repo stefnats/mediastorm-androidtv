@@ -85,6 +85,8 @@ class LivePick(val title: String, val marked: LiveChannel?, val error: String?, 
  */
 @Composable
 fun LiveScreen(pick: LivePick? = null, sharedStore: LiveStore? = null) {
+    val profile by com.strmr.tv.app.AppSession.profile.collectAsState()
+    if (profile?.isKidsProfile == true) { KidsLiveScreen(); return }
     val scope = rememberCoroutineScope()
     val context by ProfileDataContext.changes.collectAsState()
     val store = sharedStore ?: rememberProfileLiveStore(context)

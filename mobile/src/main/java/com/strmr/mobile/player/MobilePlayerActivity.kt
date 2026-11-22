@@ -178,6 +178,7 @@ class MobilePlayerActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        controller?.enforceProgrammeLimit()
         if (!relaunch) PlaybackCoordinator.playerStarted()
         hideSystemBars()
     }

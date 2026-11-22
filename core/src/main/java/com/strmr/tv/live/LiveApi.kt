@@ -183,6 +183,8 @@ suspend fun ApiClient.startLive(
     playAttemptId: String? = null, recordingConfirmation: String? = null,
     automaticRetry: Boolean = false,
 ): LiveStream {
+    if (com.strmr.tv.app.AppSession.profile.value?.isKidsProfile == true)
+        throw ApiError.NotReady("Choose a programme in Child Live TV. Direct sources and timeshift are unavailable.")
     val q = inContext(expectedContext) { buildMap {
         if (forceHls) put("format", "hls")
         if (timeshift) put("timeshift", "1")

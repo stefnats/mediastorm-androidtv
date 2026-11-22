@@ -39,19 +39,20 @@ internal object ShellTabs {
     /**
      * Visible entries in order: Home, then the views with their own tab and the pages in this
      * device's Tab Order (by default the views, then the pages), then Settings. Kids profiles
-     * don't get Live TV (as in Expo).
+     * get Live TV only after a parent explicitly enables the programme rule.
      */
-    fun build(profile: Profile?, viewTabs: List<String>): List<ShellTab> =
-        MenuTabs.ordered(defaultOrder(profile, viewTabs), ShellTab::orderKey, ShellTab::pinnedFirst, ShellTab::pinnedLast)
+    fun build(profile: Profile?, viewTabs: List<String>, kidsLiveEnabled: Boolean = false): List<ShellTab> =
+        MenuTabs.ordered(defaultOrder(profile, viewTabs, kidsLiveEnabled), ShellTab::orderKey, ShellTab::pinnedFirst, ShellTab::pinnedLast)
 
     /** The entries Tab Order can move, in their current order. */
     fun orderable(profile: Profile?, viewTabs: List<String>): List<ShellTab> =
         build(profile, viewTabs).filterNot { it.pinnedFirst || it.pinnedLast }
 
-    private fun defaultOrder(profile: Profile?, viewTabs: List<String>): List<ShellTab> = MainTab.entries.filter { tab ->
+    private fun defaultOrder(profile: Profile?, viewTabs: List<String>, kidsLiveEnabled: Boolean): List<ShellTab> = MainTab.entries.filter { tab ->
         if (tab == MainTab.MY_AREA) return@filter com.strmr.tv.ui.lists.PersonalArea.available(profile) && MenuTabs.isVisible(MenuTab.WATCHLIST)
         val menu = tab.menu ?: return@filter true
-        MenuTabs.isVisible(menu) && !(menu == MenuTab.LIVE && profile?.isKidsProfile == true)
+        if (menu == MenuTab.LIVE) com.strmr.tv.live.liveMenuVisible(profile?.isKidsProfile == true, kidsLiveEnabled, MenuTabs.isVisible(menu))
+        else MenuTabs.isVisible(menu)
     }.flatMap { tab ->
         val own = ShellTab(tab.name, if (tab == MainTab.HOME) HomeViewTabs.homeTitle(viewTabs) else tab.title, tab.icon, tab)
         if (tab != MainTab.HOME) listOf(own)

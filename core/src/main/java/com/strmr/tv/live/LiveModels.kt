@@ -134,6 +134,8 @@ data class LiveStream(
      * and return to live); 0 when it keeps only the live edge.
      */
     val timeshiftWindowSeconds: Int = 0,
+    /** One explicitly selected child programme; later status replies cannot renew this limit. */
+    val programmeLimit: KidsProgrammeLimit? = null,
 ) {
     val timeshift: Boolean get() = sessionId != null && timeshiftWindowSeconds > 0
 }

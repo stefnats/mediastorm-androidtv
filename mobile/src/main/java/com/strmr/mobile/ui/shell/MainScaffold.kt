@@ -51,7 +51,8 @@ fun MainScaffold() {
     remember(profile?.id) { HomeViewStore.activate(ApiClient.profileId) }
     val navigator = remember { Navigator() }
     val compact = LocalConfiguration.current.smallestScreenWidthDp < 600
-    val sections = Section.visible(kids = profile?.isKidsProfile == true)
+    val kidsLiveEnabled = com.strmr.tv.live.rememberKidsLiveAvailable(profile)
+    val sections = Section.visible(kids = profile?.isKidsProfile == true, kidsLiveEnabled = kidsLiveEnabled)
     val split = TabSplit.of(sections, compact)
 
     LaunchedEffect(Unit) { MenuTabs.refresh(ApiClient.profileId) }

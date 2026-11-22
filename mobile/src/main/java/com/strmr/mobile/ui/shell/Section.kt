@@ -52,14 +52,14 @@ enum class Section(val title: String, val icon: ImageVector, val selectedIcon: I
     companion object {
         /**
          * The sections the profile's menu shows, Home first and the rest in this device's Tab
-         * Order (by default the Expo order); kids profiles get no Live TV (as Expo).
+         * Order; child Live TV requires an explicitly enabled programme rule.
          */
-        fun visible(kids: Boolean): List<Section> = MenuTabs.ordered(
+        fun visible(kids: Boolean, kidsLiveEnabled: Boolean = false): List<Section> = MenuTabs.ordered(
             entries.filter { s ->
                 if (s == MORE) return@filter false
                 if (s == MY_AREA) return@filter !kids && MenuTabs.isVisible(MenuTab.WATCHLIST)
                 val tab = s.menuTab ?: return@filter true
-                if (s == LIVE && kids) return@filter false
+                if (s == LIVE) return@filter com.strmr.tv.live.liveMenuVisible(kids, kidsLiveEnabled, MenuTabs.isVisible(tab))
                 MenuTabs.isVisible(tab)
             },
             Section::orderKey,

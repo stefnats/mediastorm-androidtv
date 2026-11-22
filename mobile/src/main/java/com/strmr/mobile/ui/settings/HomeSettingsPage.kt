@@ -115,7 +115,7 @@ fun CardSettingsPage() {
 fun MenuSettingsPage() {
     SettingsPage("Menu") {
         SettingsSection(
-            footer = "Home, Profiles, Downloads and Settings always show; Live never shows on kids profiles. On phones the first four sections are in the navigation bar and the rest under More.",
+            footer = "Home, Profiles, Downloads and Settings always show. Child Live TV requires a guide and age limit explicitly enabled by a parent. On phones the first four sections are in the navigation bar and the rest under More.",
         ) {
             MenuTab.entries.forEach { tab ->
                 val override = MenuTabs.overrides[tab.key]

@@ -21,6 +21,7 @@ import com.strmr.tv.live.EpgProgram
 import com.strmr.tv.live.LiveChannel
 import com.strmr.tv.live.LiveHlsPreference
 import com.strmr.tv.live.LiveStream
+import com.strmr.tv.live.startKidsLive
 import com.strmr.tv.live.LivePlaybackAttempt
 import com.strmr.tv.live.RecordingInterruptionConsent
 import com.strmr.tv.live.Recording
@@ -180,6 +181,11 @@ object PlaybackCoordinator {
         val startedNanos = PlaybackStartupTiming.now()
         if (expectedContext != ProfileDataContext.current || _resolving.value != null) return
         val request = PlaybackRequest(DetailsTarget(channel.id, programTitle ?: channel.name, isMovie = true, backdropUrl = null, logoUrl = channel.logoUrl))
+        if (com.strmr.tv.app.AppSession.profile.value?.isKidsProfile == true) {
+            begin(request, "Checking this programme…", live = { _, _ -> ApiClient.startKidsLive(channel.id, expectedContext) },
+                liveChannel = channel, expectedContext = expectedContext, liveLabel = StreamInfo.live(channel.name), startedNanos = startedNanos)
+            return
+        }
         val attempt = LivePlaybackAttempt(requireCurrent = { ProfileDataContext.requireCurrent(expectedContext) })
         // A source remembered as needing HLS asks for it from the first tune (LiveHlsPreference).
         // Stremio failover tunes another of the channel's streams ([LiveRetune]).
@@ -374,7 +380,8 @@ object PlaybackCoordinator {
                 expectedContext?.let(ProfileDataContext::requireCurrent)
                 val prepared = if (live != null) {
                     val stream = live(false, null)
-                    PlayerSession(request, stream.url, null, reportsProgress = false, liveSessionId = stream.sessionId,
+                    val selectedRequest = stream.programmeLimit?.let { request.copy(title = request.title.copy(name = it.programme.title)) } ?: request
+                    PlayerSession(selectedRequest, stream.url, null, reportsProgress = false, liveSessionId = stream.sessionId,
                                   liveStream = stream,
                                   isLive = !growing, growingRestart = if (growing) suspend { live(false, null) } else null,
                                   retuneLive = live.takeIf { !growing }, liveChannel = liveChannel, sourceLabel = liveLabel,ownership=ownership)

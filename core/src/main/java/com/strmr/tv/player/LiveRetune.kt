@@ -76,6 +76,7 @@ class LiveRetune(
     private var failoverJob: Job? = null
     private var retuneJob: Job? = null
     private var released = false
+    private val programmeLimited = first?.programmeLimit != null
     private val lifetime = PlayerHlsLifecycle(owner, playerCurrent, denialTitleId, { release(); onDenied(it) }).also { it.remember(sessionId) }
     private val hls = LiveHlsFallback(direct = sessionId == null)
     private var hlsProof: Job? = null
@@ -125,6 +126,7 @@ class LiveRetune(
 
     /** Stops the channel's session for the archive; [unpark] tunes it again. */
     fun park() {
+        if (programmeLimited) return
         if (!lifetime.current() || released || parked) return
         lifetime.invalidate()
         parked = true
@@ -138,6 +140,7 @@ class LiveRetune(
 
     /** Back to live from the archive: the channel tuned afresh, with a full retune budget. */
     fun unpark() {
+        if (programmeLimited) return
         if (!lifetime.current() || released || !parked) return
         parked = false
         policy = LiveRetunePolicy()
@@ -155,6 +158,7 @@ class LiveRetune(
 
     /** The stream ended, which a live channel doesn't: its source dropped. */
     fun ended() {
+        if (programmeLimited) { endLimitedProgramme(); return }
         if (!lifetime.current() || released || parked) return
         if (!fallBackToHls("end of stream") && !sourceLost("end of stream")) failOverOrGiveUp("end of stream", NEVER_PLAYED)
     }
@@ -163,8 +167,21 @@ class LiveRetune(
      * A playback error; true when this took it over: any error of a direct stream that never
      * played (retried as HLS), else a source error (retuned).
      */
-    fun failed(e: PlaybackException): Boolean = !lifetime.current() || released || !parked && (stopForCapacity(e) || fallBackToHls(e.errorCodeName) || LiveRetunePolicy.isSourceError(e.errorCode) && sourceLost(e.errorCodeName) ||
+    fun failed(e: PlaybackException): Boolean {
+        if (programmeLimited) { endLimitedProgramme(); return true }
+        return !lifetime.current() || released || !parked && (stopForCapacity(e) || fallBackToHls(e.errorCodeName) || LiveRetunePolicy.isSourceError(e.errorCode) && sourceLost(e.errorCodeName) ||
             failOver(e.errorCodeName, e.message ?: e.errorCodeName))
+    }
+
+    private fun endLimitedProgramme() {
+        if (released) return
+        release()
+        player.pause()
+        player.stop()
+        player.clearMediaItems()
+        player.clearVideoSurface()
+        giveUp("This child programme has stopped. Choose a programme again for a new guide decision.")
+    }
 
     private fun stopForCapacity(error: Throwable): Boolean {
         val message = liveCapacityRejection(error) ?: return false
@@ -228,6 +245,7 @@ class LiveRetune(
 
     /** Stops the stream and its session, and tunes the channel again after [delayMs]. */
     private fun restart(label: String, delayMs: Long) {
+        if (programmeLimited) { endLimitedProgramme(); return }
         if (!lifetime.current() || released || parked) return
         val ticket = lifetime.begin() ?: return
         retuneJob?.cancel()
@@ -329,6 +347,7 @@ class LiveRetune(
      * or between sessions mid-retune.
      */
     fun handOver(): String? {
+        if (programmeLimited) { release(); return null }
         val id = sessionId?.takeIf { retuneJob?.isActive != true }
         released = true
         lifetime.detach(id)

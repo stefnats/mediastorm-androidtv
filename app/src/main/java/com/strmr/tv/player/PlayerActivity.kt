@@ -130,7 +130,7 @@ class PlayerActivity : ComponentActivity() {
                     val aspect by c.videoAspect.collectAsState()
                     // The device's subtitle style (Settings, or the Subtitles menu's Style picks), live.
                     SubtitleOverlay(cues, SubtitleStyleStore.style, aspect, Modifier.fillMaxSize())
-                    androidx.compose.runtime.key(c) { PlayerChrome(c, onExit = { c.cancelRecordingParts();finish() }, onAddScreen = { addScreen(c) }.takeIf { session.liveChannel != null }) }
+                    androidx.compose.runtime.key(c) { PlayerChrome(c, onExit = { c.cancelRecordingParts();finish() }, onAddScreen = { addScreen(c) }.takeIf { session.liveChannel != null && session.liveStream?.programmeLimit == null }) }
                     SubtitleStatusToast(c, Modifier.align(androidx.compose.ui.Alignment.TopEnd))
                 }
             }
@@ -143,6 +143,7 @@ class PlayerActivity : ComponentActivity() {
      * with the player and the first screen tunes the channel again.
      */
     private fun addScreen(c: PlayerController) {
+        if (c.session.liveStream?.programmeLimit != null) return
         // After Stremio failover, the stream now playing.
         val channel = c.liveRetune?.channel ?: c.session.liveChannel ?: return
         if (handover != null || !c.session.canOpenPlayer() || c.vodDenied.value != null) return
@@ -154,6 +155,7 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        controller?.enforceProgrammeLimit()
         PlaybackCoordinator.playerStarted()
     }
 

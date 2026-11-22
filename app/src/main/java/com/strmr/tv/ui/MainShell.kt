@@ -66,7 +66,8 @@ fun MainShell() {
     remember(profile?.id) { HomeViewStore.activate(ApiClient.profileId) }
     val viewTabs = HomeViewTabs.shown()
     val homeView = HomeViewStore.home
-    val tabs = ShellTabs.build(profile, viewTabs)
+    val kidsLiveEnabled = com.strmr.tv.live.rememberKidsLiveAvailable(profile)
+    val tabs = ShellTabs.build(profile, viewTabs, kidsLiveEnabled)
     // The tab's key: a page's name, or "view:<id>" for a view's own tab. The app always opens on Home (as on tvOS).
     var selectedKey by rememberSaveable { mutableStateOf(MainTab.HOME.name) }
     val selected = ShellTabs.indexOf(tabs, selectedKey)

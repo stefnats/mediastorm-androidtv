@@ -28,6 +28,7 @@ import com.strmr.tv.api.StartPoint
 import com.strmr.tv.api.mediaHeaders
 import com.strmr.tv.app.AppLog
 import com.strmr.tv.live.LiveCatchups
+import com.strmr.tv.live.KidsProgrammeClock
 import com.strmr.tv.player.dv7.Dv7Playback
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
@@ -53,6 +54,8 @@ class PlayerController(context: Context, val session: PlayerSession, private val
     private val ownership=requireNotNull(session.ownership) {"Playback context is unavailable"}.also {it.requireCurrent();session.recordingPart?.claim();session.recordingDerived?.claim()}
     val dataContext = ownership.epoch
     private var released=false
+    private val programmeClock = session.liveStream?.programmeLimit?.let { KidsProgrammeClock(it, android.os.SystemClock::elapsedRealtime, ::stopChildProgramme) }
+    private var programmeTimer: Job? = null
     val profileId = ownership.profileId
     val player: ExoPlayer
     val isPlaying = MutableStateFlow(false)
@@ -301,6 +304,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         override fun onRenderedFirstFrame() { if (!standby) startup.firstFrame() }
 
         override fun onIsPlayingChanged(playing: Boolean) {
+            if (playing && !enforceProgrammeLimit()) return
             isPlaying.value = playing
             if (standby) return
             if (playing) {
@@ -310,6 +314,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         }
 
         override fun onPlaybackStateChanged(state: Int) {
+            if (!enforceProgrammeLimit()) return
             buffering.value = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
             if (standby) return
             if (state == Player.STATE_READY) {
@@ -397,6 +402,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         }
 
         override fun onPlayerError(e: PlaybackException) {
+            if (!enforceProgrammeLimit()) return
             if (standby) { error.value = "Prepared replacement could not decode on this device."; return }
             if (derivedSource != null) {
                 startup.end(StartupOutcome.FAILED)
@@ -493,7 +499,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
                 timeshift.value = next.timeshift
             },expectedContext=dataContext,owner=ownership,playerCurrent=::canUsePlayerAux,onDenied={ reason -> denyVod(reason) },denialTitleId=request.title.titleId)
         }
-        catchup = session.liveChannel?.takeIf { session.isLive && LiveCatchups.window(it) > 0 }?.let { CatchupJoin(this, it) }
+        catchup = session.liveChannel?.takeIf { session.isLive && session.liveStream?.programmeLimit == null && LiveCatchups.window(it) > 0 }?.let { CatchupJoin(this, it) }
         // Debug builds log every player event under the EventLogger tag.
         if (AppBuild.DEBUG) player.addAnalyticsListener(androidx.media3.exoplayer.util.EventLogger())
         // A growing recording's playlist plays from its start (0), not its live edge.
@@ -512,8 +518,11 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         // Up Next / Switch Source: the previous playback's speed (live always plays at 1x).
         if (!standby) session.explicitAudioLanguage?.let { rememberAudioLanguage(it) }
         if (request.speed != 1f && !session.isLive) setSpeed(request.speed)
-        player.playWhenReady = !standby && recordingStart == null
-        player.prepare()
+        if (enforceProgrammeLimit()) {
+            player.playWhenReady = !standby && recordingStart == null
+            player.prepare()
+        }
+        programmeTimer = programmeClock?.let { clock -> scope.launch { clock.watch() } }
         if (recordingStart != null) recordingStartTimeout = scope.launch {
             delay(15_000)
             if (!recordingStart.started && !released) failRecordingProgressStart()
@@ -655,6 +664,21 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         ended.value = true
     }
 
+    /** Also called when a background/PiP Activity resumes; the original deadline never moves. */
+    fun enforceProgrammeLimit(): Boolean = programmeClock?.active() ?: true
+
+    private fun stopChildProgramme() {
+        if (released) return
+        liveRetune?.release()
+        progress.discardFuture()
+        player.pause()
+        player.stop()
+        player.clearMediaItems()
+        player.clearVideoSurface()
+        PlaybackCoordinator.errorMessage.value = "This programme has ended. Choose a programme again for a new guide decision."
+        ended.value = true
+    }
+
     fun report(paused: Boolean = false, ended: Boolean = false, closing: Boolean = false) {
         if (standby) return
         val recording = recordingProgress
@@ -689,6 +713,7 @@ class PlayerController(context: Context, val session: PlayerSession, private val
         if (released) return progress.lastReport
         startup.end(StartupOutcome.RELEASED)
         released=true
+        programmeTimer?.cancel()
         decodedAudio.close(); decodedAudioPolicy.reset()
         val partPosition=player.currentPosition
         recordingStartTimeout?.cancel(); recordingStartTimeout = null
