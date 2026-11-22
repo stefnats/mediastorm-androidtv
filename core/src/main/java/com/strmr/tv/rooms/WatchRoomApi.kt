@@ -47,6 +47,8 @@ interface WatchRoomGateway {
     suspend fun accept(id: String): WatchRoom
     suspend fun decline(id: String)
     suspend fun revoke(room: String, invite: String)
+    /** Only a known admitted original membership may be cleaned up after UI departure. */
+    suspend fun cleanupKnown(id: String, abandonCreated: Boolean = false)
 }
 
 /** Captured by ApiClient under its private context lock; no auth refresh or route replay. */
@@ -60,12 +62,19 @@ internal class WatchRoomTransport(
 ) : WatchRoomGateway {
     private val http = client.withoutAutomaticReplay().newBuilder()
         .followRedirects(false).followSslRedirects(false).build()
+    private var knownCleanupId: String? = null
+    private var knownCreated = false
     override fun current() = runCatching { context.check(); true }.getOrDefault(false)
     private fun segment(value: String) = ApiClient.segment(value.also { require(it.isNotBlank() && it.length <= 256) })
     private val profilePath = "/api/users/" + segment(profileId)
     private fun room(id: String) = profilePath + "/watch-rooms/" + segment(id)
-    private suspend fun raw(method: String, path: String, body: JsonObject? = null): String {
-        context.check()
+    private suspend fun raw(method: String, path: String, body: JsonObject? = null, cleanup: Boolean = false): String {
+        if (!cleanup) context.check()
+        else {
+            val id = requireNotNull(knownCleanupId) { "No original membership was confirmed." }
+            require(method == "POST" && body == null &&
+                (path == room(id) + "/leave" || knownCreated && path == room(id) + "/end"))
+        }
         val request = Request.Builder().url(base.newBuilder()
             .encodedPath(base.encodedPath.trimEnd('/') + path).query(null).fragment(null).build())
             .apply { headers.forEach { (name, value) -> header(name, value) } }
@@ -84,11 +93,17 @@ internal class WatchRoomTransport(
         .also { require(it.size <= 256); it.forEach { room -> room.checked() } }
     override suspend fun accountInbox() = data<List<WatchRoomAccountInvite>>("GET", "/api/watch-room-account-invitations")
         .also { require(it.size <= 256) }
-    override suspend fun create(body: JsonObject) = checked(data("POST", profilePath + "/watch-rooms", body))
+    override suspend fun create(body: JsonObject) = remember(checked(data("POST", profilePath + "/watch-rooms", body)), true)
     override suspend fun read(id: String) = checked(data("GET", room(id)))
-    override suspend fun join(id: String) = checked(data("POST", room(id) + "/join", buildJsonObject {
+    override suspend fun join(id: String) = remember(checked(data("POST", room(id) + "/join", buildJsonObject {
         put("clientId", clientId); put("capabilities", WatchRoomTarget.capabilities())
-    }))
+    })), false)
+    private fun remember(value: WatchRoom, created: Boolean): WatchRoom {
+        require(value.member(profileId, clientId) != null && (!created || value.creatorProfileId == profileId))
+        knownCleanupId = value.id
+        knownCreated = created
+        return value
+    }
     override suspend fun ready(id: String, value: Boolean) = checked(data("POST", room(id) + "/ready", buildJsonObject { put("ready", value) }))
     override suspend fun state(id: String, status: String, position: Double, duration: Double, revision: Long): WatchRoom {
         require(status in setOf("playing", "paused") && revision >= 0)
@@ -105,6 +120,13 @@ internal class WatchRoomTransport(
     override suspend fun accept(id: String) = checked(data("POST", profilePath + "/watch-room-account-invitations/" + segment(id) + "/accept"))
     override suspend fun decline(id: String) { raw("POST", "/api/watch-room-account-invitations/" + segment(id) + "/decline") }
     override suspend fun revoke(room: String, invite: String) { raw("DELETE", room(room) + "/account-invites/" + segment(invite)) }
+    override suspend fun cleanupKnown(id: String, abandonCreated: Boolean) {
+        require(id == knownCleanupId) { "No original membership was confirmed." }
+        require(!abandonCreated || knownCreated)
+        // Only immutable original headers/URL, no current viewer credentials or refresh.
+        raw("POST", room(id) + if (abandonCreated) "/end" else "/leave", cleanup = true)
+        if (knownCleanupId == id) { knownCleanupId = null; knownCreated = false }
+    }
     override fun toString() = "WatchRoomTransport(original viewer)"
 }
 

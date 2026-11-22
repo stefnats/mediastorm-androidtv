@@ -77,4 +77,23 @@ class WatchRoomRequestTest {
         assertEquals(503, (runCatching { api.join("room-one") }.exceptionOrNull() as ApiError).statusCode)
         assertEquals(1, requests.size)
     }
+    @Test fun knownCreateAndJoinCleanupRetainsOriginalWireAfterProfileChange() {
+        for (created in listOf(true, false)) withServer { api, requests, change ->
+            val room = if (created) api.create(WatchRoomTarget.create(RoomFixtures.request(), emptyList(), "client-one"))
+                else api.join("room-one")
+            change()
+            assertFalse(api.current())
+            api.cleanupKnown(room.id, created)
+            assertEquals(2, requests.size)
+            val cleanup = requests.last()
+            val suffix = if (created) "end" else "leave"
+            assertTrue(cleanup.startsWith("POST /base/api/users/viewer/watch-rooms/room-one/" + suffix + " "))
+            assertTrue(cleanup.contains("Authorization: Bearer synthetic-original", true))
+            assertTrue(cleanup.contains("X-Profile-Unlock: synthetic-pin", true))
+            assertTrue(cleanup.contains("X-Client-ID: client-one", true))
+            assertTrue(runCatching { api.read(room.id) }.isFailure)
+            assertTrue(runCatching { api.cleanupKnown("unknown-room", created) }.isFailure)
+            assertEquals(2, requests.size)
+        }
+    }
 }

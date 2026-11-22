@@ -61,6 +61,9 @@ internal open class FakeRooms : WatchRoomGateway {
     override suspend fun accept(id: String): WatchRoom { calls += "accept"; return room }
     override suspend fun decline(id: String) { calls += "decline"; account = emptyList() }
     override suspend fun revoke(room: String, invite: String) { calls += "revoke"; account = emptyList() }
+    override suspend fun cleanupKnown(id: String, abandonCreated: Boolean) {
+        if (abandonCreated) end(id) else leave(id)
+    }
 }
 
 class WatchRoomWireTest {
@@ -83,10 +86,22 @@ class WatchRoomWireTest {
         assertTrue(runCatching { room.copy(revision = -1).checked() }.isFailure)
     }
     @Test fun backendProjectedPositionNotAdvancedAgain() {
-        val actor = WatchRoomPlayback(FakeRooms(), RoomFixtures.room(status = "playing"), now = { RoomFixtures.now })
-        assertEquals(40000L, actor.target(RoomMediaState(0, 100000, true, false, false)))
-        // The anchor is ten seconds old; the server's forty must remain forty.
-        assertNotEquals(50000L, actor.target(RoomMediaState(0, 100000, true, false, false)))
+        var nanos = 0L
+        val room = RoomFixtures.room(position = 140.0, status = "playing").copy(duration = 500.0,
+            anchorUpdatedAt = "2000-01-01T00:00:00Z")
+        val sample = RoomMediaState(0, 500000, true, false, false)
+        val actor = WatchRoomPlayback(FakeRooms(), room, now = { RoomFixtures.now }, monotonicNanos = { nanos })
+        assertEquals(140000L, actor.target(sample))
+        nanos = 2_000_000_000L
+        assertEquals(142000L, actor.target(sample))
+        val paused = WatchRoomPlayback(FakeRooms(), room.copy(status = "paused"),
+            now = { RoomFixtures.now }, monotonicNanos = { nanos })
+        val waiting = WatchRoomPlayback(FakeRooms(), room.copy(waitingForReady = true),
+            now = { RoomFixtures.now }, monotonicNanos = { nanos })
+        nanos = 4_000_000_000L
+        assertEquals(140000L, paused.target(sample)); assertEquals(140000L, waiting.target(sample))
+        nanos = 33_000_000_000L
+        assertNull(actor.target(sample))
     }
     @Test fun nonFiniteOverflowPositionRejected() {
         for (value in listOf(-1.0, Double.NaN, Double.POSITIVE_INFINITY, Long.MAX_VALUE.toDouble())) {

@@ -23,6 +23,7 @@ class WatchRoomModelTest {
         model.create(RoomFixtures.request(), emptyList()); runCurrent()
         val close = model.close(); runCurrent()
         assertFalse(close.isCompleted); assertFalse(api.calls.contains("end"))
+        api.valid = false
         api.createGate!!.complete(Unit); close.join()
         assertEquals(listOf("create", "end"), api.calls)
         assertNull(model.state.value.room)

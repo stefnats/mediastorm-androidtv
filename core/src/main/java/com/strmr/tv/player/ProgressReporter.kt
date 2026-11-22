@@ -38,7 +38,9 @@ internal class ProgressWriteGate(private val current: () -> Boolean) {
     fun stopNewWrites() { synchronized(this) { discarded = true } }
 
     /** No new producer may enqueue while a room final snapshot is draining. */
-    suspend fun joinExisting() {
+    suspend fun joinExisting(previousProducer: Job? = null) {
+        // A producer can still be queued before registering its writes.write child.
+        previousProducer?.join()
         while (true) {
             val pending = synchronized(this) { jobs.toList() }
             if (pending.isEmpty()) return
@@ -153,6 +155,7 @@ class ProgressReporter(
      */
     fun closeRoom(): Job? {
         if (roomClosing) return lastReport
+        val previous = lastReport
         val drain = roomDrain ?: return lastReport
         val sample = times()
         val admitted = acceptsCompletion && sample != null && drain.begin()
@@ -163,7 +166,7 @@ class ProgressReporter(
         return MainScope().launch {
             try {
                 // The global gate still honors discardFuture/context invalidation.
-                writes.joinExisting()
+                writes.joinExisting(previous)
                 if (body != null && drain.allowed()) {
                     withContext(NonCancellable) { writeReport(body, sample!!.first, sample.second, true, false, true) }
                 }
