@@ -191,7 +191,7 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
             }
         }
     }
-    val menuOpen = picker != null || pendingSource != null || versionsFor != null || pendingVersion != null || model.playChoice != null ||
+    val menuOpen = choosingRoom || picker != null || pendingSource != null || versionsFor != null || pendingVersion != null || model.playChoice != null ||
         prequeueTracks.open || watchState || more || customizingButtons || episodeOrder || artworkTitle != null || CustomListsStore.picking != null
     LaunchedEffect(menuOpen) { if (menuOpen) trailer.dismiss("menu open") }
 
