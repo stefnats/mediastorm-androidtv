@@ -9,6 +9,10 @@ import com.strmr.tv.library.ProfileDataContext
 import com.strmr.tv.api.PrequeueStatus
 import com.strmr.tv.api.ReleaseReportOptions
 import com.strmr.tv.api.ReleaseReportReply
+import com.strmr.tv.api.SpokenAudioInput
+import com.strmr.tv.api.SpokenAudioReply
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import com.strmr.tv.api.cancelReleaseAlternative
 import com.strmr.tv.api.prequeueStatus
 import com.strmr.tv.api.releaseReportOptions
@@ -40,6 +44,7 @@ interface ReleaseReportGateway {
     suspend fun status(id: String): PrequeueStatus
     suspend fun cancel(id: String)
     suspend fun undo(id: String)
+    suspend fun checkAudioLanguage(id: String, input: SpokenAudioInput): SpokenAudioReply = error("Spoken audio checking is unavailable")
 }
 
 /** Transport boundary used by the actual gateway and deferred, isolated tests. */
@@ -49,6 +54,7 @@ internal interface ReleaseReportRequests {
     suspend fun status(id: String, expected: Long): PrequeueStatus
     suspend fun cancel(id: String, expected: Long)
     suspend fun undo(id: String, expected: Long)
+    suspend fun checkAudioLanguage(id: String, input: SpokenAudioInput, expected: Long): SpokenAudioReply = error("Spoken audio checking is unavailable")
 }
 
 private object ApiReleaseReportRequests : ReleaseReportRequests {
@@ -57,6 +63,7 @@ private object ApiReleaseReportRequests : ReleaseReportRequests {
     override suspend fun status(id: String, expected: Long) = ApiClient.prequeueStatus(id, expected)
     override suspend fun cancel(id: String, expected: Long) = ApiClient.cancelReleaseAlternative(id, expected)
     override suspend fun undo(id: String, expected: Long) = ApiClient.undoReleaseReport(id, expected)
+    override suspend fun checkAudioLanguage(id: String, input: SpokenAudioInput, expected: Long) = ApiClient.checkSpokenAudioLanguage(id, input, expected)
 }
 
 /** An original playback owner survives every await; cleanup never acquires replacement credentials. */
@@ -88,6 +95,12 @@ class ServerReleaseReportGateway internal constructor(
         if (!isCurrent()) return
         requests.cancel(id, owner.epoch)
         owner.requireCurrent()
+    }
+    override suspend fun checkAudioLanguage(id: String, input: SpokenAudioInput): SpokenAudioReply {
+        owner.requireCurrent()
+        val reply = requests.checkAudioLanguage(id, input, owner.epoch)
+        owner.requireCurrent()
+        return reply
     }
     override suspend fun undo(id: String) {
         owner.requireCurrent()
@@ -148,6 +161,8 @@ data class ReleaseReportState(
     val historyReset: Boolean = false,
     val historyResetUnconfirmed: Boolean = false,
     val progressStopped: Boolean = false,
+    val audioLanguageCheckBusy: Boolean = false,
+    val audioLanguageCheckMessage: String? = null,
 )
 
 /** Prepares one replacement while playback continues; adoption is always a separate user action. */
@@ -168,6 +183,7 @@ class ReleaseReports(
     private val monotonicNanos: () -> Long = System::nanoTime,
     private val beforeHistoryReset: (suspend () -> Unit)? = null,
     progressAlreadyDiscarded: Boolean = false,
+    private val currentAudioTrack: ((ReleaseReportOptions) -> Int?)? = null,
 ) {
     private val mutable = MutableStateFlow(ReleaseReportState(progressStopped = progressAlreadyDiscarded))
     val state: StateFlow<ReleaseReportState> = mutable
@@ -181,6 +197,8 @@ class ReleaseReports(
     private var serverReady: PrequeueStatus? = null
     private var localDeadline: Long? = null
     private var rangeAttempt = 0L
+    private var spokenJob: Job? = null
+    private var spokenSequence = 0L
     private fun checkCurrent() { check(!closed && gateway.isCurrent()) { "Playback context changed. Reopen this menu." } }
 
     suspend fun load() {
@@ -196,6 +214,63 @@ class ReleaseReports(
         catch (e: Exception) {
             if(!closed && gateway.isCurrent() && e is ApiError.Http && attempt!=null)e.vodDenial?.let {VodDenialEvents.reject(attempt,it)}
             mutable.value = mutable.value.copy(busy=false,options=null,ready=null,denial=e.vodDenial,message=e.vodDenial?.message ?: "Could not load the selected release. This action needs a server with release reporting.") }
+    }
+
+    val canCheckAudioLanguage: Boolean get() = !closed && pending == null &&
+        mutable.value.options?.audioLanguageCheckAvailable == true && currentAudioTrack != null
+
+    /** Explicit observation only: never enters submit/report/replacement/history paths. */
+    fun checkAudioLanguage() {
+        if (!canCheckAudioLanguage || mutable.value.busy || mutable.value.denial != null) return
+        val original = mutable.value.options ?: return
+        val attempt = ++spokenSequence
+        mutable.value = mutable.value.copy(busy = true, audioLanguageCheckBusy = true,
+            audioLanguageCheckMessage = null, message = "Checking two short audio samples; nothing will be changed.")
+        spokenJob = scope.launch {
+            val authorityAttempt = denialTitleId?.let { VodDenialEvents.begin(it, denialContext) }
+            try {
+                beforeOptions()
+                currentCoroutineContext().ensureActive(); checkCurrent()
+                check(attempt == spokenSequence)
+                val refreshed = gateway.options(sourceId)
+                currentCoroutineContext().ensureActive(); checkCurrent()
+                check(attempt == spokenSequence && refreshed.sourceVersion == original.sourceVersion &&
+                    TrackPreferences.sameLanguage(refreshed.audioLanguage, original.audioLanguage))
+                check(refreshed.audioLanguageCheckAvailable)
+                val track = currentAudioTrack?.invoke(refreshed) ?: error("Current audio track cannot be mapped safely")
+                val input = SpokenAudioInput(refreshed.sourceVersion, track, position().coerceAtLeast(0) / 1000.0)
+                val reply = withTimeout(100_000) { gateway.checkAudioLanguage(sourceId, input) }
+                currentCoroutineContext().ensureActive(); checkCurrent()
+                check(attempt == spokenSequence && currentAudioTrack?.invoke(refreshed) == track)
+                check(reply.sourceVersion == input.sourceVersion && reply.audioTrackIndex == track &&
+                    TrackPreferences.sameLanguage(reply.requestedLanguage, refreshed.audioLanguage))
+                mutable.value = mutable.value.copy(busy = false, audioLanguageCheckBusy = false, message = null,
+                    audioLanguageCheckMessage = spokenAudioMessage(reply, refreshed.audioLanguage))
+            } catch (timeout: TimeoutCancellationException) {
+                if (!closed && attempt == spokenSequence && gateway.isCurrent()) mutable.value = mutable.value.copy(
+                    busy = false, audioLanguageCheckBusy = false, message = null,
+                    audioLanguageCheckMessage = "Spoken language is unknown because the check timed out. Nothing was changed.")
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                if (!closed && attempt == spokenSequence && gateway.isCurrent()) {
+                    val denial = error.vodDenial
+                    if (denial != null && authorityAttempt != null) VodDenialEvents.reject(authorityAttempt, denial)
+                    mutable.value = mutable.value.copy(busy = false, audioLanguageCheckBusy = false, message = null,
+                        denial = denial ?: mutable.value.denial,
+                        options = if (denial != null) null else mutable.value.options,
+                        audioLanguageCheckMessage = denial?.message ?: "Could not check the current audio safely. Reopen audio controls; no report or source change was made.")
+                }
+            }
+        }
+    }
+
+    /** Track/intent changes retire even an A/B/A selection's delayed reply. */
+    fun cancelAudioLanguageCheck() {
+        spokenSequence++
+        spokenJob?.cancel(); spokenJob = null
+        if (mutable.value.audioLanguageCheckBusy) mutable.value = mutable.value.copy(
+            busy = false, audioLanguageCheckBusy = false, message = null, audioLanguageCheckMessage = null)
+        else if (mutable.value.audioLanguageCheckMessage != null) mutable.value = mutable.value.copy(audioLanguageCheckMessage = null)
     }
 
     fun choose(problem: ReleaseProblem?) {
@@ -390,6 +465,7 @@ class ReleaseReports(
     fun close() {
         if (closed) return
         closed = true
+        spokenSequence++; spokenJob?.cancel(); spokenJob = null
         job?.cancel()
         val bufferedWork = localJob
         bufferedWork?.cancel()

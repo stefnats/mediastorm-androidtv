@@ -15,6 +15,7 @@ data class ReleaseReportOptions(
     val canShare: Boolean = false,
     val hasEpisode: Boolean = false,
     val canResetHistory: Boolean = false,
+    val audioLanguageCheckAvailable: Boolean = false,
 )
 
 @Serializable

@@ -54,3 +54,29 @@ Explicit audio intent from the details/manual track panel also waits for its sav
 before automatic preparation. Unknown tags and subtitle-only changes leave audio
 intent unchanged. The single automatic-attempt budget follows a source handoff
 within the same episode; the next episode starts its own budget.
+
+## Optional spoken-audio language check
+
+The shared TV and phone report menu offers Check spoken audio language only when
+its current server advertises audioLanguageCheckAvailable. Older or unconfigured
+servers default to false. The user explicitly starts each check; loading details,
+opening the report menu or an uncertain silence signal does not start sampling.
+
+The request retains the original profile, preparation source version and actual
+selected container audio track, starting at the current playback position. If the
+player cannot safely map its selected track, it does not guess a track or sample
+another one. The fixed POST has a 100-second budget and never refreshes credentials,
+reconnects, redirects or replays automatically. Closing the menu, changing audio,
+changing sources or retiring the original profile cancels or rejects its reply.
+
+The configured backend checks two short samples. Match and mismatch are tentative
+hints, and insufficient, conflicting or malformed evidence stays unknown. No
+transcript is exposed or saved by the client. No report, permanent exclusion,
+history correction, source switch or playback grant follows automatically; the
+existing report and alternative-source controls remain explicit actions. Existing
+authorization denials retain their normal security handling.
+
+SpokenAudioCheckTest and SpokenAudioTransportTest cover the workflow and synthetic
+loopback transport. They do not establish language-model accuracy, model setup,
+real-provider behavior, physical-device playback or lip-sync correctness. The
+client does not install a speech model or edit the server analysis endpoint.

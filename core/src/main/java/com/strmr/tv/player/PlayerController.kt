@@ -135,7 +135,15 @@ class PlayerController(
                 switchTo.value = SourceSwitchRequest(next, source, replacementCarriedTracks(), prepared = status,
                     buffered = buffer, discardPreviousProgress = wrong)
             }, beforeHistoryReset = { progress.stopAndDrainForHistoryReset() }, progressAlreadyDiscarded = !progress.acceptsCompletion,
+            currentAudioTrack = { options ->
+                if (!canUsePlayerAux() || switchTo.value != null || advanceTo.value != null || ended.value) null
+                else tracks.value.ofType(C.TRACK_TYPE_AUDIO).singleOrNull { it.selected }?.let {
+                    spokenAudioContainerIndex(it.format, it.typeIndex, options)
+                }
+            },
             denialTitleId=request.title.titleId,denialContext=dataContext,beforeOptions = { vodDenied.value?.let {throw com.strmr.tv.api.ApiError.AccessDenied(it)}; audioPreferenceSave?.join(); check(!audioPreferenceFailed) { "Audio preference could not be saved" } })
+
+    internal fun cancelAudioLanguageCheck() { releaseReports?.cancelAudioLanguageCheck() }
 
     fun closeReleaseReports() {
         releaseReports?.close()
@@ -388,6 +396,9 @@ class PlayerController(
         }
 
         override fun onTracksChanged(next: Tracks) {
+            val previousAudio = tracks.value.ofType(C.TRACK_TYPE_AUDIO).singleOrNull { it.selected }?.format
+            val nextAudio = next.ofType(C.TRACK_TYPE_AUDIO).singleOrNull { it.selected }?.format
+            if (previousAudio != nextAudio) cancelAudioLanguageCheck()
             tracks.value = next
             if (!prefsApplied && !next.isEmpty) {
                 prefsApplied = true
@@ -741,6 +752,7 @@ class PlayerController(
      * request; the activity closes this playback (saving the position) and starts the other.
      */
     fun switchSource(source: SourceResult) {
+        cancelAudioLanguageCheck()
         if(vodDenied.value!=null || dataContext!=ProfileDataContext.current)return
         audioRecovery.dismiss()
         val position = player.currentPosition

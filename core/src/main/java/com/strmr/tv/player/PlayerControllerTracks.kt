@@ -15,6 +15,7 @@ fun PlayerController.select(track: PlayerTrack, byUser: Boolean = true) {
         external.deselect()
     }
     if (byUser && track.group.type == C.TRACK_TYPE_AUDIO) {
+        cancelAudioLanguageCheck()
         audioRecovery.dismiss()
         rememberAudioLanguage(track.format.language)
     }

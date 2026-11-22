@@ -284,6 +284,14 @@ object ApiClient {
             remoteCredential = { remoteCredential }, client = nonReplayingHttp).send(operation)
     }
 
+    /** Explicit selected-track sampling is never refreshed, reconnected or retried. */
+    internal suspend fun checkSpokenAudioLanguage(id: String, input: SpokenAudioInput, expected: Long): SpokenAudioReply {
+        val context = requestContexts.capture(expected)
+        val operation = context.use { SpokenAudioRequest(id, profileId, expected, input) }
+        return SpokenAudioTransport(context, { baseUrl }, { profileId }, { storedSession?.token },
+            { profile -> unlocks.token(profile) }, { Config.clientId }, { remoteCredential }, nonReplayingHttp).send(operation)
+    }
+
     private suspend fun sendOwnedRaw(
         method: String, path: String, query: Map<String, String> = emptyMap(), body: JsonElement? = null,
         authorized: Boolean = true, promptOnLock: Boolean = true, timeoutMs: Long = 30_000,
