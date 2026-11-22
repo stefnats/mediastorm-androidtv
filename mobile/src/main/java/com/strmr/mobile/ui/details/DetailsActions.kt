@@ -56,6 +56,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun PrimaryActions(state: DetailsPageState) {
     val model = state.model
+    val roomsNavigator = com.strmr.mobile.ui.shell.LocalNavigator.current
     val primary = state.primary
     val resuming = primary?.start != null
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -75,6 +76,11 @@ fun PrimaryActions(state: DetailsPageState) {
                 }
             }
         }
+        FilledTonalButton(
+            enabled = state.playbackCurrent && !model.target.fromLibrary && (model.target.isMovie || state.activeEpisode != null),
+            onClick = { roomsNavigator.push(com.strmr.mobile.ui.shell.Route.WatchRooms(
+                model.request(state.activeEpisode, null), model.dataContext)) },
+        ) { Text("Watch Together") }
         val start = primary?.start
         if (start != null) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {

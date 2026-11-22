@@ -103,7 +103,7 @@ fun PlayerChrome(controller: PlayerController, onExit: () -> Unit, onAddScreen: 
     val notice by controller.notice.collectAsState()
     val showGoLive = live && (timeshift || programme != null) && !Timeshift.isAtLive(behindLive)
     val showStartOver = live && programme.let { it != null && it.positionMs > START_OVER_MIN_MS }
-    val switchable = !controller.request.fileOnly && !live && controller.session.reportsProgress && controller.session.streamPath != null
+    val switchable = controller.session.room == null && !controller.request.fileOnly && !live && controller.session.reportsProgress && controller.session.streamPath != null
     val skipShown = skip != null && error == null
 
     // Auto-hide.
@@ -138,7 +138,7 @@ fun PlayerChrome(controller: PlayerController, onExit: () -> Unit, onAddScreen: 
     // playWhenReady, not isPlaying: a press while buffering (a live join, a seek) must pause.
     fun togglePlay() {
         if (player.playbackState == androidx.media3.common.Player.STATE_ENDED && skip is SkipAction.NextEpisode) controller.upNext?.toggleCountdownPause()
-        else if (player.playWhenReady) player.pause() else player.play()
+        else controller.userPlay(!player.playWhenReady)
     }
     fun show() { visible = true }
 
@@ -180,8 +180,8 @@ fun PlayerChrome(controller: PlayerController, onExit: () -> Unit, onAddScreen: 
             when {
                 e.type != KeyEventType.KeyDown -> false
                 e.key == Key.MediaPlayPause -> { togglePlay(); show(); true }
-                e.key == Key.MediaPlay -> { player.play(); true }
-                e.key == Key.MediaPause -> { player.pause(); show(); true }
+                e.key == Key.MediaPlay -> { controller.userPlay(true); true }
+                e.key == Key.MediaPause -> { controller.userPlay(false); show(); true }
                 e.key == Key.MediaFastForward -> { controller.skip(30_000); show(); true }
                 e.key == Key.MediaRewind -> { controller.skip(-10_000); show(); true }
                 else -> false
@@ -216,7 +216,7 @@ fun PlayerChrome(controller: PlayerController, onExit: () -> Unit, onAddScreen: 
                 { controller.audioRecovery.dismiss() }, Modifier.align(Alignment.TopStart).padding(start = 64.dp, top = 64.dp))
         }
         notice?.let { text ->
-            LaunchedEffect(text) { delay(4_000); controller.notice.value = null }
+            LaunchedEffect(text) { if (controller.session.room == null) { delay(4_000); controller.notice.value = null } }
             Text(text, style = MaterialTheme.typography.titleMedium,
                  modifier = Modifier.align(Alignment.TopCenter).padding(top = 48.dp)
                      .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(50)).padding(horizontal = 20.dp, vertical = 8.dp))
@@ -244,9 +244,10 @@ fun PlayerChrome(controller: PlayerController, onExit: () -> Unit, onAddScreen: 
                                 TransportButton(icon, label, transportFocusable.focusRequester(requester)) { open(m, requester) }
                             }
                             MenuButton(Menu.INFO, Icons.Filled.Info, "Info")
+                            if (controller.session.room != null) TransportButton(Icons.Filled.Info, "Leave room", transportFocusable) { onExit() }
                             MenuButton(Menu.AUDIO, AppIcons.Audio, "Audio")
                             MenuButton(Menu.SUBTITLES, AppIcons.Subtitles, "Subtitles")
-                            if (!live) MenuButton(Menu.SPEED, AppIcons.Speed, "Playback Speed")
+                            if (!live && controller.session.room == null) MenuButton(Menu.SPEED, AppIcons.Speed, "Playback Speed")
                             // Not for live TV or trailers: only a resolved title has other sources.
                             if (switchable) MenuButton(Menu.SOURCES, AppIcons.SwapSource, "Switch Source")
                             if (controller.canReportRelease) MenuButton(Menu.REPORT, Icons.Filled.Info, "Report / change source")

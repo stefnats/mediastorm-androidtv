@@ -35,7 +35,8 @@ class WatchRoomModel(
     private var closing: Job? = null
     private var closed = false
     private var transferred = false
-    private var created = false
+    val hasTransferred get() = transferred
+    private var abandonedCreate = false
     private var knownRoom: WatchRoom? = null
     val profileId get() = gateway.profileId
     val creator get() = knownRoom?.creatorProfileId == profileId
@@ -72,11 +73,15 @@ class WatchRoomModel(
     fun create(request: PlaybackRequest, invitees: List<String>) = run {
         val body = WatchRoomTarget.create(request, invitees, gateway.clientId)
         val room = gateway.create(body)
-        created = true
+        abandonedCreate = closed
         remember(room)
     }
-    fun join(id: String) = run { remember(gateway.join(id)) }
-    fun accept(id: String) = run { remember(gateway.accept(id)); remember(gateway.join(requireNotNull(knownRoom).id)) }
+    fun join(id: String) = run { abandonedCreate = false; remember(gateway.join(id)) }
+    fun accept(id: String) = run {
+        abandonedCreate = false
+        remember(gateway.accept(id))
+        if (current()) remember(gateway.join(requireNotNull(knownRoom).id))
+    }
     fun decline(id: String) = run {
         gateway.decline(id)
         val invites = gateway.accountInbox()
@@ -141,7 +146,7 @@ class WatchRoomModel(
             operation?.join()
             val room = knownRoom
             if (!transferred && room != null && gateway.current()) {
-                try { if (created) gateway.end(room.id) else gateway.leave(room.id) }
+                try { if (abandonedCreate) gateway.end(room.id) else gateway.leave(room.id) }
                 catch (_: Exception) { mutable.value = mutable.value.copy(notice = "Room cleanup was not confirmed. Refresh before retrying.") }
             }
         }.also { closing = it }

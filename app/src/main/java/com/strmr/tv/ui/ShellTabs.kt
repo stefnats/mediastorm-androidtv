@@ -22,6 +22,7 @@ internal enum class MainTab(val title: String, val icon: ImageVector, val menu: 
     LISTS("Lists", Icons.AutoMirrored.Outlined.List, MenuTab.LISTS),
     CALENDAR("Calendar", AppIcons.Event, MenuTab.CALENDAR),
     SEARCH("Search", Icons.Outlined.Search),
+    WATCH_ROOMS("Watch Together", Icons.AutoMirrored.Outlined.List),
     SETTINGS("Settings", Icons.Outlined.Settings),
 }
 

@@ -15,6 +15,8 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.MainScope
+import kotlinx.serialization.json.JsonObject
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -34,6 +36,15 @@ internal class ProgressWriteGate(private val current: () -> Boolean) {
 
     /** Stop new reports without interrupting a request already accepted by the server. */
     fun stopNewWrites() { synchronized(this) { discarded = true } }
+
+    /** No new producer may enqueue while a room final snapshot is draining. */
+    suspend fun joinExisting() {
+        while (true) {
+            val pending = synchronized(this) { jobs.toList() }
+            if (pending.isEmpty()) return
+            pending.forEach { it.join() }
+        }
+    }
 
     /** Await actual write completion before sending an explicit history reset. */
     suspend fun joinStopped() {
@@ -77,7 +88,12 @@ class ProgressReporter(
     private val onMigration: (reason: String) -> Unit,
 ) {
     private val request = session.request
-    private val writes = ProgressWriteGate { session.playbackAllowed() && context == ProfileDataContext.current }
+    private val roomDrain = session.room?.let { RoomProgressDrain(it) }
+    private var roomClosing = false
+    private val writes = ProgressWriteGate {
+        (if (roomClosing) roomDrain?.allowed() == true && session.ownership?.isCurrent() == true
+            else session.playbackAllowed()) && context == ProfileDataContext.current
+    }
     val acceptsCompletion get() = writes.accepts
     var lastStoredItemId: String? = null
         private set
@@ -122,41 +138,71 @@ class ProgressReporter(
     }
 
     fun report(paused: Boolean = false, ended: Boolean = false, closing: Boolean = false) {
-        if (!session.reportsProgress || !acceptsCompletion) return
+        if (roomClosing || !session.reportsProgress || !acceptsCompletion) return
         val (position, duration) = times() ?: return
         val body = request.progressReport(position, duration, paused, ended, sourcePath = session.streamPath, stream = streamHealth())
+        session.progressSink?.saved(position, duration, ended)
+        lastReport = scope.launch {
+            withContext(NonCancellable) { writeReport(body, position, duration, paused, ended, closing) }
+        }
+    }
+
+    /**
+     * Capture the actual final position before decoder release. Stop producer admission
+     * immediately, join old writes, then admit at most this same original final snapshot.
+     */
+    fun closeRoom(): Job? {
+        if (roomClosing) return lastReport
+        val drain = roomDrain ?: return lastReport
+        val sample = times()
+        val admitted = acceptsCompletion && sample != null && drain.begin()
+        val body = if (admitted) request.progressReport(sample!!.first, sample.second, paused = true,
+            ended = false, sourcePath = session.streamPath, stream = streamHealth()) else null
+        roomClosing = true
+        stop()
+        return MainScope().launch {
+            try {
+                // The global gate still honors discardFuture/context invalidation.
+                writes.joinExisting()
+                if (body != null && drain.allowed()) {
+                    withContext(NonCancellable) { writeReport(body, sample!!.first, sample.second, true, false, true) }
+                }
+            } finally {
+                writes.stopNewWrites()
+                withContext(NonCancellable) { writes.joinStopped() }
+            }
+        }.also { lastReport = it }
+    }
+
+    private suspend fun writeReport(body: JsonObject, position: Double, duration: Double,
+        paused: Boolean, ended: Boolean, closing: Boolean) {
         val kind = when {
             ended -> ProgressLog.Kind.END
             closing -> ProgressLog.Kind.CLOSE
             paused -> ProgressLog.Kind.PAUSE
             else -> ProgressLog.Kind.PERIODIC
         }
-        session.progressSink?.saved(position, duration, ended)
-        lastReport = scope.launch {
-            withContext(NonCancellable) {
-                try {
-                    writes.write {
-                        ProfileDataContext.requireCurrent(context)
-                        val reply = ApiClient.reportProgress(body, expectedContext = context)
-                        currentCoroutineContext().ensureActive()
-                        ApiClient.inContext(context) {
-                            writes.use {
-                                lastStoredItemId = reply.itemId?.takeIf { it.isNotBlank() } ?: lastStoredItemId
-                                log.saved(kind, position, duration, reply)
-                                if (reply.migrationRequested && !ended && !closing) {
-                                    onMigration("server: ${reply.migrationReason ?: "migration requested"}")
-                                }
-                            }
+        try {
+            writes.write {
+                ProfileDataContext.requireCurrent(context)
+                val reply = ApiClient.reportProgress(body, expectedContext = context)
+                currentCoroutineContext().ensureActive()
+                ApiClient.inContext(context) {
+                    writes.use {
+                        lastStoredItemId = reply.itemId?.takeIf { it.isNotBlank() } ?: lastStoredItemId
+                        log.saved(kind, position, duration, reply)
+                        if (reply.migrationRequested && !ended && !closing) {
+                            onMigration("server: " + (reply.migrationReason ?: "migration requested"))
                         }
                     }
-                } catch (error: CancellationException) { throw error
-                } catch (e: Exception) {
-                    ApiClient.inContext(context) {
-                        writes.use {
-                            log.failed(kind, position, duration, e)
-                            if (e.vodDenial == null) session.progressSink?.undelivered(body)
-                        }
-                    }
+                }
+            }
+        } catch (error: CancellationException) { throw error
+        } catch (e: Exception) {
+            ApiClient.inContext(context) {
+                writes.use {
+                    log.failed(kind, position, duration, e)
+                    if (e.vodDenial == null) session.progressSink?.undelivered(body)
                 }
             }
         }
@@ -167,4 +213,19 @@ class ProgressReporter(
         bufferAheadSeconds = player.totalBufferedDuration / 1000.0,
         requiredMbps = player.videoFormat?.bitrate?.takeIf { it > 0 }?.let { it / 1_000_000.0 },
     )
+}
+
+
+/** Five seconds to admit only the captured final write; actual accepted I/O is still joined. */
+internal class RoomProgressDrain(
+    private val room: com.strmr.tv.rooms.WatchRoomPlayback,
+    private val now: () -> Long = System::nanoTime,
+) {
+    private var deadline: Long? = null
+    fun begin(): Boolean {
+        if (deadline != null || !room.current() || !room.progressAllowed) return false
+        deadline = now() + 5_000_000_000L
+        return true
+    }
+    fun allowed(): Boolean = deadline?.let { now() - it < 0 && room.originalProgressCurrent() } == true
 }

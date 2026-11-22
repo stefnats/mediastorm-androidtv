@@ -1,5 +1,7 @@
 package com.strmr.tv.ui.details
 
+import androidx.compose.foundation.lazy.items
+
 import kotlinx.coroutines.Job
 import com.strmr.tv.library.TitleListOrigin
 import com.strmr.tv.library.TitleListAction
@@ -131,6 +133,7 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
     val artworkSupported = rememberArtworkSupported(target, model.dataContext)
     var reminderTarget by remember { mutableStateOf<ReminderTarget?>(null) }
     val navigator = com.strmr.tv.ui.LocalNavigator.current
+    var choosingRoom by remember { mutableStateOf(false) }
     val actions = com.strmr.tv.library.TitleActions.changes
     LaunchedEffect(model.vodDenial) {if(model.vodDenial!=null)trailer.dismiss("title access denied")}
     // A long-press menu's bulk watch-state action opens the sheet once the seasons are in.
@@ -172,6 +175,22 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
     // prompt, Audio & Subtitles, Add to List…, the watch-state screen, or More. They are dialog windows, so the
     // header keeps its focus state under them; this one flag stops the trailer for the visit
     // instead (as the Expo page's dismissTrailerAutoPlay; it doesn't restart when they close).
+    if (choosingRoom) {
+        com.strmr.tv.ui.SidePanelDialog("Watch Together", "Choose the exact episode", { choosingRoom = false }) {
+            items(model.seasons.flatMap { it.episodes }, key = { it.id }) { episode ->
+                androidx.tv.material3.ListItem(
+                    selected = false,
+                    headlineContent = { androidx.tv.material3.Text(episode.code + " · " + episode.name) },
+                    onClick = {
+                        if (model.playable) {
+                            choosingRoom = false
+                            navigator.open(com.strmr.tv.ui.Page.WatchRooms(model.request(episode, null), model.dataContext))
+                        }
+                    },
+                )
+            }
+        }
+    }
     val menuOpen = picker != null || pendingSource != null || versionsFor != null || pendingVersion != null || model.playChoice != null ||
         prequeueTracks.open || watchState || more || customizingButtons || episodeOrder || artworkTitle != null || CustomListsStore.picking != null
     LaunchedEffect(menuOpen) { if (menuOpen) trailer.dismiss("menu open") }
@@ -246,6 +265,14 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
                     onMore = { more = true },
                     onFocusChanged = { headerFocused = it },
                 )
+                androidx.tv.material3.Button(
+                    enabled = model.playable && !target.fromLibrary,
+                    modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd).padding(32.dp),
+                    onClick = {
+                        if (target.isMovie) navigator.open(com.strmr.tv.ui.Page.WatchRooms(model.request(null, null), model.dataContext))
+                        else choosingRoom = true
+                    },
+                ) { androidx.tv.material3.Text("Watch Together") }
             }
             WithDefaultScroll(rowScroll) {
                 if (!target.isMovie && model.seasons.isNotEmpty()) {

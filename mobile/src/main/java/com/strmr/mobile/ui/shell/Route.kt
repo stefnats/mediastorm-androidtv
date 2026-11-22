@@ -22,5 +22,6 @@ sealed interface Route {
     data class SettingsPage(val key: String, val title: String) : Route
     data class RecordingDetail(val id: String) : Route
     data object RecordingRules : Route
+    data class WatchRooms(val create: com.strmr.tv.player.PlaybackRequest? = null, val expected: Long = com.strmr.tv.library.ProfileDataContext.current) : Route
     data object Reminders : Route
 }

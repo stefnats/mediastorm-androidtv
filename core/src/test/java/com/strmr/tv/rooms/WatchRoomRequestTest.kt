@@ -17,13 +17,14 @@ import org.junit.Test
 class WatchRoomRequestTest {
     private fun withServer(code: Int = 200, body: String = ApiJson.encodeToString(WatchRoom.serializer(), RoomFixtures.room()),
         action: suspend (WatchRoomGateway, MutableList<String>, () -> Unit) -> Unit) {
-        val server = ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())
+        val server = ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
         val requests = CopyOnWriteArrayList<String>()
         var epoch = 9L
         val contexts = RequestContext({ epoch }, { epoch++ })
         val worker = thread(isDaemon = true) {
             try {
                 while (!server.isClosed) server.accept().use { socket ->
+                    socket.soTimeout = 5000
                     val input = socket.getInputStream().bufferedReader()
                     val lines = mutableListOf<String>()
                     while (true) { val line = input.readLine() ?: break; if (line.isEmpty()) break; lines += line }

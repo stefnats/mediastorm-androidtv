@@ -6,6 +6,7 @@ import kotlinx.coroutines.test.runCurrent
 import org.junit.Assert.*
 import org.junit.Test
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class WatchRoomModelTest {
     @Test fun createJoinAreExplicit() = runTest {
         val api = FakeRooms(); val model = WatchRoomModel(api, this)
@@ -14,7 +15,7 @@ class WatchRoomModelTest {
         model.create(RoomFixtures.request(), emptyList()); runCurrent()
         assertEquals(1, api.calls.count { it == "create" })
         model.close().join()
-        assertEquals("end", api.calls.last())
+        assertEquals("leave", api.calls.last())
     }
     @Test fun lateCreateAckJoinedBeforeCleanup() = runTest {
         val api = FakeRooms(); api.createGate = CompletableDeferred()

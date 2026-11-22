@@ -11,6 +11,9 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -106,10 +109,15 @@ internal class WatchRoomTransport(
 }
 
 /** Body bytes are bounded while reading, before allocation by the JSON parser. */
-private suspend fun Call.roomReply(): Pair<Int, String> = suspendCancellableCoroutine { continuation ->
+private suspend fun Call.roomReply(): Pair<Int, String> {
+    val done = CompletableDeferred<Unit>()
+    try { return suspendCancellableCoroutine { continuation ->
     continuation.invokeOnCancellation { cancel() }
-    enqueue(object : Callback {
-        override fun onFailure(call: Call, e: IOException) { if (continuation.isActive) continuation.resumeWithException(e) }
+    if (!continuation.isActive) { done.complete(Unit); return@suspendCancellableCoroutine }
+    try { enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            try { if (continuation.isActive) continuation.resumeWithException(e) } finally { done.complete(Unit) }
+        }
         override fun onResponse(call: Call, response: Response) {
             try {
                 val result = response.use {
@@ -122,6 +130,8 @@ private suspend fun Call.roomReply(): Pair<Int, String> = suspendCancellableCoro
                 }
                 if (continuation.isActive) continuation.resume(result)
             } catch (e: Exception) { if (continuation.isActive) continuation.resumeWithException(e) }
+            finally { done.complete(Unit) }
         }
-    })
+    }) } catch (e: Exception) { done.complete(Unit); if (continuation.isActive) continuation.resumeWithException(e) }
+    } } finally { withContext(NonCancellable) { done.await() } }
 }

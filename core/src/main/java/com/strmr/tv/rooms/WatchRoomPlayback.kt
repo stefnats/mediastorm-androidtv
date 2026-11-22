@@ -39,19 +39,52 @@ class WatchRoomPlayback(
     private var port: WatchRoomPlayerPort? = null
     private var poll: Job? = null
     private var heartbeat: Job? = null
+    private var expiry: Job? = null
+    private var resolving: Job? = null
+    private var resolutionWatch: Job? = null
     private var mutation: Job? = null
     private var closing: Job? = null
     private var closed = false
+    var progressAllowed = false
+        private set
     private val write = Mutex()
     private val mutableNotice = MutableStateFlow<String?>("Waiting for the room and your copy…")
     val notice: StateFlow<String?> = mutableNotice
     fun current() = !closed && gateway.current() && room.alive(now()) &&
         room.member(gateway.profileId, gateway.clientId) != null
+    /** Only a pre-admitted final history snapshot may use this after media retirement. */
+    internal fun originalProgressCurrent() = gateway.current() && room.alive(now()) &&
+        room.member(gateway.profileId, gateway.clientId) != null
+    internal fun belongsTo(owner: com.strmr.tv.player.PlaybackSessionContext) =
+        owner.isCurrent() && owner.profileId == gateway.profileId && current()
+
+    /** The exact resolver job, not the coordinator's next mutable job. No source permission is inferred. */
+    internal fun watchResolution(actual: Job) {
+        check(resolving == null && current())
+        resolving = actual
+        resolutionWatch = scope.launch {
+            while (isActive && actual.isActive && !closed && port == null) {
+                if (!current()) { close(); break }
+                try {
+                    observe(gateway.read(room.id))
+                    if (!current()) { close(); break }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    if ((e as? ApiError)?.statusCode in setOf(401, 403, 404, 410)) { close(); break }
+                }
+                delay(2_000)
+            }
+        }
+    }
 
     fun bind(actual: WatchRoomPlayerPort) {
         check(port == null && current()) { "The original room is no longer available." }
         port = actual
         actual.pause()
+        expiry = scope.launch {
+            delay(java.time.Duration.between(now(), Instant.parse(room.expiresAt)).toMillis().coerceAtLeast(0))
+            fail("This room has expired.")
+        }
         poll = scope.launch {
             while (isActive && !closed) {
                 if (!current()) { fail("This room or viewer has ended."); break }
@@ -128,6 +161,7 @@ class WatchRoomPlayback(
         if (!actual.apply(target, room.status == "playing")) {
             actual.pause(); mutableNotice.value = "This position is not available yet. Waiting to resync…"; return
         }
+        progressAllowed = true
         mutableNotice.value = "Watch Together · " + room.members.count { it.joined }.toString() + " viewers"
     }
 
@@ -139,7 +173,11 @@ class WatchRoomPlayback(
         if (target(sample) == null || !sample.seekable) return
         val position = positionMs ?: sample.positionMs
         if (position !in 0 until sample.durationMs) return
-        actual.pause()
+        if (!actual.apply(position, false)) {
+            actual.pause()
+            mutableNotice.value = "That position is not available in this copy."
+            return
+        }
         mutation = scope.launch {
             write.withLock {
                 if (!current()) return@withLock
@@ -173,14 +211,18 @@ class WatchRoomPlayback(
         close()
     }
     /** Stop caller joins before new player ownership; callbacks themselves never join. */
-    fun close(): Job {
+    fun close(finalProgress: Job? = null): Job {
         closing?.let { return it }
         closed = true
         port = null
         return scope.launch {
             poll?.cancelAndJoin()
             heartbeat?.cancelAndJoin()
+            expiry?.cancelAndJoin()
+            resolutionWatch?.cancelAndJoin()
+            resolving?.cancelAndJoin()
             mutation?.join()
+            finalProgress?.join()
             if (gateway.current()) {
                 try { gateway.leave(room.id) }
                 catch (_: Exception) { mutableNotice.value = "Leaving the room was not confirmed. Refresh before retrying." }

@@ -3,6 +3,9 @@ package com.strmr.tv.rooms
 import com.strmr.tv.api.ApiError
 import com.strmr.tv.api.HttpFailure
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import com.strmr.tv.player.RoomProgressDrain
+import com.strmr.tv.player.ProgressWriteGate
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.advanceTimeBy
@@ -25,6 +28,7 @@ internal class FakeRoomPlayer : WatchRoomPlayerPort {
     override fun stop(message: String) { stopped = true; pause() }
 }
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class WatchRoomPlaybackTest {
     @Test fun eachMemberResolvesOwnExactTarget() {
         val room = RoomFixtures.room().copy(mediaType = "episode", itemId = "tmdb:42:S02E03",
@@ -35,8 +39,12 @@ class WatchRoomPlaybackTest {
     }
     @Test fun sourceFailureNeverMarksReady() = runTest {
         val api = FakeRooms(); val actor = WatchRoomPlayback(api, api.room, this)
-        // No actual player/source was admitted.
+        val source = launch { CompletableDeferred<Unit>().await() }
+        actor.watchResolution(source); runCurrent()
+        api.room = api.room.copy(status = "ended")
+        advanceTimeBy(2001); runCurrent()
         actor.close().join()
+        assertTrue(source.isCancelled)
         assertFalse(api.calls.contains("ready"))
     }
     @Test fun initialAndRebufferStartWaitForReady() = runTest {
@@ -115,5 +123,25 @@ class WatchRoomPlaybackTest {
         assertFalse(WatchRoomTarget.eligible(RoomFixtures.request().copy(fileOnly = true)))
         assertFalse(WatchRoomTarget.eligible(RoomFixtures.request().copy(title = RoomFixtures.request().title.copy(fromLibrary = true))))
         assertTrue(WatchRoomTarget.request(RoomFixtures.room()).following.isEmpty())
+    }
+    @Test fun heldFinalReportJoinsRoomCloseWithoutNewAdmission() = runTest {
+        val api = FakeRooms(); val actor = WatchRoomPlayback(api, api.room, this)
+        actor.bind(FakeRoomPlayer()); runCurrent()
+        var nanos = 0L
+        val drain = RoomProgressDrain(actor) { nanos }
+        assertTrue(drain.begin()); assertFalse(drain.begin())
+        val gate = ProgressWriteGate { drain.allowed() }
+        val entered = CompletableDeferred<Unit>(); val response = CompletableDeferred<Unit>()
+        val final = launch { gate.write { entered.complete(Unit); response.await() } }
+        entered.await()
+        val close = actor.close(final); runCurrent()
+        assertFalse(actor.current()); assertTrue(drain.allowed())
+        actor.command(true)
+        assertFalse(api.calls.contains("state")); assertFalse(api.calls.contains("leave")); assertFalse(close.isCompleted)
+        response.complete(Unit); close.join()
+        assertTrue(final.isCompleted); assertEquals("leave", api.calls.last())
+        gate.discard(); assertFalse(gate.accepts)
+        nanos = 5_000_000_000L; assertFalse(drain.allowed())
+        nanos = 0L; api.valid = false; assertFalse(drain.allowed())
     }
 }

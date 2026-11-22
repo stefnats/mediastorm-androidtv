@@ -14,6 +14,7 @@ sealed interface HomeSource {
     data class RecentlyAired(val sources: ShelfConfig.CalendarSources?) : HomeSource
     /** What's playing on the server. */
     data object Dashboard : HomeSource
+    data object WatchRooms : HomeSource
     data class WatchSomething(val hasAI: Boolean) : HomeSource
     data class Services(val services: kotlin.collections.List<StreamingService>) : HomeSource
     data class Hub(val links: kotlin.collections.List<HubLink>) : HomeSource
@@ -40,6 +41,7 @@ sealed interface HomeSource {
             "calendar" -> Calendar
             "my-recently-aired" -> RecentlyAired(config.calendarSources)
             "dashboard" -> Dashboard
+            "watch-rooms" -> WatchRooms
             "live-favorites" -> LiveFavorites
             "watch-something" -> WatchSomething(settings.hasAI)
             "streaming-services" -> Services(StreamingService.resolved(config.streamingServices))

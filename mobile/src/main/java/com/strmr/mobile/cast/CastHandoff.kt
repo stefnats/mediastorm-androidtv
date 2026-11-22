@@ -80,7 +80,7 @@ internal fun castSubtitleTrack(tracks: TrackSelection?): SelectedTrack? {
 }
 
 /** Whether the player's session can go to a TV: a title stream, or a live channel. */
-fun PlayerSession.castable(): Boolean = !localFile && canOpenPlayer() && ownership?.let(::castContextEligible)==true && ((streamPath != null && reportsProgress) || (isLive && liveChannel != null))
+fun PlayerSession.castable(): Boolean = room == null && !localFile && canOpenPlayer() && ownership?.let(::castContextEligible)==true && ((streamPath != null && reportsProgress) || (isLive && liveChannel != null))
 
 /**
  * The player's Cast button chose [device]: pauses here, saves the position, closes the player
