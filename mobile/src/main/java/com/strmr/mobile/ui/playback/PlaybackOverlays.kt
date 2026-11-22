@@ -47,6 +47,7 @@ fun PlaybackOverlays() {
     val resolving by PlaybackCoordinator.resolving.collectAsState()
     val error by PlaybackCoordinator.errorMessage.collectAsState()
     val recordingPrompt by PlaybackCoordinator.recordingInterruption.prompt.collectAsState()
+    val combinedFile by PlaybackCoordinator.combinedLibraryFile.prompt.collectAsState()
     resolving?.let { StreamStartCover(it) }
     recordingPrompt?.let { prompt ->
         AlertDialog(
@@ -55,6 +56,15 @@ fun PlaybackOverlays() {
             text = { Text(prompt.message) },
             confirmButton = { TextButton(onClick = { PlaybackCoordinator.recordingInterruption.answer(prompt, true) }) { Text("Stop recording and play") } },
             dismissButton = { TextButton(onClick = { PlaybackCoordinator.recordingInterruption.answer(prompt, false) }) { Text("Cancel") } },
+        )
+    }
+    combinedFile?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = { PlaybackCoordinator.combinedLibraryFile.answer(prompt, false) },
+            title = { Text("Play combined episode file?") },
+            text = { Text(prompt.title + "\n\n" + prompt.message) },
+            confirmButton = { TextButton(onClick = { PlaybackCoordinator.combinedLibraryFile.answer(prompt, true) }) { Text("Play file from beginning") } },
+            dismissButton = { TextButton(onClick = { PlaybackCoordinator.combinedLibraryFile.answer(prompt, false) }) { Text("Cancel") } },
         )
     }
     error?.let {

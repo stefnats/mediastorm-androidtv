@@ -44,7 +44,7 @@ data class LibraryFileStart(
         ): LibraryFileStart {
             val expected=ProfileDataContext.current
             val playback = ApiClient.libraryPlayback(version.id,expected)
-            val resume = ApiClient.resumeState(if (episode == null) "movie" else "episode", playback.streamPath,expected)
+            val resume = if (playback.requiresFilePlayback) null else ApiClient.resumeState(if (episode == null) "movie" else "episode", playback.streamPath,expected)
             ProfileDataContext.requireCurrent(expected)
             return LibraryFileStart(group, versions, version, episode, following, playback, resume?.startPoint,expected)
         }

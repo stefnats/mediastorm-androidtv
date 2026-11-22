@@ -116,6 +116,8 @@ data class ResolvedStream(
     val explicitAudioLanguage: String? = null,
     /** A legacy or deliberate library copy chosen while resolving this request. */
     val libraryVersion: com.strmr.tv.library.LibraryVersion? = null,
+    /** Original library preflight, consumed before selecting progress identity. */
+    val libraryPlayback: com.strmr.tv.api.LibraryPlaybackInfo? = null,
 )
 
 /** Local-file callers must supply a live owner check at every player entry. */
