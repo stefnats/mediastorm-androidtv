@@ -144,12 +144,12 @@ class PlayerController(
             },
             denialTitleId=request.title.titleId,denialContext=dataContext,beforeOptions = { if (!automatic) automaticSpokenAudio.cancelAndJoin(); vodDenied.value?.let {throw com.strmr.tv.api.ApiError.AccessDenied(it)}; audioPreferenceSave?.join(); check(!audioPreferenceFailed) { "Audio preference could not be saved" } })
 
-    private val automaticSpokenAudio by lazy {
+    private val automaticSpokenAudio: AutomaticSpokenAudio by lazy {
         AutomaticSpokenAudio(scope, ::canCheckSpokenAudioAutomatically,
             { createReleaseReports(false, automatic = true) }, { audioRecovery.suggest(AudioRecoveryHint.LANGUAGE) })
     }
 
-    private val playbackMenus = PlaybackMenuGate { automaticSpokenAudio.cancel() }
+    private val playbackMenus: PlaybackMenuGate = PlaybackMenuGate { automaticSpokenAudio.cancel() }
     fun openPlaybackMenu(): java.io.Closeable = playbackMenus.acquire()
     suspend fun awaitAutomaticAudioRetirement() { automaticSpokenAudio.cancelAndJoin() }
 
