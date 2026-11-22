@@ -25,6 +25,7 @@ fun PlaybackQualityRows() {
             onDismiss = { picking = null })
     }
     Column {
+        SpokenAudioAutoRow()
         if (state.loading || state.error != null) ListItem(selected = false, enabled = !state.loading,
             onClick = { scope.launch { editor.load() } }, headlineContent = { Text("Playback quality") },
             supportingContent = { Text(state.error ?: "Loading playback quality…") })
@@ -35,4 +36,21 @@ fun PlaybackQualityRows() {
                 trailingContent = { Text(row.valueLabel) })
         }
     }
+}
+
+@Composable
+private fun SpokenAudioAutoRow() {
+    val editor = rememberSpokenAudioAutoEditor()
+    val state by editor.state.collectAsState()
+    val scope = rememberCoroutineScope()
+    var picking by remember(editor) { mutableStateOf(false) }
+    val snapshot = state.snapshot
+    if (picking && snapshot != null) PickerDialog("Automatic spoken language hints", snapshot.choices, snapshot.selected,
+        onPick = { index -> scope.launch { editor.save(listOf(null, false, true)[index]) } }, onDismiss = { picking = false })
+    if (state.error != null || snapshot?.supported == true) ListItem(selected = false,
+        enabled = !state.busy && (state.error != null || snapshot?.editable == true),
+        onClick = { if (state.error != null) scope.launch { editor.load() } else picking = true },
+        headlineContent = { Text("Automatic spoken language hints") },
+        supportingContent = { Text(state.error ?: "After 45 seconds of continuous video, check two short samples. Hints never report or switch sources.") },
+        trailingContent = { Text(if (state.busy) "Saving…" else snapshot?.label.orEmpty()) })
 }
