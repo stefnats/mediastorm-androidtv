@@ -104,9 +104,10 @@ class PlayerController(
 
     fun openReleaseReports(): ReleaseReports {
         releaseReportOpen = true
+        automaticSpokenAudio.cancel()
         return (audioRecovery.flow ?: createReleaseReports(false)).also { releaseReports = it }
     }
-    private fun createReleaseReports(recovery: Boolean): ReleaseReports =
+    private fun createReleaseReports(recovery: Boolean, automatic: Boolean = false): ReleaseReports =
         ReleaseReports(requireNotNull(session.prequeueId), recoveryContext, scope,
             { player.currentPosition }, { status, offset, wrong ->
                 autoSwitch.cancel()
@@ -141,9 +142,25 @@ class PlayerController(
                     spokenAudioContainerIndex(it.format, it.typeIndex, options)
                 }
             },
-            denialTitleId=request.title.titleId,denialContext=dataContext,beforeOptions = { vodDenied.value?.let {throw com.strmr.tv.api.ApiError.AccessDenied(it)}; audioPreferenceSave?.join(); check(!audioPreferenceFailed) { "Audio preference could not be saved" } })
+            denialTitleId=request.title.titleId,denialContext=dataContext,beforeOptions = { if (!automatic) automaticSpokenAudio.cancelAndJoin(); vodDenied.value?.let {throw com.strmr.tv.api.ApiError.AccessDenied(it)}; audioPreferenceSave?.join(); check(!audioPreferenceFailed) { "Audio preference could not be saved" } })
 
-    internal fun cancelAudioLanguageCheck() { releaseReports?.cancelAudioLanguageCheck() }
+    private val automaticSpokenAudio by lazy {
+        AutomaticSpokenAudio(scope, ::canCheckSpokenAudioAutomatically,
+            { createReleaseReports(false, automatic = true) }, { audioRecovery.suggest(AudioRecoveryHint.LANGUAGE) })
+    }
+
+    private fun spokenAudioSourceEligible() = session.playback?.autoCheckAudioLanguage == true &&
+        canUsePlayerAux() && canReportRelease && recoveryContext.isCurrent()
+
+    private fun canCheckSpokenAudioAutomatically() = spokenAudioSourceEligible() &&
+        !releaseReportOpen && !audioRecovery.active && !autoSwitch.preparing &&
+        switchTo.value == null && advanceTo.value == null && !ended.value && player.playerError == null &&
+        player.isPlaying && player.playbackState == Player.STATE_READY
+
+    internal fun cancelAudioLanguageCheck() {
+        releaseReports?.cancelAudioLanguageCheck()
+        automaticSpokenAudio.cancel()
+    }
 
     fun closeReleaseReports() {
         releaseReports?.close()
@@ -155,13 +172,21 @@ class PlayerController(
         !releaseReportOpen && !audioRecovery.active && !autoSwitch.preparing && switchTo.value == null && advanceTo.value == null && !ended.value
 
     private fun observeAudioAvailability() {
-        if (!audioRecoveryEligible(session, AutoSwitchSettings.enabled, recoveryContext.isCurrent())) audioRecovery.dismiss()
+        val languageHint = audioRecovery.suggestion.value?.hint == AudioRecoveryHint.LANGUAGE
+        if (if (languageHint) !spokenAudioSourceEligible()
+            else !audioRecoveryEligible(session, AutoSwitchSettings.enabled, recoveryContext.isCurrent())) audioRecovery.dismiss()
         val next = tracks.value
         audioRecoveryPolicy.observe(AudioAvailability(SystemClock.elapsedRealtime(), player.currentPosition, player.isPlaying,
             next.ofType(C.TRACK_TYPE_VIDEO).any { it.selected }, session.tracks?.audio != null,
             next.ofType(C.TRACK_TYPE_AUDIO).isNotEmpty(), C.TRACK_TYPE_AUDIO !in player.trackSelectionParameters.disabledTrackTypes,
             player.volume), canPrepareAudioAlternative())?.let { audioRecovery.suggest(it) }
         val selectedAudio = next.ofType(C.TRACK_TYPE_AUDIO).singleOrNull { it.selected }
+        automaticSpokenAudio.observe(SpokenAudioPlayback(SystemClock.elapsedRealtime(), player.currentPosition,
+            player.isPlaying, player.playbackState != Player.STATE_READY,
+            next.ofType(C.TRACK_TYPE_VIDEO).any { it.selected },
+            selectedAudio?.let { "${it.format.id}:${it.typeIndex}:${it.format.language}" },
+            C.TRACK_TYPE_AUDIO !in player.trackSelectionParameters.disabledTrackTypes,
+            player.volume, player.playbackParameters.speed))
         if (decodedAudioPolicy.observe(decodedAudio.snapshot(), DecodedAudioPlayback(
                 nowMs = SystemClock.elapsedRealtime(), positionMs = player.currentPosition,
                 durationMs = player.duration.takeIf { it != C.TIME_UNSET } ?: 0L,
@@ -425,6 +450,7 @@ class PlayerController(
         }
 
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            cancelAudioLanguageCheck()
             decodedAudio.restart()
             decodedAudioPolicy.reset()
             if (reason == Player.DISCONTINUITY_REASON_SEEK && recordingStart?.started == true) report()
@@ -766,6 +792,7 @@ class PlayerController(
         if (released) return progress.lastReport
         startup.end(StartupOutcome.RELEASED)
         released=true
+        automaticSpokenAudio.cancel()
         programmeTimer?.cancel()
         decodedAudio.close(); decodedAudioPolicy.reset()
         val partPosition=player.currentPosition

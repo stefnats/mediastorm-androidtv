@@ -80,3 +80,18 @@ SpokenAudioCheckTest and SpokenAudioTransportTest cover the workflow and synthet
 loopback transport. They do not establish language-model accuracy, model setup,
 real-provider behavior, physical-device playback or lip-sync correctness. The
 client does not install a speech model or edit the server analysis endpoint.
+
+
+Optional automatic spoken language hints are a separate profile/server preference,
+`playback.autoCheckAudioLanguage`, disabled on old servers and by default. TV and
+mobile offer the existing server-editable, single-field profile setting with
+explicit inheritance; device settings cannot enable it. Each actual active source
+gets at most one opportunity after 45 seconds of continuous video advancement.
+Pause, buffering, seek, track change, menus, recovery and owner retirement cancel
+or restart the observation window; an already spent opportunity is not retried.
+Only a credible two-sample mismatch offers the existing audio/source review card.
+Match and unknown stay silent. The card does not prepare, adopt, report or block
+anything automatically. This is optional model evidence, not a language or lip
+sync guarantee. Source-only test additions cover the policy, joined cancellation,
+conservative hint publication, explicit false/inheritance and confirmed settings
+readback. Physical validation is coordinated separately.

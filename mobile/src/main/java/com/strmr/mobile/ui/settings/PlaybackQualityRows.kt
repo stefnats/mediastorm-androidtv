@@ -7,12 +7,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import com.strmr.tv.ui.settings.rememberSpokenAudioAutoEditor
 import com.strmr.tv.ui.settings.QualitySettingRow
 import com.strmr.tv.ui.settings.rememberPlaybackQualityEditor
 import kotlinx.coroutines.launch
 
 @Composable
 fun PlaybackQualityRows() {
+    SpokenAudioAutoRow()
     val editor = rememberPlaybackQualityEditor()
     val state by editor.state.collectAsState()
     val scope = rememberCoroutineScope()
@@ -28,5 +30,24 @@ fun PlaybackQualityRows() {
     state.snapshot?.rows?.forEach { row ->
         SettingsRow(row.title, if (state.saving) "Saving…" else "${row.valueLabel}. ${row.description}",
             enabled = !state.loading && !state.saving && state.error == null && row.editable) { picking = row }
+    }
+}
+
+@Composable
+private fun SpokenAudioAutoRow() {
+    val editor = rememberSpokenAudioAutoEditor()
+    val state by editor.state.collectAsState()
+    val scope = rememberCoroutineScope()
+    var picking by remember(editor) { mutableStateOf(false) }
+    val snapshot = state.snapshot
+    if (picking && snapshot != null) ChoiceDialog("Automatic spoken language hints", snapshot.choices, snapshot.selected,
+        onDismiss = { picking = false }) { index ->
+        picking = false
+        scope.launch { editor.save(listOf(null, false, true)[index]) }
+    }
+    if (state.error != null || snapshot?.supported == true) SettingsRow("Automatic spoken language hints",
+        state.error ?: "${if (state.busy) "Saving…" else snapshot?.label.orEmpty()}. After 45 seconds of continuous video, check two short samples. Hints never report or switch sources.",
+        enabled = !state.busy && (state.error != null || snapshot?.editable == true)) {
+        if (state.error != null) scope.launch { editor.load() } else picking = true
     }
 }

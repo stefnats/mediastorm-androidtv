@@ -163,6 +163,7 @@ data class ReleaseReportState(
     val progressStopped: Boolean = false,
     val audioLanguageCheckBusy: Boolean = false,
     val audioLanguageCheckMessage: String? = null,
+    val audioLanguageCheckResult: SpokenAudioReply? = null,
 )
 
 /** Prepares one replacement while playback continues; adoption is always a separate user action. */
@@ -220,12 +221,12 @@ class ReleaseReports(
         mutable.value.options?.audioLanguageCheckAvailable == true && currentAudioTrack != null
 
     /** Explicit observation only: never enters submit/report/replacement/history paths. */
-    fun checkAudioLanguage() {
-        if (!canCheckAudioLanguage || mutable.value.busy || mutable.value.denial != null) return
-        val original = mutable.value.options ?: return
+    fun checkAudioLanguage(): Job? {
+        if (!canCheckAudioLanguage || mutable.value.busy || mutable.value.denial != null) return null
+        val original = mutable.value.options ?: return null
         val attempt = ++spokenSequence
         mutable.value = mutable.value.copy(busy = true, audioLanguageCheckBusy = true,
-            audioLanguageCheckMessage = null, message = "Checking two short audio samples; nothing will be changed.")
+            audioLanguageCheckMessage = null, audioLanguageCheckResult = null, message = "Checking two short audio samples; nothing will be changed.")
         spokenJob = scope.launch {
             val authorityAttempt = denialTitleId?.let { VodDenialEvents.begin(it, denialContext) }
             try {
@@ -245,7 +246,7 @@ class ReleaseReports(
                 check(reply.sourceVersion == input.sourceVersion && reply.audioTrackIndex == track &&
                     TrackPreferences.sameLanguage(reply.requestedLanguage, refreshed.audioLanguage))
                 mutable.value = mutable.value.copy(busy = false, audioLanguageCheckBusy = false, message = null,
-                    audioLanguageCheckMessage = spokenAudioMessage(reply, refreshed.audioLanguage))
+                    audioLanguageCheckMessage = spokenAudioMessage(reply, refreshed.audioLanguage), audioLanguageCheckResult = reply)
             } catch (timeout: TimeoutCancellationException) {
                 if (!closed && attempt == spokenSequence && gateway.isCurrent()) mutable.value = mutable.value.copy(
                     busy = false, audioLanguageCheckBusy = false, message = null,
@@ -262,6 +263,13 @@ class ReleaseReports(
                 }
             }
         }
+        return spokenJob
+    }
+
+    internal suspend fun stopAudioLanguageCheck() {
+        val original = spokenJob
+        cancelAudioLanguageCheck()
+        original?.cancelAndJoin()
     }
 
     /** Track/intent changes retire even an A/B/A selection's delayed reply. */
@@ -269,8 +277,8 @@ class ReleaseReports(
         spokenSequence++
         spokenJob?.cancel(); spokenJob = null
         if (mutable.value.audioLanguageCheckBusy) mutable.value = mutable.value.copy(
-            busy = false, audioLanguageCheckBusy = false, message = null, audioLanguageCheckMessage = null)
-        else if (mutable.value.audioLanguageCheckMessage != null) mutable.value = mutable.value.copy(audioLanguageCheckMessage = null)
+            busy = false, audioLanguageCheckBusy = false, message = null, audioLanguageCheckMessage = null, audioLanguageCheckResult = null)
+        else if (mutable.value.audioLanguageCheckMessage != null) mutable.value = mutable.value.copy(audioLanguageCheckMessage = null, audioLanguageCheckResult = null)
     }
 
     fun choose(problem: ReleaseProblem?) {

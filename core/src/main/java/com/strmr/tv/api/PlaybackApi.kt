@@ -99,6 +99,8 @@ data class PlaybackSettings(
     val sourcePolicyAvailable: Boolean = true,
     /** Match this device refresh rate to the observed video frame rate. */
     val matchFrameRate: Boolean = false,
+    /** Explicit profile/global opt-in; no device override or inferred enablement. */
+    val autoCheckAudioLanguage: Boolean = false,
 )
 
 @Serializable
@@ -128,6 +130,7 @@ internal data class PlaybackFields(
     val allowedTrackLanguages: List<String>? = null,
     val preferLocalFiles: Boolean? = null,
     val matchFrameRate: Boolean? = null,
+    val autoCheckAudioLanguage: Boolean? = null,
 ) {
     /** The `subtitle*` fields of the same object. */
     val style: SubtitleStyle.Server
@@ -195,6 +198,7 @@ internal fun mergePlaybackSettings(
         automaticLibrarySelectionSupported = automaticLibrarySelectionSupported,
         sourcePolicyAvailable = sourcePolicyAvailable,
         matchFrameRate = d?.matchFrameRate ?: u?.matchFrameRate ?: false,
+        autoCheckAudioLanguage = u?.autoCheckAudioLanguage ?: false,
     )
 
 /** Missing optional settings may use legacy defaults; an authorization rejection may not. */
