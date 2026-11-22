@@ -117,7 +117,8 @@ fun LandscapeCard(
 }
 
 @Composable
-private fun CardArt(card: HomeCard, wide: Boolean, forceOverlay: Boolean) {
+private fun CardArt(original: HomeCard, wide: Boolean, forceOverlay: Boolean) {
+    val card = com.strmr.tv.ui.details.PersonalArtwork.store.card(original)
     val sourceHint = rememberSourceHint(card.sourceAvailability)
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Box(Modifier.fillMaxSize().sourceHintArtwork(sourceHint)) {

@@ -62,6 +62,7 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun MainShell() {
+    com.strmr.tv.ui.details.rememberPersonalArtwork()
     val profile by AppSession.profile.collectAsState()
     remember(profile?.id) { HomeViewStore.activate(ApiClient.profileId) }
     val viewTabs = HomeViewTabs.shown()

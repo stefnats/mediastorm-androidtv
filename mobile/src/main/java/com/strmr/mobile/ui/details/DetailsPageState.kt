@@ -47,6 +47,7 @@ class DetailsPageState(val model: DetailsModel) {
     var episodeSourceHint by mutableStateOf<com.strmr.tv.api.SourceAvailability?>(null)
     var episodeMenu by mutableStateOf<Episode?>(null)
     var localPreferenceRequest by mutableStateOf<ContentLocalRequest?>(null)
+    var artworkTitle by mutableStateOf<com.strmr.tv.api.Title?>(null)
     var reminderTarget by mutableStateOf<ReminderTarget?>(null)
     var more by mutableStateOf(false)
     var watchState by mutableStateOf(false)

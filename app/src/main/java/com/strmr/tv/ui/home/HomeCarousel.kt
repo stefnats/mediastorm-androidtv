@@ -76,10 +76,10 @@ fun CarouselAutoAdvance(state: CarouselState, count: Int, shown: State<Boolean>)
 @Composable
 fun CarouselArt(slides: List<HomeCard>, state: CarouselState, modifier: Modifier) {
     val count = slides.size
-    val slide = slides.getOrNull(state.index)
+    val slide = slides.getOrNull(state.index)?.let { com.strmr.tv.ui.details.PersonalArtwork.store.card(it) }
     CarouselBackdrop(
         slide?.backdropUrl ?: slide?.artworkUrl,
-        slides.getOrNull((state.index + 1) % maxOf(count, 1))?.let { it.backdropUrl ?: it.artworkUrl },
+        slides.getOrNull((state.index + 1) % maxOf(count, 1))?.let { com.strmr.tv.ui.details.PersonalArtwork.store.card(it) }?.let { it.backdropUrl ?: it.artworkUrl },
         modifier,
     )
 }

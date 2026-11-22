@@ -64,7 +64,7 @@ fun DetailsHero(model: DetailsModel) {
         else minOf(maxWidth * 1.05f, config.screenHeightDp.dp * 0.58f)
         val background = MaterialTheme.colorScheme.background
         Box(Modifier.fillMaxWidth().height(height)) {
-            ArtImage(model.title?.backdrop?.url ?: target.backdropUrl, "w1280", null, Modifier.fillMaxSize())
+            ArtImage(model.displayBackdropUrl, "w1280", null, Modifier.fillMaxSize())
             Box(
                 Modifier.fillMaxSize().background(
                     Brush.verticalGradient(

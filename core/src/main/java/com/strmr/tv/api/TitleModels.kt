@@ -121,6 +121,9 @@ data class Title(
     val sourceAvailability: SourceAvailability? = null,
     /** Optional catalogue provenance; never an audio-track promise. */
     val originalLanguageEvidence: OriginalLanguageEvidence? = null,
+    /** Existing provider variants offered for a deliberate personal artwork choice. */
+    val posters: List<ImageRef>? = null,
+    val textBackdrop: ImageRef? = null,
 ) {
     val isMovie: Boolean get() = mediaType == "movie"
 }

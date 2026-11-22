@@ -47,6 +47,7 @@ import com.strmr.tv.ui.settings.BadgeSettings
  */
 @Composable
 fun MainScaffold() {
+    com.strmr.tv.ui.details.rememberPersonalArtwork()
     val profile by AppSession.profile.collectAsState()
     remember(profile?.id) { HomeViewStore.activate(ApiClient.profileId) }
     val navigator = remember { Navigator() }

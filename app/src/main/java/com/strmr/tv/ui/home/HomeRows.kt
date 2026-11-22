@@ -292,6 +292,6 @@ private fun Modifier.headerOverflow(room: Dp, state: LazyListState): Modifier = 
 private const val ROW_FADE_OUT_MS = 120
 private const val ROW_FADE_IN_MS = 200
 
-internal fun HomeCard.hero() = HeroContent(title, subtitle, overview, backdropUrl ?: artworkUrl, logoUrl, drawable)
+internal fun HomeCard.hero() = HeroContent(title, subtitle, overview, backdropUrl ?: artworkUrl, logoUrl, drawable, target?.titleId)
 
 private fun ExploreCard.hero() = HeroContent(title, "$moreCount more", "Open the whole list.", backdropUrl, null)

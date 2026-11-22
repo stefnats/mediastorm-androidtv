@@ -69,6 +69,7 @@ fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: Corout
     val reminderProfile by AppSession.profile.collectAsState()
     val model = state.model
     val target = model.target
+    val artworkSupported = com.strmr.tv.ui.details.rememberArtworkSupported(target, model.dataContext)
     val listOrigin = remember(model, state) { TitleListOrigin(target, model.dataContext, requireNotNull(scope.coroutineContext[Job]), currentRoute) }
     DisposableEffect(listOrigin) { onDispose { listOrigin.close() } }
     val rate = com.strmr.tv.ui.rememberRatingAction(target, listOrigin, scope)
@@ -79,6 +80,9 @@ fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: Corout
     val actions = buildList {
         if(remindersAllowed(reminderProfile) && reminderChoices(ReminderTarget(target)).isNotEmpty()) add(SheetAction("Remind me…", Icons.Outlined.Star) {state.reminderTarget=ReminderTarget(target)})
         if (!target.fromLibrary) add(SheetAction("Rate for this profile…", Icons.Outlined.Star, action = rate))
+        if (artworkSupported && model.title != null) add(SheetAction("Choose artwork for this profile…", Icons.Outlined.Star) {
+            if (currentRoute() && state.playbackCurrent) state.artworkTitle = model.title
+        })
         model.currentSeason.let { season ->
             contentLocalScopes(target, season).takeIf { it.isNotEmpty() }?.let { targets ->
                 val generation = model.accessGeneration
@@ -115,7 +119,7 @@ fun DetailsMoreSheet(state: DetailsPageState, warm: WarmPrequeue?, scope: Corout
     }
     ActionSheet({ listOrigin.dismiss { state.more = false } }, header = {
         Column {
-            SheetHeader(target.name, model.metadataLine, target.posterUrl)
+            SheetHeader(target.name, model.metadataLine, model.displayPosterUrl)
             membership.notice?.let { Text(it, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) }
         }
     }, actions = actions)

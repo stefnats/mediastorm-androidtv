@@ -49,17 +49,20 @@ data class HeroContent(
     val backdropUrl: String?,
     val logoUrl: String?,
     val drawable: Int? = null,
+    val titleId: String? = null,
 )
 
 /** The full-bleed backdrop that follows focus, darker at the bottom for the rows and at the left for the text. */
 @Composable
 fun HeroBackdrop(hero: HeroContent?) {
+    val original = hero?.backdropUrl
+    val backdrop = hero?.titleId?.let { com.strmr.tv.ui.details.PersonalArtwork.store.backdrop(it, original) } ?: original
     Box(Modifier.fillMaxSize()) {
         if (hero?.drawable != null) {
             Image(painterResource(hero.drawable), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         } else {
             AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current).data(settledArt(Artwork.url(hero?.backdropUrl))).crossfade(350).build(),
+                model = ImageRequest.Builder(LocalContext.current).data(settledArt(Artwork.url(backdrop))).crossfade(350).build(),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),

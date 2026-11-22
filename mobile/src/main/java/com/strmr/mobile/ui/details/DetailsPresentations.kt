@@ -18,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 @Composable
 fun DetailsPresentations(state: DetailsPageState, warm: WarmPrequeue?, scope: CoroutineScope, extras: DetailsActionContext, currentRoute: () -> Boolean, onHidden: () -> Unit) {
     val model = state.model
+    state.artworkTitle?.let { title -> ContentArtworkDialog(model.target, title, model.dataContext, onDismiss = { state.artworkTitle = null }) }
     state.reminderTarget?.let { target -> com.strmr.mobile.ui.reminders.ReminderDialog(target,model.dataContext,reloadTitle={model.reloadForReminder()},onDismiss={state.reminderTarget=null}) }
     state.localPreferenceRequest?.let { request ->
         ContentLocalPreferenceDialog(request,

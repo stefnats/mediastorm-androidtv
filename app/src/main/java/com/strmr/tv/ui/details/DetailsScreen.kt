@@ -127,6 +127,8 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
     var customizingButtons by remember { mutableStateOf(false) }
     var episodeOrder by remember { mutableStateOf(false) }
     var localPreferenceRequest by remember(model, actionGeneration) { mutableStateOf<ContentLocalRequest?>(null) }
+    var artworkTitle by remember(model, actionGeneration) { mutableStateOf<com.strmr.tv.api.Title?>(null) }
+    val artworkSupported = rememberArtworkSupported(target, model.dataContext)
     var reminderTarget by remember { mutableStateOf<ReminderTarget?>(null) }
     val navigator = com.strmr.tv.ui.LocalNavigator.current
     val actions = com.strmr.tv.library.TitleActions.changes
@@ -170,7 +172,7 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
     // header keeps its focus state under them; this one flag stops the trailer for the visit
     // instead (as the Expo page's dismissTrailerAutoPlay; it doesn't restart when they close).
     val menuOpen = picker != null || pendingSource != null || versionsFor != null || pendingVersion != null || model.playChoice != null ||
-        prequeueTracks.open || watchState || more || customizingButtons || episodeOrder || CustomListsStore.picking != null
+        prequeueTracks.open || watchState || more || customizingButtons || episodeOrder || artworkTitle != null || CustomListsStore.picking != null
     LaunchedEffect(menuOpen) { if (menuOpen) trailer.dismiss("menu open") }
 
     fun chooseVersion(version: LibraryVersion, episode: Episode?) {
@@ -212,7 +214,7 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
         val foldPx = with(LocalDensity.current) { screenHeight.toPx() } * 0.5f
         val belowFold = { (pageScroll.value / foldPx).coerceIn(0f, 1f) }
         AsyncImage(
-            model = ImageRequest.Builder(context).data(Artwork.url(model.title?.backdrop?.url ?: target.backdropUrl)).crossfade(300).build(),
+            model = ImageRequest.Builder(context).data(Artwork.url(model.displayBackdropUrl)).crossfade(300).build(),
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize().alpha(backdropAlpha).graphicsLayer {
@@ -297,7 +299,9 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
                         }?.let { localPreferenceRequest = it }
                     })
                 }
-            }, reminder = ReminderTarget(target).takeIf { remindersAllowed(reminderProfile) && reminderChoices(it).isNotEmpty() }?.let { value ->
+            }, artworkPreference = if (artworkSupported && model.title != null) DialogChoice("Choose artwork for this profile…") {
+                if (currentPage() && model.acceptsPlaybackAction(actionGeneration)) artworkTitle = model.title
+            } else null, reminder = ReminderTarget(target).takeIf { remindersAllowed(reminderProfile) && reminderChoices(it).isNotEmpty() }?.let { value ->
                 DialogChoice("Remind me…") { reminderTarget = value }
             })
     }
@@ -306,6 +310,7 @@ fun DetailsScreen(target: DetailsTarget, openWatchState: Boolean = false, autopl
             onSaved = { request.publishIfSelected({ localPreferenceRequest }) { model.sourcePreferenceChanged(); prequeueTracks.clear() } },
             onDismiss = { request.dismissIfSelected({ localPreferenceRequest }) { localPreferenceRequest = null } })
     }
+    artworkTitle?.let { title -> ContentArtworkDialog(target, title, model.dataContext, onDismiss = { artworkTitle = null }) }
     reminderTarget?.let { value -> ReminderDialog(value,model.dataContext,reloadTitle={model.reloadForReminder()},onDismiss={reminderTarget=null}) }
     if (episodeOrder) EpisodeOrderDialog(model, scope, onDismiss = { episodeOrder = false })
     if (customizingButtons) DetailsButtonsDialog(onDismiss = { customizingButtons = false })

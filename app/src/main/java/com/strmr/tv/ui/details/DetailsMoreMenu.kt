@@ -50,6 +50,7 @@ fun DetailsMoreMenu(
     onDismiss: () -> Unit,
     sourcePreference: DialogChoice? = null,
     reminder: DialogChoice? = null,
+    artworkPreference: DialogChoice? = null,
 ) {
     val rate = com.strmr.tv.ui.rememberRatingAction(target, listOrigin, scope)
     var membership by remember(listOrigin) { mutableStateOf(DetailsMenuSnapshot()) }
@@ -60,6 +61,7 @@ fun DetailsMoreMenu(
         if (!target.fromLibrary) add(DialogChoice("Rate for this profile…", rate))
         addAll(moved)
         sourcePreference?.let(::add)
+        artworkPreference?.let(::add)
         reminder?.let(::add)
         if (membership.inContinueWatching) {
             add(DialogChoice("Set Aside", TitleListAction(listOrigin, scope) { TitleActions.setAside(target, it) }))

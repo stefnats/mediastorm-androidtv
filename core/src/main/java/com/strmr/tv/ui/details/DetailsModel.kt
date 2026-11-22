@@ -115,6 +115,8 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
     }
     var title by mutableStateOf<Title?>(null)
         private set
+    val displayPosterUrl get() = PersonalArtwork.store.poster(target.titleId, title?.textPoster?.url ?: title?.poster?.url ?: target.displayPosterUrl)
+    val displayBackdropUrl get() = PersonalArtwork.store.backdrop(target.titleId, title?.backdrop?.url ?: target.backdropUrl)
     var seasons by mutableStateOf<List<Season>>(emptyList())
         private set
     var selectedSeason by mutableStateOf<Int?>(null)
@@ -480,7 +482,7 @@ class DetailsModel(val target: DetailsTarget, private val scope: CoroutineScope 
     }
 
     fun request(episode: Episode?, start: StartPoint?): PlaybackRequest {
-        val primaryBackdrop = title?.backdrop?.url ?: target.backdropUrl
+        val primaryBackdrop = displayBackdropUrl
         val alternates = title?.backdrops?.map { it.url }.orEmpty()
         val art = (listOfNotNull(primaryBackdrop) + alternates).distinct().shuffled(Random(artSeed))
         return PlaybackRequest(

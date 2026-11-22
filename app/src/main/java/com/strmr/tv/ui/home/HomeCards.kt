@@ -127,7 +127,7 @@ fun HomeCardView(
     onLongClick: (() -> Unit)? = null,
 ) {
     val visibleSource = rememberVisibleTitleSource(card)
-    val observedCard = card.copy(sourceAvailability = visibleSource.source)
+    val observedCard = com.strmr.tv.ui.details.PersonalArtwork.store.card(card).copy(sourceAvailability = visibleSource.source)
 
     Column(Modifier.openWidth(metrics, open), verticalArrangement = Arrangement.spacedBy(metrics.captionGap)) {
         Card(

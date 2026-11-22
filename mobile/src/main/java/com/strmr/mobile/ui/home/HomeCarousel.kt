@@ -117,8 +117,9 @@ fun HomeCarousel(slides: List<HomeCard>, onCard: (HomeCard) -> Unit, onMenu: (Ho
 
 @Composable
 private fun CarouselTile(card: HomeCard, sourceHint: com.strmr.tv.home.SourceHint?, modifier: Modifier) {
+    val shown = com.strmr.tv.ui.details.PersonalArtwork.store.card(card)
     Box(modifier.clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
-        ArtImage(card.backdropUrl ?: card.artworkUrl, "w1280", card.title, Modifier.fillMaxSize())
+        ArtImage(shown.backdropUrl ?: shown.artworkUrl, "w1280", card.title, Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.85f))))
         Column(
             Modifier.align(Alignment.BottomStart).padding(16.dp),
