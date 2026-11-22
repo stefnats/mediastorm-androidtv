@@ -14,6 +14,7 @@ data class ReleaseReportOptions(
     val selectedAudioTrack: Int = -1,
     val canShare: Boolean = false,
     val hasEpisode: Boolean = false,
+    val canResetHistory: Boolean = false,
 )
 
 @Serializable
@@ -21,6 +22,8 @@ data class ReleaseReportReply(
     val report: SavedReleaseReport? = null,
     val replacement: PrequeueStartResponse? = null,
     val resumePosition: Double = 0.0,
+    val historyReset: Boolean = false,
+    val historyResetError: String? = null,
 )
 
 @Serializable

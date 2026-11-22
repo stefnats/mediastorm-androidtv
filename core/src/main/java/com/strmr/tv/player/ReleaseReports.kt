@@ -144,6 +144,10 @@ data class ReleaseReportState(
     val reportId: String? = null,
     val message: String? = null,
     val denial:VodAccessDenial?=null,
+    val resetHistory: Boolean = false,
+    val historyReset: Boolean = false,
+    val historyResetUnconfirmed: Boolean = false,
+    val progressStopped: Boolean = false,
 )
 
 /** Prepares one replacement while playback continues; adoption is always a separate user action. */
@@ -162,8 +166,10 @@ class ReleaseReports(
     private val prepareLocal: (suspend (PrequeueStatus, Long, Long) -> PreparedReleaseBuffer)? = null,
     private val adoptLocal: ((PrequeueStatus, Long, Boolean, PreparedReleaseBuffer) -> Unit)? = null,
     private val monotonicNanos: () -> Long = System::nanoTime,
+    private val beforeHistoryReset: (suspend () -> Unit)? = null,
+    progressAlreadyDiscarded: Boolean = false,
 ) {
-    private val mutable = MutableStateFlow(ReleaseReportState())
+    private val mutable = MutableStateFlow(ReleaseReportState(progressStopped = progressAlreadyDiscarded))
     val state: StateFlow<ReleaseReportState> = mutable
     private var job: Job? = null
     private var pending: String? = null
@@ -193,8 +199,22 @@ class ReleaseReports(
     }
 
     fun choose(problem: ReleaseProblem?) {
-        if (!mutable.value.busy && pending == null) mutable.value = mutable.value.copy(problem = problem, track = null, message = null)
+        if (!mutable.value.busy && pending == null) mutable.value = mutable.value.copy(problem = problem, track = null, resetHistory = false, message = null)
     }
+    val canResetHistory: Boolean get() = beforeHistoryReset != null &&
+        mutable.value.options?.canResetHistory == true && mutable.value.problem?.wrongContent == true
+
+    fun resetHistory(enabled: Boolean) {
+        if (!closed && !mutable.value.busy && pending == null) {
+            mutable.value = mutable.value.copy(resetHistory = enabled && canResetHistory)
+        }
+    }
+
+    private fun playbackNotice(message: String): String = message + if (mutable.value.progressStopped) {
+        (if (mutable.value.historyReset && !message.contains("history", ignoreCase = true) && !message.contains("unwatched"))
+            " The history reset remains saved." else "") + " The old source remains paused without saving progress."
+    } else " Playback can continue."
+
     fun track(index: Int) {
         if (!mutable.value.busy && mutable.value.options?.audioTracks?.any { it.index == index } == true) {
             mutable.value = mutable.value.copy(track = index)
@@ -213,7 +233,7 @@ class ReleaseReports(
         val attempt = ++rangeAttempt
         val target = mutable.value.resume.position(position(), mutable.value.problem?.wrongContent == true, status.duration)
         val deadline = localDeadline ?: (monotonicNanos() + 15_000_000_000L).also { localDeadline = it }
-        mutable.value = mutable.value.copy(ready = null, busy = true, message = "Buffering the alternative at ${target / 1000}s. Playback continues.")
+        mutable.value = mutable.value.copy(ready = null, busy = true, message = playbackNotice("Buffering the alternative at ${target / 1000}s."))
         localJob = scope.launch {
             var owned: PreparedReleaseBuffer? = null
             try {
@@ -224,11 +244,11 @@ class ReleaseReports(
                 checkCurrent(); check(attempt == rangeAttempt && owned.targetMs == target && owned.isReady())
                 local = owned; owned = null
                 mutable.value = mutable.value.copy(ready = status, busy = false,
-                    message = "Alternative buffered at ${target / 1000}s. Switch to this saved position.")
+                    message = playbackNotice("Alternative buffered at ${target / 1000}s. Switch to this saved position."))
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
                 if (!closed && attempt == rangeAttempt) mutable.value = mutable.value.copy(ready = null, busy = false,
-                    message = "Could not buffer the alternative. Playback continues. Choose another position or source.")
+                    message = playbackNotice("Could not buffer the alternative. Choose another position or source."))
             } finally { withContext(NonCancellable) { owned?.closeAndJoin() } }
         }
     }
@@ -238,25 +258,44 @@ class ReleaseReports(
         val options = mutable.value.options ?: return
         val problem = mutable.value.problem
         if (reporting && (problem == null || (problem == ReleaseProblem.AUDIO && mutable.value.track == null))) return
+        val resetHistory = reporting && problem?.wrongContent == true && canResetHistory && mutable.value.resetHistory
         val body = buildJsonObject {
             put("sourceVersion", options.sourceVersion)
             if (reporting) { put("reason", problem!!.key); put("audioLanguage", options.audioLanguage) }
             if (reporting && problem == ReleaseProblem.AUDIO) put("audioTrackIndex", mutable.value.track!!)
+            if (resetHistory) put("resetHistory", true)
             put("retry", prepare); put("startOffset", 0); put("skipHLS", true); put("clientId", clientId)
         }
-        mutable.value = mutable.value.copy(busy = true, message = if (prepare) "Preparing a suitable alternative. Playback can continue." else "Saving report...")
+        mutable.value = mutable.value.copy(busy = true, message = if (resetHistory) "Finishing earlier progress updates..." else if (prepare) playbackNotice("Preparing a suitable alternative.") else "Saving report...")
         job = scope.launch {
             var attempt=denialTitleId?.let {VodDenialEvents.begin(it,denialContext)}
+            var submitted = false
             try {
                 checkCurrent()
+                if (resetHistory) {
+                    mutable.value = mutable.value.copy(progressStopped = true)
+                    requireNotNull(beforeHistoryReset).invoke()
+                    checkCurrent()
+                    mutable.value = mutable.value.copy(historyResetUnconfirmed = true)
+                }
+                submitted = true
                 // Obtain the replacement ID even if Back is pressed while POST is in flight,
                 // so cancellation can release the preparation instead of leaving an orphan.
                 val reply = withContext(NonCancellable) { withTimeout(12_000) { gateway.submit(sourceId, reporting, body) } }
                 pending = reply.replacement?.prequeueId
                 if (closed || mutable.value.denial!=null || !gateway.isCurrent()) { cleanup(); return@launch }
-                mutable.value = mutable.value.copy(reportId = reply.report?.id ?: mutable.value.reportId)
+                mutable.value = mutable.value.copy(reportId = reply.report?.id ?: mutable.value.reportId,
+                    historyReset = mutable.value.historyReset || resetHistory && reply.historyReset,
+                    historyResetUnconfirmed = if (resetHistory) !reply.historyReset else mutable.value.historyResetUnconfirmed)
+                if (reply.historyResetError != null || resetHistory && !reply.historyReset) {
+                    cleanup()
+                    mutable.value = mutable.value.copy(busy = false, ready = null,
+                        message = playbackNotice("Report saved, but the history reset could not be confirmed. Check history and try the reset again."))
+                    return@launch
+                }
                 if (!prepare) {
-                    mutable.value = mutable.value.copy(busy = false, message = "Report saved. Playback can continue.")
+                    mutable.value = mutable.value.copy(busy = false, message = playbackNotice(if (resetHistory)
+                        "Report saved. This item is now unwatched and its saved position is cleared." else "Report saved."))
                     return@launch
                 }
                 val id = pending ?: error("No alternative preparation was returned.")
@@ -279,15 +318,17 @@ class ReleaseReports(
                 }
                 serverReady = ready
                 if (prepareLocal != null) startLocal(ready)
-                else mutable.value = mutable.value.copy(busy = false, ready = ready, message = "Alternative ready. Choose where to start, then switch.")
+                else mutable.value = mutable.value.copy(busy = false, ready = ready, message = playbackNotice("Alternative ready. Choose where to start, then switch."))
             } catch (e: TimeoutCancellationException) {
                 cleanup()
-                mutable.value = mutable.value.copy(busy = false, message = "Preparation timed out. The current source is unchanged.")
+                mutable.value = mutable.value.copy(busy = false, message = if (mutable.value.progressStopped) playbackNotice(if (mutable.value.historyReset) "Preparation timed out. The history reset remains saved." else "Could not confirm the report or history reset. Check history.") else "Preparation timed out. The current source is unchanged.")
             } catch (e: CancellationException) { cleanup(); throw e }
             catch (e: Exception) {
                 if(!closed && gateway.isCurrent() && e is ApiError.Http)attempt?.let {captured->e.vodDenial?.let {VodDenialEvents.reject(captured,it)}}
                 cleanup()
-                mutable.value = mutable.value.copy(busy = false,options=if(e.vodDenial!=null)null else mutable.value.options,ready=null,denial=e.vodDenial,message = e.vodDenial?.message ?: if (e is ApiError) "The server rejected this action. Reopen the menu to refresh the selection and language." else e.message ?: "Could not prepare another source.")
+                mutable.value = mutable.value.copy(busy = false,options=if(e.vodDenial!=null)null else mutable.value.options,ready=null,denial=e.vodDenial,message = if (resetHistory && !submitted) playbackNotice("Could not finish earlier progress updates. No report or history reset was sent. Try again.")
+                    else if (mutable.value.progressStopped) playbackNotice(e.vodDenial?.message ?: if (mutable.value.historyReset) "Could not prepare another source. The history reset remains saved." else "Could not confirm the report or history reset. Check history.")
+                    else e.vodDenial?.message ?: if (e is ApiError) "The server rejected this action. Reopen the menu to refresh the selection and language." else e.message ?: "Could not prepare another source.")
             }
         }
     }
@@ -303,14 +344,14 @@ class ReleaseReports(
         val wrong = state.problem?.wrongContent == true
         val buffered = local
         if (prepareLocal != null && (buffered == null || !buffered.isReady())) {
-            mutable.value = state.copy(ready = null, message = "The buffered alternative is no longer ready. Playback continues.")
+            mutable.value = state.copy(ready = null, message = playbackNotice("The buffered alternative is no longer ready."))
             return
         }
         val offset = buffered?.targetMs ?: state.resume.position(position(), wrong, ready.duration)
         if (buffered != null) {
             try { requireNotNull(adoptLocal)(ready, offset, wrong, buffered) }
             catch (error: Exception) {
-                mutable.value = state.copy(ready = null, message = "Could not switch. Playback continues.")
+                mutable.value = state.copy(ready = null, message = playbackNotice("Could not switch."))
                 return
             }
             local = null
@@ -328,7 +369,12 @@ class ReleaseReports(
             try {
                 checkCurrent(); gateway.undo(id); checkCurrent()
                 cleanup()
-                mutable.value = mutable.value.copy(reportId = null, ready = null, busy = false, message = "Report removed.")
+                mutable.value = mutable.value.copy(reportId = null, ready = null, busy = false,
+                    message = when {
+                        mutable.value.historyReset -> playbackNotice("Report removed. The history reset is not undone.")
+                        mutable.value.historyResetUnconfirmed -> playbackNotice("Report removed. Any history correction is not undone. Check history.")
+                        else -> "Report removed."
+                    })
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { mutable.value = mutable.value.copy(busy = false, message = "Could not remove the report.") }
         }

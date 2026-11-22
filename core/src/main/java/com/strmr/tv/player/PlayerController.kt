@@ -126,7 +126,8 @@ class PlayerController(context: Context, val session: PlayerSession, private val
                 val next = buffer.candidateSession.request
                 switchTo.value = SourceSwitchRequest(next, source, replacementCarriedTracks(), prepared = status,
                     buffered = buffer, discardPreviousProgress = wrong)
-            }, denialTitleId=request.title.titleId,denialContext=dataContext,beforeOptions = { vodDenied.value?.let {throw com.strmr.tv.api.ApiError.AccessDenied(it)}; audioPreferenceSave?.join(); check(!audioPreferenceFailed) { "Audio preference could not be saved" } })
+            }, beforeHistoryReset = { progress.stopAndDrainForHistoryReset() }, progressAlreadyDiscarded = !progress.acceptsCompletion,
+            denialTitleId=request.title.titleId,denialContext=dataContext,beforeOptions = { vodDenied.value?.let {throw com.strmr.tv.api.ApiError.AccessDenied(it)}; audioPreferenceSave?.join(); check(!audioPreferenceFailed) { "Audio preference could not be saved" } })
 
     fun closeReleaseReports() {
         releaseReports?.close()

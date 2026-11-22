@@ -32,6 +32,15 @@ internal class ProgressWriteGate(private val current: () -> Boolean) {
         pending.forEach { it.cancel() }
     }
 
+    /** Stop new reports without interrupting a request already accepted by the server. */
+    fun stopNewWrites() { synchronized(this) { discarded = true } }
+
+    /** Await actual write completion before sending an explicit history reset. */
+    suspend fun joinStopped() {
+        val pending = synchronized(this) { check(discarded); jobs.toList() }
+        pending.forEach { it.join() }
+    }
+
     fun use(action: () -> Unit): Boolean = synchronized(this) {
         if (discarded || !current()) false else { action(); true }
     }
@@ -46,10 +55,13 @@ internal class ProgressWriteGate(private val current: () -> Boolean) {
             if (accepts) result else null
         }
         synchronized(this@ProgressWriteGate) {
-            if (discarded || !current()) child.cancel() else jobs.add(child)
+            if (discarded || !current()) child.cancel() else {
+                jobs.add(child)
+                child.invokeOnCompletion { synchronized(this@ProgressWriteGate) { jobs.remove(child) } }
+            }
         }
-        try { child.start(); child.await() }
-        finally { synchronized(this@ProgressWriteGate) { jobs.remove(child) } }
+        child.start()
+        child.await()
     }
 }
 
@@ -88,6 +100,16 @@ class ProgressReporter(
 
     /** Do not save further progress for a source the viewer identified as the wrong content. */
     fun discardFuture() { writes.discard(); stop() }
+
+    /** Finish old reports before an explicit server-side history correction. */
+    suspend fun stopAndDrainForHistoryReset() {
+        writes.stopNewWrites()
+        stop()
+        player.pause()
+        periodic?.join()
+        writes.joinStopped()
+        lastReport?.join()
+    }
 
     fun stop() {
         periodic?.cancel()
