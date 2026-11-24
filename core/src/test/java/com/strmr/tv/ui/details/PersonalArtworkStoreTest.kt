@@ -1,6 +1,7 @@
 package com.strmr.tv.ui.details
 
 import com.strmr.tv.api.CardEpisode
+import com.strmr.tv.api.ArtworkKind
 import com.strmr.tv.api.ContentArtworkPreference
 import com.strmr.tv.api.ImageRef
 import com.strmr.tv.api.Title
@@ -65,5 +66,55 @@ class PersonalArtworkStoreTest {
         assertEquals("personal-poster", store.card(HomeCard.from(title)).posterUrl)
         store.replace(1, emptyList())
         assertEquals("text-poster", store.card(HomeCard.from(title)).posterUrl)
+    }
+
+    @Test fun confirmedStandardReplacesCachedLearnedImagesAndNewManualChoiceClearsOnlyItsKind() {
+        val store = PersonalArtworkStore { 1 }
+        store.activate(1)
+        val cached = HomeCard.from(title.copy(poster = ImageRef("learned-poster"), textPoster = ImageRef("learned-text"),
+            backdrop = ImageRef("learned-background")))
+        store.saved(1, title.id, chosen.copy(posterUrl = null, backdropUrl = null))
+        store.restoredStandard(1, title.id, ArtworkKind.POSTER, "original-poster")
+        store.restoredStandard(1, title.id, ArtworkKind.BACKDROP, "original-background")
+        store.replace(1, listOf(chosen.copy(posterUrl = null, backdropUrl = null)))
+        assertEquals("original-poster", store.card(cached).posterUrl)
+        assertEquals("original-background", store.card(cached).backdropUrl)
+        assertEquals("original-background", store.card(cached).artworkUrl)
+        assertEquals("original-poster", store.poster(title.id, "cached-auto"))
+        assertEquals("original-background", store.backdrop(title.id, "cached-auto"))
+        val episode = cached.copy(episode = CardEpisode(1, 2, "Episode", null), artworkUrl = "episode-still")
+        assertEquals("episode-still", store.card(episode).artworkUrl)
+        store.saved(1, title.id, chosen.copy(posterUrl = "new-manual-poster", backdropUrl = null))
+        assertEquals("new-manual-poster", store.card(cached).posterUrl)
+        assertEquals("original-background", store.card(cached).backdropUrl)
+        store.replace(1, listOf(chosen.copy(posterUrl = null, backdropUrl = "new-server-background")))
+        assertEquals("learned-text", store.card(cached).posterUrl)
+        assertEquals("new-server-background", store.card(cached).backdropUrl)
+        store.replace(1, emptyList())
+        assertEquals("learned-background", store.card(cached).backdropUrl)
+    }
+
+    @Test fun knownStandardRejectsStaleReadsAndProfileChangesWhileUnknownLegacyResetKeepsFallback() {
+        var current = 1L
+        val store = PersonalArtworkStore { current }
+        store.activate(1)
+        val oldRevision = store.revision
+        store.saved(1, title.id, chosen.copy(posterUrl = null, backdropUrl = null))
+        store.restoredStandard(1, title.id, ArtworkKind.POSTER, "original-poster")
+        store.replace(1, listOf(chosen), oldRevision)
+        assertEquals("original-poster", store.poster(title.id, "cached-auto"))
+        val freshRevision = store.revision
+        store.replace(1, emptyList(), freshRevision)
+        store.replace(1, listOf(chosen.copy(posterUrl = null, backdropUrl = null)), freshRevision)
+        assertEquals("fresh-automatic-picture", store.poster(title.id, "fresh-automatic-picture"))
+        store.restoredStandard(1, title.id, ArtworkKind.BACKDROP, null)
+        assertEquals("cached-auto", store.backdrop(title.id, "cached-auto"))
+        current = 2
+        assertEquals("second-profile", store.poster(title.id, "second-profile"))
+        store.activate(2)
+        store.restoredStandard(1, title.id, ArtworkKind.POSTER, "late-original")
+        store.saved(1, title.id, chosen)
+        store.replace(1, listOf(chosen))
+        assertEquals("second-profile", store.poster(title.id, "second-profile"))
     }
 }

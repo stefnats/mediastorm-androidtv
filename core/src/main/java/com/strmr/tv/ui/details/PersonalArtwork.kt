@@ -26,27 +26,49 @@ import kotlinx.coroutines.flow.StateFlow
 
 /** Pure display overrides; provider metadata and episode artwork remain intact. */
 class PersonalArtworkStore(private val current: () -> Long) {
+    private data class StandardDisplay(val poster: String? = null, val backdrop: String? = null)
     private var context: Long? = null
     var revision: Long = 0
         private set
     private var choices by mutableStateOf<Map<String, ContentArtworkPreference>>(emptyMap())
-    fun activate(expected: Long) { if (context != expected) { context = expected; choices = emptyMap(); revision++ } }
+    private var standards by mutableStateOf<Map<String, StandardDisplay>>(emptyMap())
+    fun activate(expected: Long) { if (context != expected) { context = expected; choices = emptyMap(); standards = emptyMap(); revision++ } }
+    private fun retainStandards(values: Map<String, ContentArtworkPreference>) {
+        standards = standards.filterKeys { it in values }.mapValues { (id, display) ->
+            display.copy(poster = display.poster.takeIf { values[id]?.posterUrl.isNullOrBlank() },
+                backdrop = display.backdrop.takeIf { values[id]?.backdropUrl.isNullOrBlank() })
+        }.filterValues { it.poster != null || it.backdrop != null }
+    }
     fun replace(expected: Long, values: List<ContentArtworkPreference>, readRevision: Long = revision) {
         if (current() != expected || context != expected || readRevision != revision) return
         choices = values.filter { it.contentId.isNotBlank() }.associateBy { it.contentId.lowercase() }
+        retainStandards(choices)
     }
     fun saved(expected: Long, id: String, value: ContentArtworkPreference) {
-        if (current() == expected && context == expected) { choices = choices + (id.lowercase() to value); revision++ }
+        if (current() == expected && context == expected) {
+            choices = choices + (id.lowercase() to value); retainStandards(choices); revision++
+        }
+    }
+    /** Display evidence after a confirmed reset; the stored server preference stays null. */
+    fun restoredStandard(expected: Long, id: String, kind: ArtworkKind, knownURL: String?) {
+        if (current() != expected || context != expected || knownURL.isNullOrBlank()) return
+        val key = id.lowercase()
+        val preference = choices[key] ?: return
+        if (!(if (kind == ArtworkKind.POSTER) preference.posterUrl else preference.backdropUrl).isNullOrBlank()) return
+        val value = standards[key] ?: StandardDisplay()
+        standards = standards + (key to if (kind == ArtworkKind.POSTER) value.copy(poster = knownURL) else value.copy(backdrop = knownURL))
+        revision++
     }
     private fun preference(id: String) = choices[id.lowercase()].takeIf { context == current() }
-    fun poster(id: String, original: String?) = preference(id)?.posterUrl?.takeIf(String::isNotBlank) ?: original
-    fun backdrop(id: String, original: String?) = preference(id)?.backdropUrl?.takeIf(String::isNotBlank) ?: original
+    private fun standard(id: String) = standards[id.lowercase()].takeIf { context == current() }
+    fun poster(id: String, original: String?) = preference(id)?.posterUrl?.takeIf(String::isNotBlank) ?: standard(id)?.poster ?: original
+    fun backdrop(id: String, original: String?) = preference(id)?.backdropUrl?.takeIf(String::isNotBlank) ?: standard(id)?.backdrop ?: original
     fun card(card: HomeCard): HomeCard {
         val id = card.target?.titleId ?: return card
-        val selected = preference(id) ?: return card
-        return card.copy(posterUrl = selected.posterUrl?.takeIf(String::isNotBlank) ?: card.posterUrl,
-            backdropUrl = selected.backdropUrl?.takeIf(String::isNotBlank) ?: card.backdropUrl,
-            artworkUrl = if (card.episode != null) card.artworkUrl else selected.backdropUrl?.takeIf(String::isNotBlank) ?: card.artworkUrl)
+        if (preference(id) == null && standard(id) == null) return card
+        val background = backdrop(id, card.backdropUrl)
+        return card.copy(posterUrl = poster(id, card.posterUrl), backdropUrl = background,
+            artworkUrl = if (card.episode != null) card.artworkUrl else backdrop(id, card.artworkUrl))
     }
 }
 
@@ -118,7 +140,9 @@ data class ContentArtworkState(val preference: ContentArtworkPreference? = null,
 }
 
 class ContentArtworkEditor(val title: Title, private val gateway: ContentArtworkGateway,
-    private val onSaved: (ContentArtworkPreference) -> Unit) {
+    private val onSaved: (ContentArtworkPreference) -> Unit, private val onStandardRestored: (ArtworkKind, String) -> Unit) {
+    constructor(title: Title, gateway: ContentArtworkGateway, onSaved: (ContentArtworkPreference) -> Unit) :
+        this(title, gateway, onSaved, { _, _ -> })
     private val mutable = MutableStateFlow(ContentArtworkState())
     val state: StateFlow<ContentArtworkState> = mutable
     private var closed = false
@@ -186,6 +210,10 @@ class ContentArtworkEditor(val title: Title, private val gateway: ContentArtwork
             val value = gateway.write(kind, url); checkCurrent()
             check(value.artworkPreferenceSupported && (if (kind == ArtworkKind.POSTER) value.posterUrl else value.backdropUrl) == url)
             onSaved(value)
+            if (url == null) {
+                val standard = if (kind == ArtworkKind.POSTER) title.standardPoster?.url else title.standardBackdrop?.url
+                standard?.takeIf(String::isNotBlank)?.let { checkCurrent(); onStandardRestored(kind, it) }
+            }
             mutable.value = mutable.value.copy(preference = value, saving = false,
                 message = if (url == null) "Standard ${kind.label.lowercase()} restored for this profile." else "${kind.label} saved for this profile.")
             if (mutable.value.learning?.enabled == true) loadLearning()
@@ -198,9 +226,9 @@ class ContentArtworkEditor(val title: Title, private val gateway: ContentArtwork
 
 @Composable
 fun rememberContentArtworkEditor(target: DetailsTarget, title: Title, expected: Long): ContentArtworkEditor {
-    val editor = remember(target, title, expected) { ContentArtworkEditor(title, ServerContentArtworkGateway(target, expected)) {
-        PersonalArtwork.store.saved(expected, target.titleId, it)
-    } }
+    val editor = remember(target, title, expected) { ContentArtworkEditor(title, ServerContentArtworkGateway(target, expected),
+        onSaved = { PersonalArtwork.store.saved(expected, target.titleId, it) },
+        onStandardRestored = { kind, url -> PersonalArtwork.store.restoredStandard(expected, target.titleId, kind, url) }) }
     LaunchedEffect(editor) { editor.load() }
     DisposableEffect(editor) { onDispose { editor.close() } }
     return editor

@@ -130,4 +130,28 @@ class ArtworkLearningEditorTest {
         assertEquals("learned-poster", projected.poster!!.url)
         assertNull(title.standardPoster); assertNull(title.standardBackdrop)
     }
+
+    @Test fun onlyConfirmedNullResetPublishesKnownStandardDisplayWithoutFakingServerPreference() = runTest {
+        val projected = ApiJson.decodeFromString<Title>("""{"id":"tmdb:movie:1","name":"Synthetic","poster":{"url":"learned"},"standardPoster":{"url":"original"}}""")
+        for (confirmed in listOf(false, true)) {
+            val gateway = object : ContentArtworkGateway {
+                override fun isCurrent() = true
+                override suspend fun read() = ContentArtworkPreference(projected.id, true, posterUrl = "manual")
+                override suspend fun write(kind: ArtworkKind, value: String?) =
+                    ContentArtworkPreference(projected.id, true, posterUrl = if (confirmed) value else "manual")
+            }
+            val saved = mutableListOf<ContentArtworkPreference>()
+            val standards = mutableListOf<Pair<ArtworkKind, String>>()
+            val editor = ContentArtworkEditor(projected, gateway, saved::add, { kind, url -> standards += kind to url })
+            editor.load(); editor.save(null)
+            if (confirmed) {
+                assertEquals(listOf(ArtworkKind.POSTER to "original"), standards)
+                assertNull(saved.single().posterUrl)
+                assertNull(editor.state.value.preference!!.posterUrl)
+            } else {
+                assertTrue(standards.isEmpty()); assertTrue(saved.isEmpty())
+                assertNotNull(editor.state.value.error)
+            }
+        }
+    }
 }
