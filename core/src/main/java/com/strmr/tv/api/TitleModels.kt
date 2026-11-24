@@ -124,6 +124,9 @@ data class Title(
     /** Existing provider variants offered for a deliberate personal artwork choice. */
     val posters: List<ImageRef>? = null,
     val textBackdrop: ImageRef? = null,
+    /** Unpersonalized defaults when a learned picture style is projected by the server. */
+    val standardPoster: ImageRef? = null,
+    val standardBackdrop: ImageRef? = null,
 ) {
     val isMovie: Boolean get() = mediaType == "movie"
 }

@@ -26,8 +26,27 @@ fun ContentArtworkDialog(target: DetailsTarget, title: Title, expected: Long, on
     val state by editor.state.collectAsState()
     val scope = rememberCoroutineScope()
     SidePanelDialog("Artwork for this profile", state.error ?: state.message ?: target.name, onDismiss) {
+        state.learning?.let { learning ->
+            item {
+                ListItem(selected = learning.enabled, enabled = !state.loading && !state.saving && !state.learningSaving && state.learningError == null,
+                    onClick = { scope.launch { editor.setLearningEnabled(!learning.enabled) } },
+                    headlineContent = { Text(if (state.learningSaving) "Saving picture learning…" else if (learning.enabled) "Disable picture learning" else "Learn from my picture choices") },
+                    supportingContent = { Text("Learns picture language and text-free style from future choices on at least 3 different titles per picture type. Manual choices take priority.") })
+            }
+            item {
+                ListItem(selected = false, enabled = !state.loading && !state.saving && !state.learningSaving && state.learningError == null &&
+                    (learning.enabled || learning.posterSamples > 0 || learning.backdropSamples > 0),
+                    onClick = { scope.launch { editor.forgetLearning() } }, headlineContent = { Text("Forget learned picture style") },
+                    supportingContent = { Text("Posters: ${learning.posterSamples} · Backgrounds: ${learning.backdropSamples}. Forgetting turns learning off and keeps manual choices.") })
+            }
+        }
+        if (state.learningError != null) item {
+            ListItem(selected = false, enabled = !state.loading && !state.saving && !state.learningSaving,
+                onClick = { scope.launch { editor.load() } }, headlineContent = { Text("Reload picture learning") },
+                supportingContent = { Text(state.learningError.orEmpty()) })
+        }
         items(ArtworkKind.entries) { kind ->
-            ListItem(selected = state.kind == kind, enabled = !state.saving, onClick = { editor.kind(kind) },
+            ListItem(selected = state.kind == kind, enabled = !state.loading && !state.saving && !state.learningSaving, onClick = { editor.kind(kind) },
                 headlineContent = { Text(kind.label) })
         }
         if (state.loading || state.error != null) item {
@@ -35,7 +54,7 @@ fun ContentArtworkDialog(target: DetailsTarget, title: Title, expected: Long, on
                 headlineContent = { Text(if (state.loading) "Loading artwork choices…" else "Reload choices") })
         }
         if (state.supported) items(editor.options) { option ->
-            ListItem(selected = state.selected == option.url, enabled = !state.saving && state.error == null,
+            ListItem(selected = state.selected == option.url, enabled = !state.loading && !state.saving && !state.learningSaving && state.error == null,
                 onClick = { scope.launch { editor.save(option.url) } },
                 headlineContent = { Text(if (state.saving) "Saving…" else option.label) },
                 leadingContent = { AsyncImage(Artwork.url(option.previewUrl, "w185"), option.label,

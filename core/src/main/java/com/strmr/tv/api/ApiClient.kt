@@ -133,6 +133,20 @@ object ApiClient {
         }
     }
 
+    fun artworkLearningGateway(expected: Long): ArtworkLearningGateway {
+        val context = requestContexts.capture(expected)
+        return context.use {
+            val token = requireNotNull(storedSession) { "Sign in before choosing artwork settings." }.token
+            val headers = buildMap {
+                put("Authorization", "Bearer $token")
+                put("X-Client-ID", Config.clientId)
+                unlocks.token(profileId)?.let { put(UNLOCK_HEADER, it) }
+                remoteCredential?.let { put("X-Remote-Access-Credential", it) }
+            }
+            ArtworkLearningTransport(context, baseUrl, profileId, headers, nonReplayingHttp)
+        }
+    }
+
     const val UNLOCK_HEADER = "X-Profile-Unlock"
     private val jsonType = "application/json".toMediaType()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

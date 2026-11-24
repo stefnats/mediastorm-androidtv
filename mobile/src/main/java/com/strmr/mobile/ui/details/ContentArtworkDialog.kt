@@ -33,9 +33,28 @@ fun ContentArtworkDialog(target: DetailsTarget, title: Title, expected: Long, on
     ModalBottomSheet(onDismissRequest = onDismiss) {
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 640.dp)) {
             item { ListItem(headlineContent = { Text("Artwork for this profile") }, supportingContent = { Text(state.error ?: state.message ?: target.name) }) }
+            state.learning?.let { learning ->
+                item {
+                    ListItem(headlineContent = { Text(if (state.learningSaving) "Saving picture learning…" else if (learning.enabled) "Disable picture learning" else "Learn from my picture choices") },
+                        supportingContent = { Text("Learns picture language and text-free style from future choices on at least 3 different titles per picture type. Manual choices take priority.") },
+                        modifier = Modifier.clickable(enabled = !state.loading && !state.saving && !state.learningSaving && state.learningError == null) {
+                            scope.launch { editor.setLearningEnabled(!learning.enabled) }
+                        })
+                }
+                item {
+                    ListItem(headlineContent = { Text("Forget learned picture style") },
+                        supportingContent = { Text("Posters: ${learning.posterSamples} · Backgrounds: ${learning.backdropSamples}. Forgetting turns learning off and keeps manual choices.") },
+                        modifier = Modifier.clickable(enabled = !state.loading && !state.saving && !state.learningSaving && state.learningError == null &&
+                            (learning.enabled || learning.posterSamples > 0 || learning.backdropSamples > 0)) { scope.launch { editor.forgetLearning() } })
+                }
+            }
+            if (state.learningError != null) item {
+                ListItem(headlineContent = { Text("Reload picture learning") }, supportingContent = { Text(state.learningError.orEmpty()) },
+                    modifier = Modifier.clickable(enabled = !state.loading && !state.saving && !state.learningSaving) { scope.launch { editor.load() } })
+            }
             items(ArtworkKind.entries) { kind ->
                 ListItem(headlineContent = { Text(kind.label + if (state.kind == kind) " · selected" else "") },
-                    modifier = Modifier.clickable(enabled = !state.saving) { editor.kind(kind) })
+                    modifier = Modifier.clickable(enabled = !state.loading && !state.saving && !state.learningSaving) { editor.kind(kind) })
             }
             if (state.loading || state.error != null) item {
                 ListItem(headlineContent = { Text(if (state.loading) "Loading artwork choices…" else "Reload choices") },
@@ -44,7 +63,7 @@ fun ContentArtworkDialog(target: DetailsTarget, title: Title, expected: Long, on
             if (state.supported) items(editor.options) { option ->
                 ListItem(headlineContent = { Text((if (state.saving) "Saving…" else option.label) + if (state.selected == option.url) " · selected" else "") },
                     leadingContent = { ArtImage(option.previewUrl, "w185", option.label, Modifier.size(80.dp), contentScale = ContentScale.Fit) },
-                    modifier = Modifier.clickable(enabled = !state.saving && state.error == null) { scope.launch { editor.save(option.url) } })
+                    modifier = Modifier.clickable(enabled = !state.loading && !state.saving && !state.learningSaving && state.error == null) { scope.launch { editor.save(option.url) } })
             }
             item { ListItem(headlineContent = { Text("Done") }, modifier = Modifier.clickable(onClick = onDismiss)) }
         }
